@@ -766,7 +766,91 @@ def restore_written(words, pairs):
     return out + words[i:]
 
 
+# ---------- narration engines: Kokoro preset voices, your cloned voice, or your own recording ----------
+_whisper = None
+
+
+def transcribe_words(wav):
+    """Word timings in any narration audio (local faster-whisper, model kept in .cache/whisper)."""
+    global _whisper
+    from faster_whisper import WhisperModel
+    if _whisper is None:
+        _whisper = WhisperModel("small.en", device="cpu", compute_type="int8", download_root=str(ROOT / ".cache" / "whisper"))
+    import numpy as np, soundfile as sf
+    audio, sr = sf.read(str(wav), dtype="float32")  # our narration is always WAV: skip PyAV, feed 16 kHz mono samples
+    audio = audio.mean(axis=1) if audio.ndim > 1 else audio
+    if sr != 16000:
+        audio = np.interp(np.arange(0, len(audio), sr / 16000), np.arange(len(audio)), audio).astype("float32")
+    segments, _ = _whisper.transcribe(audio, language="en", word_timestamps=True, vad_filter=False)
+    return [(w.word.strip(), float(w.start), float(w.end)) for seg in segments for w in seg.words if w.word.strip()]
+
+
+def align_words(text, heard, duration=None):
+    """Script words (as written, for captions) timed by what was actually heard. Words the recogniser got differently
+    (names, numbers) are spread evenly between the matched words around them."""
+    import difflib
+    norm = lambda w: re.sub(r"\W", "", w.lower())
+    written = text.split()
+    if not heard:
+        step = (duration or len(written) * 0.4) / max(1, len(written))
+        return [[w, k * step, (k + 1) * step] for k, w in enumerate(written)]
+    times = [None] * len(written)
+    sm = difflib.SequenceMatcher(None, [norm(w) for w in written], [norm(h[0]) for h in heard], autojunk=False)
+    for a, b, size in sm.get_matching_blocks():
+        for k in range(size):
+            times[a + k] = (heard[b + k][1], heard[b + k][2])
+    end = duration or heard[-1][2]
+    k = 0
+    while k < len(written):  # fill gaps between anchors evenly
+        if times[k] is not None:
+            k += 1
+            continue
+        j = k
+        while j < len(written) and times[j] is None:
+            j += 1
+        t0 = times[k - 1][1] if k else 0.0
+        t1 = times[j][0] if j < len(written) else max(end, t0 + 0.3 * (j - k))
+        step = (t1 - t0) / (j - k)
+        for n in range(k, j):
+            times[n] = (t0 + (n - k) * step, t0 + (n - k + 1) * step)
+        k = j
+    return [[w, a, b] for w, (a, b) in zip(written, times)]
+
+
 def tts(text, dest):
+    """Narrate with the engine chosen in Settings. Returns (caption words as written, duration)."""
+    return tts_clone(text, dest) if BRAND.get("voice_engine") == "clone" else tts_kokoro(text, dest)
+
+
+def tts_clone(text, dest):
+    """Your cloned voice (Chatterbox, in .venv-clone), then timings from the audio itself."""
+    import subprocess, numpy as np, soundfile as sf
+    sample = ROOT / BRAND.get("voice_sample", "brand/voice_sample.wav")
+    if not sample.exists() or not BRAND.get("clone_consent"):
+        raise SystemExit("cloned voice needs a voice sample and your confirmation in Settings → Voice")
+    spoken, _ = speakable_map(text)
+    print("  cloned voice (this takes a while)…")
+    r = subprocess.run([str(ROOT / ".venv-clone" / "bin" / "python"), "-W", "ignore", str(ROOT / "clone_tts.py"),
+                        "--text", spoken, "--sample", str(sample), "--out", str(dest)], capture_output=True, text=True)
+    if r.returncode:
+        raise RuntimeError("voice cloning failed: " + (r.stderr.strip().splitlines() or ["unknown error"])[-1])
+    audio, sr = sf.read(str(dest))
+    dur = len(audio) / sr + 0.5
+    if dur > BRAND["max_seconds"]:  # too long: speed up slightly, pitch preserved
+        import imageio_ffmpeg
+        tempo = min(1.25, dur / (BRAND["max_seconds"] - 1))
+        tmp = Path(str(dest) + ".fast.wav")
+        subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(), "-y", "-loglevel", "error", "-i", str(dest), "-filter:a",
+                        f"atempo={tempo:.3f}", str(tmp)], check=True)
+        tmp.replace(dest)
+        audio, sr = sf.read(str(dest))
+        print(f"  sped up ×{tempo:.2f} to fit")
+    sf.write(str(dest), np.concatenate([audio, np.zeros(int(sr * 0.5), dtype=audio.dtype)]), sr)
+    dur = len(audio) / sr + 0.5
+    return align_words(text, transcribe_words(dest), dur), dur
+
+
+def tts_kokoro(text, dest):
     """Kokoro narration -> wav + per-word timings [(word, start, end)]; captions show the text as written."""
     text, written = speakable_map(text)
     import numpy as np, soundfile as sf
@@ -1091,7 +1175,8 @@ def description(m):
              f"Episode {m['ep']} of {BRAND['channel']}. {BRAND['tagline']}", "", "CREDITS",
              m.get("credit") or f"Text adapted from the Wikipedia article \"{m['article_title']}\", CC BY-SA 4.0: {m['url']}"]
     lines += [f"Image: \"{i['name']}\", {credit(i).replace(' · ', ', ')}: {i['page']}" for i in m["images"] if credit(i)]
-    lines += ["Narration: AI voice (Kokoro TTS). Fonts: Anton, Inter (SIL OFL).", "",
+    narration = {"recording": f"Narration: {BRAND['channel']}.", "clone": "Narration: AI voice clone of the creator (Chatterbox)."}
+    lines += [narration.get(m.get("narration"), "Narration: AI voice (Kokoro TTS).") + " Fonts: SIL OFL.", "",
               " ".join("#" + re.sub(r"\W", "", t) for t in BRAND["hashtags"] + m["tags"][:3])]
     return "\n".join(lines)[:4900]
 
@@ -1192,13 +1277,23 @@ def make(con, pageid):
 
 def produce(con, m, out):
     """Voice + render a video from its meta (script, title, images) and save everything."""
+    import soundfile as sf
     work = WORK / str(m["pageid"])
-    print("  voicing…")
-    words, dur = tts(m["script"].strip() + " " + BRAND["outro_line"], work / "voice.wav")
+    text = m["script"].strip() + " " + BRAND["outro_line"]
+    recording = work / "voice_recorded.wav"
+    if m.get("narration") == "recording" and recording.exists():  # your own voice, recorded in the studio
+        print("  using your recorded narration; timing captions to it…")
+        dur = sf.info(str(recording)).duration + 0.3
+        words, voice = align_words(text, transcribe_words(recording), dur), recording
+    else:
+        m["narration"] = "clone" if BRAND.get("voice_engine") == "clone" else "kokoro"
+        print("  voicing…")
+        words, dur = tts(text, work / "voice.wav")
+        voice = work / "voice.wav"
     m["yt_description"] = description(m)
     (work / "meta.json").write_text(json.dumps(m, indent=2))
     print(f"  rendering {dur:.1f}s…")
-    render(m, words, work / "voice.wav", dur, out)
+    render(m, words, voice, dur, out)
     upsert(con, m["pageid"], status="rendered", video_path=str(out))
     print(f"  done: {out}")
 
@@ -1323,7 +1418,7 @@ def voicetest(text=None):
     print("voice sample saved: data/voice_preview.wav")
 
 
-def rerender(con, ep, repick_images=False):
+def rerender(con, ep, repick_images=False, narration=None):
     """Re-voice and re-render an episode from its saved (possibly hand-edited) script. No LLM rewrite."""
     row = con.execute("select * from pages where ep=?", (ep,)).fetchone()
     if not row or not (WORK / str(row["pageid"]) / "meta.json").exists():
@@ -1333,6 +1428,12 @@ def rerender(con, ep, repick_images=False):
     m = json.loads((WORK / str(row["pageid"]) / "meta.json").read_text())
     print(f"[{ep:03d}] re-rendering {m['article_title']}")
     m.pop("potential", None)
+    if narration == "recording":
+        if not (WORK / str(row["pageid"]) / "voice_recorded.wav").exists():
+            raise SystemExit("no recording for this episode yet: record one in the studio first")
+        m["narration"] = "recording"
+    elif narration == "ai":
+        m["narration"] = "kokoro"
     if repick_images:
         print("  picking images from the script…")
         m["images"] = pick_visuals(m["article_title"], m["script"], WORK / str(row["pageid"]), own=[]) or m["images"]
@@ -1468,6 +1569,11 @@ def selftest():
     assert image_starts([0, 1, 2, 3], ws, 7) == [0.0, 2, 4, None]  # 'Four.' starts too close to the end
     assert image_starts([0, 1, 1], ws, 7) == [0.0, 2, None]  # same sentence twice: second image dropped
     assert image_starts([0, None], ws, 7) is None  # hand-picked image without a cue: even spacing
+    al = align_words("In 1932, Australia lost a war to 20,000 emus.",
+                     [("In", 0, .2), ("1932,", .2, .9), ("Australia", 1, 1.5), ("lost", 1.5, 1.8), ("a", 1.8, 1.9),
+                      ("war", 1.9, 2.2), ("to", 2.2, 2.4), ("twenty", 2.4, 2.8), ("thousand", 2.8, 3.3), ("emus.", 3.3, 4)])
+    assert [w[0] for w in al] == ["In", "1932,", "Australia", "lost", "a", "war", "to", "20,000", "emus."]
+    assert al[7][1:] == [2.4, 3.3] and al[8][1:] == [3.3, 4]  # '20,000' fills the gap the recogniser heard as words
     assert visual_query("August 2026", "PHP2Shell") == "PHP2Shell" and visual_query("70 percent", "X") == "X"
     assert visual_query("Internet Archive", "X") == "Internet Archive" and visual_query("World War II", "X") == "World War II"
     assert mentions("Internet Archive", {"name": "Internet Archive logo.svg"}) and not mentions("Internet Archive", {"name": "Cat.jpg"})
@@ -1505,6 +1611,8 @@ def main():
     up.add_argument("--keep-local", action="store_true")
     rr = sub.add_parser("rerender"); rr.add_argument("--ep", type=int, required=True)
     rr.add_argument("--repick-images", action="store_true", help="choose new images from what the script mentions")
+    rr.add_argument("--recording", action="store_const", const="recording", dest="narration", help="use your recorded narration")
+    rr.add_argument("--ai-voice", action="store_const", const="ai", dest="narration", help="go back to the AI voice")
     dc = sub.add_parser("discover"); dc.add_argument("--count", type=int, default=5)
     dc.add_argument("--topic"); dc.add_argument("--degree", choices=["1", "2", "3", "any"], default="any")
     dc.add_argument("--source", choices=["wikipedia", "link", "hackernews", "rss", "arxiv", "apod"], default="wikipedia")
@@ -1540,7 +1648,7 @@ def main():
     elif args.cmd == "unpublish":
         unpublish(con, args.ep, args.keep_local)
     elif args.cmd == "rerender":
-        rerender(con, args.ep, args.repick_images)
+        rerender(con, args.ep, args.repick_images, args.narration)
     elif args.cmd == "discover" and args.source != "wikipedia":
         discover_source(con, args.source, args.count, {"rss": args.feed, "link": args.link}.get(args.source, args.topic))
     elif args.cmd == "discover":

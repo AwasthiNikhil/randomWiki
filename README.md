@@ -6,7 +6,12 @@ Articles go in, and branded YouTube Shorts come out. Wikipedia is the main sourc
 2. **Log:** every page that comes up is stored in SQLite with a status and the reason, so nothing is ever processed twice.
 3. **Script:** Ollama writes a 45–55s narration from the full article, then fact-checks it against the article. You can edit it before rendering again.
 4. **Visuals:** chosen from what the narration mentions, sentence by sentence. Each named thing (a person, place, organisation, product or logo) gets the lead image of its own Wikipedia article. Named things without one are searched in Commons and Openverse, needing all the words to match plus an LLM meaning check. Vague phrases keep the previous image rather than show a wrong one. Each image appears when its sentence is spoken; logos and screenshots are shown whole on a light card. Falls back to the article's own images. In the visuals editor you can **Auto-pick from script**, search NASA and The Met, or upload your own.
-5. **Voice:** Kokoro TTS. Its per-word timestamps drive word-highlighted captions, and Roman numerals are read correctly ("World War Two").
+5. **Voice:** one of three:
+   - a **Kokoro preset voice**: fast, the default
+   - **your cloned voice**: Settings → Voice → *My voice*. Record a 15–30 s sample in the studio; it's cloned locally with Chatterbox (MIT licence), and the output carries an inaudible AI watermark. Install it with `./setup.sh --clone`.
+   - **your own recording**: open a video → *Record it in your voice*. A teleprompter shows the script; record with your mic, and the video re-renders with your voice.
+
+   Captions are timed to whatever was spoken (local faster-whisper alignment) and show the text as written. Numbers, versions and Roman numerals are spoken correctly ("5.4–8.5" → "5 point 4 to 8 point 5", "World War II" → "World War Two").
 6. **Render:** a branded 1080×1920 layout drawn with Pillow and encoded with ffmpeg.
 7. **Score:** each video gets a 0–100 potential score from topic demand, hook, appeal, reach, visuals and length.
 8. **Publish:** YouTube Data API upload, private or scheduled, best potential first. Credits go into the description automatically.
@@ -46,7 +51,7 @@ Everything else (uv, Python 3.12, Python packages, the bundled ffmpeg, fonts, th
 ```
 git clone git@github.com:AwasthiNikhil/shorts-machine.git
 cd shorts-machine
-./setup.sh          # about 1.5 GB download, ends with "selftest ok"
+./setup.sh          # about 2 GB download, ends with "selftest ok" (add --clone for voice cloning, ~1.5 GB more)
 ./rw web            # opens the studio at http://127.0.0.1:8765
 ```
 The voice model (about 300 MB) downloads on the first render.

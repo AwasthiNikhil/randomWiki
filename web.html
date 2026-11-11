@@ -316,11 +316,28 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
             </div>
           </fieldset>
           <fieldset class="scard"><legend>Voice</legend>
-            <div class="inline">
+            <div style="display:grid;gap:6px">
+              <label class="radio"><input type="radio" name="vEngine" value="kokoro"> Preset AI voice (Kokoro): fast</label>
+              <label class="radio"><input type="radio" name="vEngine" value="clone"> <b>My voice</b>: cloned from a sample (Chatterbox, a few minutes per video)</label>
+            </div>
+            <div id="cloneBox" style="display:grid;gap:10px;padding:12px;border:1px dashed var(--line);border-radius:10px">
+              <div class="hint">Record 15–30 seconds in a quiet room, reading this at your normal pace:</div>
+              <div class="box" style="font-size:14px;line-height:1.6">In 1932, Australia went to war with emus, and the emus won. Soldiers with machine guns spent weeks chasing twenty thousand birds across the wheat fields of Western Australia. The birds scattered, regrouped, and outran the trucks. One officer said that if he had a division of soldiers with the emus' ability to absorb bullets, he could face any army in the world.</div>
+              <div class="inline">
+                <button class="btn sm" type="button" id="sampleRec">● Record sample</button>
+                <label class="btn sm" style="display:inline-block;cursor:pointer">Upload audio<input type="file" accept="audio/*" id="sampleFile" hidden></label>
+                <span class="hint" id="sampleState"></span>
+              </div>
+              <audio id="sampleAudio" controls hidden></audio>
+              <label class="check"><input type="checkbox" id="cloneConsent"> This is my own voice, or I have the speaker's permission to clone it.</label>
+              <div class="hint">Runs locally; your sample never leaves this Mac. Cloned audio carries an inaudible AI watermark, and descriptions say "AI voice clone". Tick YouTube's "altered or synthetic content" box when you publish.</div>
+            </div>
+            <div class="inline" id="presetBox">
               <label style="flex:1;min-width:min(200px,100%)">Voice<select name="voice" id="voiceSel"></select></label>
               <label style="flex:1;min-width:min(200px,100%)">Speed <output id="speedOut"></output><input type="range" name="voice_speed" min="0.7" max="1.3" step="0.05"></label>
             </div>
             <div class="inline"><button class="btn" type="button" id="hear">Save &amp; hear it</button><audio id="voiceAudio" controls hidden></audio></div>
+            <span class="hint" id="hearHint"></span>
           </fieldset>
           <fieldset class="scard"><legend>Background music</legend>
             <div class="inline"><span id="musicState" class="hint"></span>
@@ -422,6 +439,7 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
 <script>
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+let brandOutro = "";
 let selected = new Set(), confirming = false, logSort = {key: "updated", dir: -1};
 let pages = [], running = false, since = 0, statusFilter = "all", q = "", epFilter = "all", epQ = "", epSort = "potential", qDegree = "1";
 // load video previews only when their card scrolls near the viewport
@@ -452,6 +470,7 @@ async function loadPages() {
   const j = await (await fetch("/api/pages")).json();
   pages = j.pages;
   $("#brand").innerHTML = esc(j.brand.channel.toUpperCase()) + "<small>studio</small>";
+  brandOutro = j.brand.outro_line || "";
   document.title = `${j.brand.channel} studio · Shorts Machine`;
   $(".logo").innerHTML = j.brand.logo ? `<img src="/brand/logo.png?t=${Date.now()}" alt="" style="width:26px;height:26px;object-fit:contain">` : esc(j.brand.logo_text || "?");
   document.documentElement.style.setProperty("--accent", j.brand.colors.accent);
@@ -699,12 +718,29 @@ function openDetail(id) {
         </div>
         <div class="vresults" id="vResults"></div>
         <div class="btns" style="margin-top:12px"><button class="btn primary" data-rerender="${p.pageid}" data-ep="${p.ep}">Save &amp; re-render</button>
-        <span class="hint" style="align-self:center">Applies your text and visuals, re-voices and re-renders (about 1–2 min). No AI rewrite.</span></div>`
+        <span class="hint" style="align-self:center">Applies your text and visuals, re-voices and re-renders (about 1–2 min). No AI rewrite.</span></div>
+        <h5>Narration · <span style="text-transform:none;letter-spacing:0">${{recording: "your recording", clone: "your cloned voice", kokoro: "AI preset voice"}[p.narration] || "AI preset voice"}</span></h5>
+        <div class="btns">
+          <button class="btn" id="recOpen">🎙 Record it in your voice</button>
+          ${p.has_recording && p.narration !== "recording" ? `<button class="btn" data-userec="${p.ep}">Use my saved recording</button>` : ""}
+          ${p.narration === "recording" ? `<button class="btn" data-aivoice="${p.ep}">Back to AI voice</button>` : ""}
+        </div>
+        <div id="recPanel" hidden style="margin-top:10px;display:grid;gap:10px">
+          <div class="box" id="prompter" style="font-size:20px;line-height:1.7;max-height:260px;overflow:auto">${esc(p.script)} ${esc(brandOutro)}</div>
+          <div class="inline">
+            <button class="btn primary" id="recBtn">● Start recording</button>
+            <span class="hint" id="recTime"></span>
+            <audio id="recAudio" controls hidden></audio>
+            <button class="btn primary" id="recUse" hidden>Use this recording</button>
+          </div>
+          <div class="hint">Read the script and the closing line. Captions are timed to your delivery automatically. Use headphones if music is playing.</div>
+        </div>`
       : p.script ? `<h5>Narration</h5><div class="box">${esc(p.script)}</div>` : ""}
       ${p.yt_description ? `<h5>YouTube description</h5><div class="box">${esc(p.yt_description)}</div>` : ""}
     </div></div>`;
   dlg.showModal();
   if ($("#vStrip")) wireVisuals(p);
+  if ($("#recOpen")) wireRecorder(p);
   const ed = $("#edScript");
   if (ed) { const n = () => $("#edCount").textContent = `· ${ed.value.trim().split(/\s+/).length} words (aim 85–128)`; ed.oninput = n; n(); }
 }
@@ -768,6 +804,8 @@ document.addEventListener("click", async e => {
   }
   else if (t.dataset.unpubno) $("#unpubBox").innerHTML = `<button class="btn danger" data-unpub="${t.dataset.unpubno}">Delete from YouTube…</button>`;
   else if (t.dataset.unpubgo) { dlg.close(); exec(`unpublish --ep ${+t.dataset.unpubgo}` + (t.dataset.keep ? " --keep-local" : "")); }
+  else if (t.dataset.userec) { dlg.close(); exec(`rerender --ep ${+t.dataset.userec} --recording`); }
+  else if (t.dataset.aivoice) { dlg.close(); exec(`rerender --ep ${+t.dataset.aivoice} --ai-voice`); }
   else if (t.dataset.rerender) {
     const pid = +t.dataset.rerender;
     t.disabled = true; t.textContent = "Saving…";
@@ -854,6 +892,37 @@ $("#prompt").onsubmit = e => { e.preventDefault(); const c = $("#cmd").value.tri
 dlg.addEventListener("close", () => { const v = dlg.querySelector("video"); if (v) v.pause(); });
 
 
+// ---------------- microphone recording (narration and voice samples) ----------------
+let mic = null;
+async function toggleRecording(btn, label, timeEl, done) {
+  if (mic) { mic.rec.stop(); return; }
+  let stream;
+  try { stream = await navigator.mediaDevices.getUserMedia({audio: {echoCancellation: true, noiseSuppression: true}}); }
+  catch (e) { timeEl.textContent = "Microphone blocked: allow it for this page in the browser's site settings."; return; }
+  const rec = new MediaRecorder(stream), chunks = [], t0 = Date.now();
+  mic = {rec, timer: setInterval(() => { const s = Math.round((Date.now() - t0) / 1000); timeEl.textContent = `recording ${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; }, 250)};
+  rec.ondataavailable = e => chunks.push(e.data);
+  rec.onstop = () => {
+    clearInterval(mic.timer); stream.getTracks().forEach(t => t.stop()); mic = null;
+    btn.textContent = label; done(new Blob(chunks, {type: rec.mimeType}), (Date.now() - t0) / 1000);
+  };
+  rec.start(); btn.textContent = "■ Stop";
+}
+function wireRecorder(p) {
+  let blob = null;
+  $("#recOpen").onclick = () => { $("#recPanel").hidden = !$("#recPanel").hidden; };
+  $("#recBtn").onclick = () => toggleRecording($("#recBtn"), "● Record again", $("#recTime"), (b, secs) => {
+    blob = b; $("#recAudio").src = URL.createObjectURL(b); $("#recAudio").hidden = false; $("#recUse").hidden = false;
+    $("#recTime").textContent = `${secs.toFixed(0)}s recorded${secs > 60 ? " (over 60s: fine for Shorts up to 3 min)" : ""}`;
+  });
+  $("#recUse").onclick = async () => {
+    $("#recUse").disabled = true; $("#recUse").textContent = "Uploading…";
+    const r = await fetch(`/api/upload_audio?kind=narration&pageid=${p.pageid}`, {method: "POST", headers: {"X-RW": "1"}, body: blob});
+    if (!r.ok) { $("#recTime").textContent = (await r.json()).error; $("#recUse").disabled = false; $("#recUse").textContent = "Use this recording"; return; }
+    dlg.close(); exec(`rerender --ep ${p.ep} --recording`);
+  };
+}
+
 // ---------------- settings ----------------
 let S = null, fpRole = null;
 const COLOR_LABELS = {bg: "Background", panel: "Panels", accent: "Accent", text: "Text", muted: "Muted text"};
@@ -870,6 +939,12 @@ async function loadSettings() {
   F("display_weight").value = S.fonts.display_weight || "Bold";
   $("#voiceSel").innerHTML = Object.entries(VOICE_GROUPS).map(([pre, label]) => `<optgroup label="${label}">${j.voices.filter(v => v.startsWith(pre)).map(v => `<option>${v}</option>`).join("")}</optgroup>`).join("");
   F("voice").value = S.voice;
+  S.voice_engine = S.voice_engine || "kokoro";
+  document.querySelectorAll("[name=vEngine]").forEach(r => r.checked = r.value === S.voice_engine);
+  $("#cloneConsent").checked = !!S.clone_consent;
+  sampleState(j.voice_sample);
+  if (!j.clone_ready) document.querySelector("[name=vEngine][value=clone]").disabled = true;
+  syncEngine();
   $("#llmSel").innerHTML = [...new Set([S.llm, ...j.models])].map(m => `<option>${esc(m)}</option>`).join("");
   F("llm").value = S.llm;
   $("#colorRows").innerHTML = Object.entries(COLOR_LABELS).map(([k, label]) => `<label>${label}<span class="crow">
@@ -915,7 +990,8 @@ async function searchFonts() {
 function collect() {
   S = {...S, channel: F("channel").value, tagline: F("tagline").value, outro_line: F("outro_line").value, logo_text: F("logo_text").value,
     hashtags: F("hashtags").value.split(",").map(x => x.trim()).filter(Boolean), voice: F("voice").value, voice_speed: +F("voice_speed").value,
-    music_volume: +F("music_volume").value, min_score: +F("min_score").value, max_seconds: +F("max_seconds").value, llm: F("llm").value,
+    music_volume: +F("music_volume").value, voice_engine: document.querySelector("[name=vEngine]:checked")?.value || "kokoro",
+    clone_consent: $("#cloneConsent").checked, min_score: +F("min_score").value, max_seconds: +F("max_seconds").value, llm: F("llm").value,
     fonts: {...S.fonts, display_weight: F("display_weight").value}};
   readSchedule();
   return S;
@@ -960,6 +1036,27 @@ let fqTimer; $("#fq").oninput = () => { clearTimeout(fqTimer); fqTimer = setTime
 $("#fcat").onchange = searchFonts;
 $("#musicFile").onchange = e => e.target.files[0] && uploadBrand("music", e.target.files[0]);
 $("#logoFile").onchange = e => e.target.files[0] && uploadBrand("logo", e.target.files[0]);
+
+// ---- voice engine + sample ----
+function sampleState(has) {
+  $("#sampleState").textContent = has ? "Sample saved." : "No sample yet.";
+  $("#sampleAudio").hidden = !has; if (has) $("#sampleAudio").src = "/brand/voice_sample.wav?t=" + Date.now();
+}
+function syncEngine() {
+  const clone = document.querySelector("[name=vEngine]:checked")?.value === "clone";
+  $("#cloneBox").hidden = !clone; $("#presetBox").hidden = clone;
+  $("#hearHint").textContent = clone ? "The first sample takes a minute or two while the model loads." : "";
+}
+async function uploadSample(blob) {
+  $("#sampleState").textContent = "Saving…";
+  const r = await fetch("/api/upload_audio?kind=sample", {method: "POST", headers: {"X-RW": "1"}, body: blob});
+  const j = await r.json();
+  if (!r.ok) { $("#sampleState").textContent = j.error; return; }
+  sampleState(true); $("#sampleState").textContent = `Sample saved (${j.seconds}s).`;
+}
+$("#sform").addEventListener("change", e => { if (e.target.name === "vEngine") { syncEngine(); setDirty(true); } });
+$("#sampleRec").onclick = () => toggleRecording($("#sampleRec"), "● Record sample again", $("#sampleState"), b => uploadSample(b));
+$("#sampleFile").onchange = e => e.target.files[0] && uploadSample(e.target.files[0]);
 
 // ---- automation ----
 const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];

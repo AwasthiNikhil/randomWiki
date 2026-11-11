@@ -53,6 +53,13 @@ def save_brand(new):
     if new["voice"] not in rw.KOKORO_VOICES:
         raise ValueError("unknown voice")
     b["voice"], b["voice_lang"], b["voice_speed"] = new["voice"], new["voice"][0], num("voice_speed", 0.7, 1.3)
+    b["voice_engine"] = new.get("voice_engine", "kokoro")
+    if b["voice_engine"] not in ("kokoro", "clone"):
+        raise ValueError("unknown voice engine")
+    b["clone_consent"] = bool(new.get("clone_consent"))
+    if b["voice_engine"] == "clone" and not (b["clone_consent"] and (rw.ROOT / "brand" / "voice_sample.wav").exists()):
+        raise ValueError("to use your cloned voice, record or upload a voice sample and tick the confirmation")
+    b["voice_sample"] = "brand/voice_sample.wav"
     b["music_volume"], b["min_score"], b["max_seconds"] = num("music_volume", 0, 0.5), num("min_score", 1, 10, int), num("max_seconds", 20, 175, int)
     b["llm"] = text("llm", 1, 80)
     sch = new.get("schedule") or {}
@@ -105,6 +112,7 @@ def pages():
         if r["ep"] and meta.exists():
             m = json.loads(meta.read_text())
             r.update(yt_title=m["title"], script=m["script"], yt_description=m["yt_description"], potential_info=m.get("potential"),
+                     narration=m.get("narration", "kokoro"), has_recording=(rw.WORK / str(r["pageid"]) / "voice_recorded.wav").exists(),
                      images=[{k: v for k, v in i.items() if k != "path"} | {"credit": rw.credit(i), "file": Path(i["path"]).name}
                              for i in m["images"]])
         v = Path(r["video_path"] or "")
@@ -170,6 +178,30 @@ class H(BaseHTTPRequestHandler):
         self.send(200, {"image": {"source": "own", "name": "Own image", "artist": "", "license": "", "page": "",
                                   "file": name, "credit": ""}})
 
+    def upload_audio(self, raw):
+        """POST /api/upload_audio?kind=sample|narration[&pageid=N] with recorded/uploaded audio (webm, ogg, m4a, mp3, wav)."""
+        import imageio_ffmpeg, soundfile as sf, tempfile
+        kind = (re.search(r"kind=(sample|narration)", self.path) or [None, None])[1]
+        pid = (re.search(r"pageid=(\d+)", self.path) or [None, None])[1]
+        if not kind or not 0 < len(raw) <= 60_000_000 or (kind == "narration" and not (pid and (rw.WORK / pid).is_dir())):
+            return self.send(400, {"error": "bad upload"})
+        dest = rw.ROOT / "brand" / "voice_sample.wav" if kind == "sample" else rw.WORK / pid / "voice_recorded.wav"
+        staged = dest.with_suffix(".new.wav")  # convert and check first, so a bad upload never replaces a good file
+        with tempfile.NamedTemporaryFile(suffix=".audio", dir=rw.DB.parent) as tmp:
+            tmp.write(raw)
+            tmp.flush()
+            r = subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(), "-y", "-loglevel", "error", "-i", tmp.name,
+                                "-ac", "1", "-ar", "24000", str(staged)], capture_output=True, text=True)
+        if r.returncode:
+            staged.unlink(missing_ok=True)
+            return self.send(400, {"error": "couldn't read that audio file"})
+        secs = sf.info(str(staged)).duration
+        if (kind == "sample" and not 5 <= secs <= 90) or secs < 1:
+            staged.unlink()
+            return self.send(400, {"error": f"that recording is {secs:.0f}s; " + ("record 10-30 seconds" if kind == "sample" else "it looks empty")})
+        staged.replace(dest)
+        return self.send(200, {"ok": True, "seconds": round(secs, 1)})
+
     def upload_brand(self, raw):
         """POST /api/upload_brand?kind=music|logo with the file as the body."""
         import io
@@ -209,7 +241,8 @@ class H(BaseHTTPRequestHandler):
             return self.send(200, {"brand": b, "voices": sorted(rw.KOKORO_VOICES), "models": models,
                                    "schedule": rw.SCHEDULE_DEFAULTS | b.get("schedule", {}), "schedule_loaded": rw.schedule_loaded(),
                                    "auto_log": [l for l in log if l.startswith(("===", "make:", "queue empty", "  done", "  uploaded", "  upload failed"))][-12:],
-                                   "music": (rw.ROOT / b["music"]).is_file(),
+                                   "music": (rw.ROOT / b["music"]).is_file(), "voice_sample": (rw.ROOT / "brand" / "voice_sample.wav").is_file(),
+                                   "clone_ready": (rw.ROOT / ".venv-clone" / "bin" / "python").exists(),
                                    "logo": bool(b.get("logo")) and (rw.ROOT / b["logo"]).is_file()})
         if path == "/api/fonts":
             from urllib.parse import parse_qs
@@ -220,7 +253,10 @@ class H(BaseHTTPRequestHandler):
             except Exception as e:
                 return self.send(502, {"error": f"Google Fonts unavailable: {e}"})
             return self.send(200, {"fonts": sorted(found, key=lambda f: f["popularity"])[:40]})
-        m = re.fullmatch(r"/(data|brand)/(preview\.png|voice_preview\.wav|logo\.png|music\.mp3)", path)
+        m = re.fullmatch(r"/work/(\d+)/voice_recorded\.wav", path)
+        if m and (rw.WORK / m[1] / "voice_recorded.wav").is_file():
+            return self.send_file(rw.WORK / m[1] / "voice_recorded.wav", "audio/wav")
+        m = re.fullmatch(r"/(data|brand)/(preview\.png|voice_preview\.wav|logo\.png|music\.mp3|voice_sample\.wav)", path)
         if m and (rw.ROOT / m[1] / m[2]).is_file():
             types = {"png": "image/png", "wav": "audio/wav", "mp3": "audio/mpeg"}
             return self.send_file(rw.ROOT / m[1] / m[2], types[m[2].rsplit(".", 1)[1]])
@@ -258,6 +294,8 @@ class H(BaseHTTPRequestHandler):
             return self.upload_image(raw)
         if self.path.startswith("/api/upload_brand"):
             return self.upload_brand(raw)
+        if self.path.startswith("/api/upload_audio"):
+            return self.upload_audio(raw)
         body = json.loads(raw or "{}")
         try:
             if self.path == "/api/exec":
