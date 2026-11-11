@@ -79,7 +79,7 @@ A local web UI. It's bound to 127.0.0.1 and runs the same commands as the CLI, s
 `--force` re-makes a page that was already rendered or uploaded. The queue is made in the order you dragged it to; anything you haven't placed follows, pages you added first, then oldest first.
 
 ## Branding
-Everything is editable in the studio's **Settings** tab and stored in `brand.json`:
+Everything is editable in the studio's **Settings** tab and stored in `brand.json`. That file is yours and git-ignored: it's created from `brand.example.json` the first time you run anything, so your settings never end up in the repo.
 - **Channel:** name, tagline, spoken closing line, hashtags, and a logo (1–2 characters, or an uploaded image)
 - **Colours:** background, panel, accent, text and muted text
 - **Typography:** any Google Fonts family (searchable, with live samples). The font is downloaded into `brand/fonts/` and fetched again automatically on a fresh clone.
@@ -110,7 +110,7 @@ In the studio go to **Settings → Automation**: turn it on, pick up to 4 times 
 | `sources.py` | non-Wikipedia sources: web, RSS, Hacker News, arXiv, APOD |
 | `web.py`, `web.html` | the studio (Python standard library server and a single page) |
 | `rw` | wrapper that runs `rw.py` with the project's own Python |
-| `brand.json` | channel identity and settings |
+| `brand.example.json` | default settings; copied to your own `brand.json` (git-ignored) on first run |
 | `setup.sh` | builds the local toolchain |
 | `PRIVACY.md` | privacy policy (served by GitHub Pages for the OAuth screen) |
 | `brand/` | fonts, logo, music (git-ignored) |

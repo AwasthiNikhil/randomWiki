@@ -13,7 +13,8 @@ out/
 .tools/
 __pycache__/
 
-# downloaded/personal brand assets
+# your settings (seeded from brand.example.json) and downloaded/personal brand assets
+brand.json
 brand/fonts/
 brand/music.mp3
 .DS_Store

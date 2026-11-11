@@ -12,7 +12,7 @@ import rw
 ALLOWED = {"run", "add", "discover", "upload", "unpublish", "rerender", "log", "score", "selftest", "preview", "voicetest",
            "auto", "schedule"}
 HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
-BRAND_FILE = rw.ROOT / "brand.json"
+BRAND_FILE = rw.BRAND_FILE
 HEX = re.compile(r"^#[0-9a-fA-F]{6}$")
 
 

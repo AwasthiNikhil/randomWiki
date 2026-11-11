@@ -12,8 +12,8 @@
   "fonts": {
     "display": "brand/fonts/Anton-Regular.ttf",
     "body": "brand/fonts/Inter.ttf",
-    "display_family": "",
-    "body_family": "",
+    "display_family": "Anton",
+    "body_family": "Inter",
     "display_weight": "Bold"
   },
   "voice": "bm_george",
@@ -34,9 +34,9 @@
   "user_agent": "ShortsMachine/0.1 (personal non-commercial project)",
   "logo_text": "?",
   "schedule": {
-    "enabled": true,
+    "enabled": false,
     "times": [
-      "14:36"
+      "09:00"
     ],
     "days": [
       0,
@@ -47,7 +47,7 @@
       5,
       6
     ],
-    "upload": false,
+    "upload": true,
     "publish": "private",
     "publish_time": "15:00",
     "fallback": "wikipedia",

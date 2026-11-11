@@ -20,7 +20,11 @@ ROOT = Path(__file__).resolve().parent
 for k, sub in [("HF_HOME", "hf"), ("TORCH_HOME", "torch"), ("XDG_CACHE_HOME", "xdg")]:
     os.environ.setdefault(k, str(ROOT / ".cache" / sub))  # keep every download inside the project
 
-BRAND = json.loads((ROOT / "brand.json").read_text())
+BRAND_FILE = ROOT / "brand.json"  # your settings (git-ignored); seeded from brand.example.json on first run
+if not BRAND_FILE.exists():
+    import shutil
+    shutil.copy(ROOT / "brand.example.json", BRAND_FILE)
+BRAND = json.loads(BRAND_FILE.read_text())
 C = BRAND["colors"]
 DB = ROOT / "data" / "randomwiki.db"
 WORK, OUT, SECRETS = ROOT / "work", ROOT / "out", ROOT / "secrets"
