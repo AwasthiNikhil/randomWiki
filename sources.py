@@ -40,6 +40,22 @@ def detect(url):
 
 
 # ---------- any web page ----------
+def fetch_page(url):
+    """fetch() with plain-language errors instead of tracebacks for pages that refuse or don't exist."""
+    import urllib.error
+    try:
+        return fetch(url)
+    except urllib.error.HTTPError as e:
+        why = {401: "needs a login", 403: "refuses automated access (bot protection)", 404: "doesn't exist (404)",
+               410: "has been removed", 429: "is rate-limiting requests; try again in a few minutes",
+               451: "is unavailable for legal reasons"}.get(e.code, f"returned an error (HTTP {e.code})")
+        hint = " Try a different page, the site's RSS feed, or another source." if e.code in (401, 403, 451) else ""
+        raise SystemExit(f"{urllib.parse.urlsplit(url).netloc} {why}.{hint}") from None
+    except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
+        raise SystemExit(f"couldn't reach {urllib.parse.urlsplit(url).netloc}: {getattr(e, 'reason', e)}") from None
+
+
+
 BOILERPLATE = re.compile(r"^(contribute to|sign up|log in|subscribe|read more|click here)", re.I)
 
 
@@ -67,7 +83,7 @@ def fetch_web(url, extra_credit=""):
     url = urllib.parse.urldefrag(url)[0]
     if not allowed_by_robots(url):
         raise SystemExit(f"robots.txt asks bots not to fetch {url}")
-    doc = trafilatura.bare_extraction(fetch(url).decode("utf-8", "ignore"), url=url, with_metadata=True)
+    doc = trafilatura.bare_extraction(fetch_page(url).decode("utf-8", "ignore"), url=url, with_metadata=True)
     d = doc if isinstance(doc, dict) else (doc.as_dict() if doc else {})
     text, title = (d.get("text") or "").strip(), (d.get("title") or url).strip()
     if len(text) < MIN_TEXT:
@@ -110,7 +126,7 @@ def parse_feed(data, limit):
 
 
 def discover_rss(feed_url, limit):
-    return parse_feed(fetch(feed_url), limit)
+    return parse_feed(fetch_page(feed_url), limit)
 
 
 # ---------- Hacker News ----------
@@ -244,7 +260,7 @@ def discover_link(url, limit):
         return f"arXiv {m[1]}", discover_rss(f"https://rss.arxiv.org/rss/{m[1]}", limit)
     if host in ("reddit.com", "old.reddit.com") and (m := re.match(r"/r/(\w+)", path)) and "/comments/" not in path:
         return f"r/{m[1]}", discover_rss(f"https://www.reddit.com/r/{m[1]}/.rss", limit)
-    data = fetch(u.geturl())
+    data = fetch_page(u.geturl())
     head = data[:500].lstrip().lower()
     if head.startswith(b"<?xml") or b"<rss" in head or b"<feed" in head:
         return "feed", parse_feed(data, limit)
