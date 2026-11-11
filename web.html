@@ -13,6 +13,7 @@
   --mono: ui-monospace, "SF Mono", Menlo, monospace;
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html, body { margin: 0; height: 100%; }
 body { background: var(--bg); color: var(--text); font: 14px/1.5 Inter, system-ui, sans-serif; }
 button, input { font: inherit; color: inherit; }
@@ -63,9 +64,20 @@ main { overflow: auto; padding: 20px 24px 40px; }
 .sort + .search { margin-left: 0; }
 .search { margin-left: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; width: 240px; max-width: 100%; }
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.sortbtn { background: none; border: 0; padding: 0; color: inherit; font: inherit; cursor: pointer; }
+.sortbtn:hover { color: var(--text); }
+th[aria-sort] .sortbtn { color: var(--accent); }
 th { text-align: left; color: var(--muted); font-weight: 500; padding: 8px; border-bottom: 1px solid var(--line); position: sticky; top: -20px; background: var(--bg); }
 td { padding: 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
 td.reason { color: var(--muted); max-width: 420px; }
+td.ck, th.ck { width: 28px; }
+td.ck input, th.ck input { accent-color: var(--accent); width: 16px; height: 16px; cursor: pointer; }
+tr.sel td { background: #1d1a10; }
+.selbar { display: inline-flex; gap: 6px; align-items: center; font-size: 12px; color: var(--muted); white-space: nowrap; }
+.selbar b { color: var(--text); font-weight: 600; }
+.selbar .warn { color: var(--bad); }
+.btn.sm { padding: 4px 10px; font-size: 12px; }
+.btn.icon { padding: 4px 8px; font-size: 12px; line-height: 1; }
 td.num { font-family: var(--mono); color: var(--muted); white-space: nowrap; }
 
 aside { border-left: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; background: #0B0E12; }
@@ -90,7 +102,8 @@ aside { border-left: 1px solid var(--line); display: flex; flex-direction: colum
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
 .dot.run { background: var(--ok); box-shadow: 0 0 0 4px #4ade8022; animation: pulse 1.2s infinite; }
 @keyframes pulse { 50% { opacity: .4; } }
-.term-head .btn { margin-left: auto; padding: 3px 10px; font-size: 12px; }
+.term-head .btn { padding: 3px 10px; font-size: 12px; }
+.term-head .btn:first-of-type { margin-left: auto; }
 pre.out { flex: 1; margin: 0; padding: 14px 18px; overflow: auto; font: 12.5px/1.55 var(--mono); color: #C9D1D9; white-space: pre-wrap; word-break: break-word; }
 .out .cmd { color: var(--accent); }
 .out .err { color: var(--bad); }
@@ -219,8 +232,12 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
       <div id="qList"></div>
     </section>
     <section id="log" hidden>
-      <div class="toolbar" id="filters"></div>
-      <table><thead><tr><th>Status</th><th>Score</th><th>Title</th><th>Source</th><th>Reason</th><th>When</th></tr></thead>
+      <div class="toolbar">
+        <span id="filters" style="display:contents"></span>
+        <input class="search" id="search" placeholder="Search title, reason, source, topic…" aria-label="Search page log">
+        <span class="selbar" id="selbar" hidden aria-live="polite"></span>
+      </div>
+      <table><thead><tr><th class="ck"><input type="checkbox" id="selAll" aria-label="Select all shown"></th><th data-col="status"><button class="sortbtn" data-sort="status">Status</button></th><th data-col="score"><button class="sortbtn" data-sort="score">Score</button></th><th data-col="title"><button class="sortbtn" data-sort="title">Title</button></th><th data-col="source"><button class="sortbtn" data-sort="source">Source</button></th><th data-col="reason"><button class="sortbtn" data-sort="reason">Reason</button></th><th data-col="updated"><button class="sortbtn" data-sort="updated">When</button></th></tr></thead>
       <tbody id="logrows"></tbody></table>
     </section>
   </main>
@@ -251,7 +268,7 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
       </div>
     </div>
     <div class="term">
-      <div class="term-head"><span class="dot" id="dot"></span><span id="jobLabel">idle</span><button class="btn danger" id="stop" disabled>Stop</button></div>
+      <div class="term-head"><span class="dot" id="dot"></span><span id="jobLabel">idle</span><button class="btn" id="clearTerm" title="Clear terminal history">Clear</button><button class="btn danger" id="stop" disabled>Stop</button></div>
       <pre class="out" id="out" aria-live="polite"></pre>
       <form class="prompt" id="prompt"><span>rw ›</span><input id="cmd" placeholder="run --url … · add … · upload · log 20" autocomplete="off" aria-label="Command"></form>
     </div>
@@ -263,6 +280,7 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
 <script>
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+let selected = new Set(), confirming = false, logSort = {key: "updated", dir: -1};
 let pages = [], running = false, since = 0, statusFilter = "all", q = "", epFilter = "all", epQ = "", epSort = "potential", qDegree = "1";
 // load video previews only when their card scrolls near the viewport
 const lazy = new IntersectionObserver(es => es.forEach(e => {
@@ -418,16 +436,46 @@ function wireVisuals(p) {
   };
 }
 
+function renderSelbar() {
+  const sel = pages.filter(p => selected.has(p.pageid));
+  const up = sel.filter(p => p.status === "uploaded").length, files = sel.filter(p => p.ep && p.status !== "uploaded").length;
+  $("#selbar").hidden = !sel.length;
+  const n = sel.length - up;
+  const detail = [files ? `${files} with video files` : "", up ? `${up} uploaded kept` : ""].filter(Boolean).join(", ");
+  $("#selbar").innerHTML = !confirming
+    ? `<b>${sel.length}</b> selected<button class="btn danger sm" id="delSel">Delete</button><button class="btn icon" id="clrSel" aria-label="Clear selection" title="Clear selection">✕</button>`
+    : `<span class="warn">Delete ${n}${detail ? ` (${detail})` : ""}? Can't be undone.</span>
+       <button class="btn danger sm" id="delYes" ${n ? "" : "disabled"}>Delete</button><button class="btn sm" id="delNo">Cancel</button>`;
+}
+
 function renderLog() {
   const statuses = ["all", ...new Set(pages.map(p => p.status))];
-  $("#filters").innerHTML = statuses.map(s => `<button class="filter ${s === statusFilter ? "on" : ""}" data-f="${s}">${s} ${s === "all" ? pages.length : pages.filter(p => p.status === s).length}</button>`).join("")
-    + `<input class="search" id="search" placeholder="Search titles…" value="${esc(q)}">`;
-  const rows = pages.filter(p => (statusFilter === "all" || p.status === statusFilter) && p.title.toLowerCase().includes(q.toLowerCase()));
-  $("#logrows").innerHTML = rows.slice(0, 1000).map(p => `<tr>
+  $("#filters").innerHTML = statuses.map(s => `<button class="filter ${s === statusFilter ? "on" : ""}" data-f="${s}">${s} ${s === "all" ? pages.length : pages.filter(p => p.status === s).length}</button>`).join("");
+  const ql = q.toLowerCase().trim();
+  const val = p => p[logSort.key] ?? null;
+  const rows = pages
+    .filter(p => statusFilter === "all" || p.status === statusFilter)
+    .filter(p => !ql || [p.title, p.reason, p.source, p.via, p.yt_title].some(x => (x || "").toLowerCase().includes(ql)))
+    .sort((a, b) => {
+      const x = val(a), y = val(b);
+      if (x === y) return 0;
+      if (x === null) return 1; if (y === null) return -1;  // empty values always last
+      return (typeof x === "number" ? x - y : String(x).localeCompare(String(y))) * logSort.dir;
+    });
+  document.querySelectorAll("#log th[data-col]").forEach(th => {
+    if (th.dataset.col === logSort.key) th.setAttribute("aria-sort", logSort.dir > 0 ? "ascending" : "descending"); else th.removeAttribute("aria-sort");
+    th.querySelector(".sortbtn").textContent = th.querySelector(".sortbtn").textContent.replace(/ [▲▼]$/, "") + (th.dataset.col === logSort.key ? (logSort.dir > 0 ? " ▲" : " ▼") : "");
+  });
+  const shown = rows.slice(0, 1000);
+  selected = new Set([...selected].filter(id => pages.some(p => p.pageid === id)));
+  $("#selAll").checked = shown.length > 0 && shown.every(p => selected.has(p.pageid));
+  $("#selAll").onchange = e => { shown.forEach(p => e.target.checked ? selected.add(p.pageid) : selected.delete(p.pageid)); confirming = false; renderLog(); };
+  $("#logrows").innerHTML = shown.map(p => `<tr class="${selected.has(p.pageid) ? "sel" : ""}">
+    <td class="ck"><input type="checkbox" data-sel="${p.pageid}" ${selected.has(p.pageid) ? "checked" : ""} aria-label="Select ${esc(p.title)}"></td>
     <td><span class="chip s-${p.status}">${p.status}</span></td><td class="num">${p.score ?? ""}</td>
     <td><a href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.title)}</a></td><td>${esc(p.source)}</td>
     <td class="reason">${esc(p.reason)}</td><td class="num">${esc((p.updated || "").slice(5, 16))}</td></tr>`).join("");
-  const s = $("#search"); s.oninput = e => { q = e.target.value; renderLog(); const n = $("#search"); n.focus(); n.setSelectionRange(q.length, q.length); };
+  renderSelbar();
 }
 
 function openDetail(id) {
@@ -443,6 +491,8 @@ function openDetail(id) {
         ${p.status === "rendered" ? `<button class="btn primary" data-upload="${p.ep}">Upload this video</button>` : ""}
         ${p.status !== "uploaded" ? `<button class="btn" data-remake="${esc(p.url)}">Remake</button>` : ""}
         ${["rendered", "queued", "failed"].includes(p.status) ? `<button class="btn danger" data-skip="${p.pageid}">Skip (don't upload)</button>` : ""}
+        ${p.ep && p.status !== "uploaded" ? `<span id="delVidBox"><button class="btn danger" data-delvid="${p.pageid}">Delete video</button></span>` : ""}
+        ${p.status === "uploaded" ? `<span id="unpubBox"><button class="btn danger" data-unpub="${p.ep}">Delete from YouTube…</button></span>` : ""}
       </div>
       ${potDetail(p)}
       ${p.status === "failed" ? `<h5>Error</h5><div class="box">${esc(p.reason)}</div>` : ""}
@@ -481,7 +531,7 @@ async function poll() {
     const was = running; running = j.running;
     $("#dot").className = "dot" + (running ? " run" : "");
     $("#jobLabel").textContent = running ? j.cmd : (j.cmd ? `idle · last: ${j.cmd}` : "idle");
-    document.querySelectorAll("[data-cmd], #makeUrl, #queueUrl, #upload, #qAdd, #qFind, [data-remake], [data-upload], [data-make], [data-rerender]").forEach(b => b.disabled = running);
+    document.querySelectorAll("[data-cmd], #makeUrl, #queueUrl, #upload, #qAdd, #qFind, [data-remake], [data-upload], [data-make], [data-rerender], [data-unpubgo]").forEach(b => b.disabled = running);
     $("#stop").disabled = !running;
     if (was && !running) loadPages();
   } catch (e) {
@@ -496,11 +546,41 @@ document.addEventListener("click", async e => {
     document.querySelectorAll(".tab").forEach(b => b.classList.toggle("on", b === t));
     ["episodes", "queue", "log"].forEach(id => $("#" + id).hidden = t.dataset.tab !== id);
   } else if (t.dataset.f) { statusFilter = t.dataset.f; renderLog(); }
+  else if (t.id === "delSel") { confirming = true; renderSelbar(); }
+  else if (t.id === "delNo") { confirming = false; renderSelbar(); }
+  else if (t.id === "clrSel") { selected.clear(); confirming = false; renderLog(); }
+  else if (t.id === "delYes") {
+    const r = await fetch("/api/delete", {method: "POST", headers: {"Content-Type": "application/json", "X-RW": "1"}, body: JSON.stringify({pageids: [...selected]})});
+    const j = await r.json();
+    termLine(`deleted ${j.deleted} page(s) from the log` + (j.kept_uploaded ? `; kept ${j.kept_uploaded} uploaded` : ""), "good");
+    selected.clear(); confirming = false; loadPages();
+  }
+  else if (t.dataset.sort) {
+    logSort = logSort.key === t.dataset.sort ? {key: t.dataset.sort, dir: -logSort.dir}
+      : {key: t.dataset.sort, dir: ["score", "updated"].includes(t.dataset.sort) ? -1 : 1};  // numbers/dates start high
+    renderLog();
+  }
   else if (t.dataset.ef) { epFilter = t.dataset.ef; renderEpisodes(); }
   else if (t.dataset.id) openDetail(t.dataset.id);
   else if (t.dataset.cmd) exec(t.dataset.cmd);
   else if (t.dataset.upload) { dlg.close(); exec(`upload --ep ${+t.dataset.upload}` + publishArg()); }
   else if (t.dataset.make) exec(`run --url ${quote(t.dataset.make)}`);
+  else if (t.dataset.delvid) {
+    $("#delVidBox").innerHTML = `<span class="hint" style="color:var(--bad)">Delete this video and its files? Can't be undone.</span>
+      <button class="btn danger" data-delvidyes="${t.dataset.delvid}">Delete</button> <button class="btn" data-delvidno="${t.dataset.delvid}">Cancel</button>`;
+  }
+  else if (t.dataset.delvidno) $("#delVidBox").innerHTML = `<button class="btn danger" data-delvid="${t.dataset.delvidno}">Delete video</button>`;
+  else if (t.dataset.delvidyes) {
+    if (await post("/api/delete_video", {pageid: +t.dataset.delvidyes})) { dlg.close(); termLine("video deleted; page kept in the log as skipped", "good"); loadPages(); }
+  }
+  else if (t.dataset.unpub) {
+    $("#unpubBox").innerHTML = `<div class="hint" style="color:var(--bad);margin:6px 0">Permanently deletes this video from YouTube: its views, likes and comments are lost. Can't be undone.</div>
+      <button class="btn danger" data-unpubgo="${t.dataset.unpub}" data-keep="1">Delete from YouTube, keep local copy</button>
+      <button class="btn danger" data-unpubgo="${t.dataset.unpub}" data-keep="">Delete everywhere</button>
+      <button class="btn" data-unpubno="${t.dataset.unpub}">Cancel</button>`;
+  }
+  else if (t.dataset.unpubno) $("#unpubBox").innerHTML = `<button class="btn danger" data-unpub="${t.dataset.unpubno}">Delete from YouTube…</button>`;
+  else if (t.dataset.unpubgo) { dlg.close(); exec(`unpublish --ep ${+t.dataset.unpubgo}` + (t.dataset.keep ? " --keep-local" : "")); }
   else if (t.dataset.rerender) {
     const pid = +t.dataset.rerender;
     t.disabled = true; t.textContent = "Saving…";
@@ -549,8 +629,20 @@ $("#qAdd").onclick = () => {
   if (items.length) exec("add " + items.map(quote).join(" ")).then(ok => ok && ($("#qText").value = ""));
 };
 $("#upload").onclick = () => exec("upload" + publishArg());
+$("#search").oninput = e => { q = e.target.value; renderLog(); };
 $("#epSearch").oninput = e => { epQ = e.target.value; renderEpisodes(); };
 $("#epSort").onchange = e => { epSort = e.target.value; renderEpisodes(); };
+$("#logrows").onchange = e => {
+  const id = +e.target.dataset.sel; if (!id) return;
+  e.target.checked ? selected.add(id) : selected.delete(id);
+  confirming = false; e.target.closest("tr").classList.toggle("sel", e.target.checked);
+  $("#selAll").checked = [...document.querySelectorAll("[data-sel]")].every(c => c.checked);
+  renderSelbar();
+};
+$("#clearTerm").onclick = async () => {
+  const r = await fetch("/api/clear", {method: "POST", headers: {"X-RW": "1"}});
+  since = (await r.json()).next; $("#out").innerHTML = "";
+};
 $("#stop").onclick = () => post("/api/stop");
 $("#prompt").onsubmit = e => { e.preventDefault(); const c = $("#cmd").value.trim(); if (c) exec(c.replace(/^(\.\/)?rw\s+/, "")).then(ok => ok && ($("#cmd").value = "")); };
 dlg.addEventListener("close", () => { const v = dlg.querySelector("video"); if (v) v.pause(); });

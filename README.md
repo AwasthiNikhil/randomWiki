@@ -38,6 +38,7 @@ The voice model (about 300 MB) downloads on the first run.
 ./rw upload [--ep N]          # upload every rendered video not yet uploaded, or just episode N
 ./rw score [--all]            # predict how well each video may do (0-100)
 ./rw rerender --ep N          # re-voice + re-render from the saved (hand-edited) script
+./rw unpublish --ep N [--keep-local]   # delete an uploaded episode from YouTube (and locally unless --keep-local)
 ./rw log [N]                  # rejected / queued / rendered / uploaded / failed, with reasons
 ./rw web                      # studio UI at http://127.0.0.1:8765 (browse, generate, publish)
 ./rw selftest

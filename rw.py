@@ -4,6 +4,7 @@
   ./rw add URL [URL ...]                              queue curated pages
   ./rw discover [--count N] [--topic KEY --degree 1|2|3|any]   queue N ideas (random, or around a topic)
   ./rw upload [--ep N] [--publish-at ISO]             upload every rendered video (or just episode N)
+  ./rw unpublish --ep N [--keep-local]                delete an uploaded episode from YouTube (and locally)
   ./rw rerender --ep N                                re-voice/re-render from the saved (edited) script
   ./rw log [N]                                        show the page log
   ./rw web [--port 8765]                              local studio UI in the browser
@@ -852,35 +853,80 @@ def rerender(con, ep):
 
 
 
-def upload(con, pageid, publish_at=None):
+YT_UPLOAD = "https://www.googleapis.com/auth/youtube.upload"
+YT_MANAGE = "https://www.googleapis.com/auth/youtube.force-ssl"  # needed to delete videos
+
+
+def youtube(scope):
+    """Authorised YouTube client. Asks Google for consent (browser) only if the saved token lacks `scope`."""
     from google.auth.transport.requests import Request
     from google.oauth2.credentials import Credentials
     from google_auth_oauthlib.flow import InstalledAppFlow
     from googleapiclient.discovery import build
-    from googleapiclient.http import MediaFileUpload
-
-    row = con.execute("select * from pages where pageid=?", (pageid,)).fetchone()
-    if not row or row["status"] != "rendered":
-        raise SystemExit(f"page {pageid} is not in 'rendered' state")
-    m = json.loads((WORK / str(pageid) / "meta.json").read_text())
-    scopes = ["https://www.googleapis.com/auth/youtube.upload"]
     tok = SECRETS / "token.json"
-    creds = Credentials.from_authorized_user_file(tok, scopes) if tok.exists() else None
+    creds = Credentials.from_authorized_user_file(tok) if tok.exists() else None
+    if creds and not creds.has_scopes([scope]):
+        print("  YouTube needs an extra permission; a browser window will ask you to allow it")
+        creds = None
     if creds and creds.expired and creds.refresh_token:
         creds.refresh(Request())
     if not creds or not creds.valid:
         cs = SECRETS / "client_secret.json"
         if not cs.exists():
             raise SystemExit(f"Missing {cs}; see README.md")
-        creds = InstalledAppFlow.from_client_secrets_file(cs, scopes).run_local_server(port=0)
+        had = json.loads(tok.read_text()).get("scopes", []) if tok.exists() else []
+        creds = InstalledAppFlow.from_client_secrets_file(cs, sorted({*had, scope})).run_local_server(port=0)
     tok.write_text(creds.to_json())
+    return build("youtube", "v3", credentials=creds)
+
+
+def delete_local(con, pageid, reason):
+    """Delete an episode's video and work files; the page stays in the log as skipped."""
+    import shutil
+    row = con.execute("select video_path from pages where pageid=?", (pageid,)).fetchone()
+    shutil.rmtree(WORK / str(int(pageid)), ignore_errors=True)
+    video = Path(row["video_path"] or "") if row else Path()
+    if row and row["video_path"] and video.resolve().parent == OUT.resolve():  # only files we rendered
+        video.unlink(missing_ok=True)
+    con.execute("update pages set status='skipped', reason=?, ep=null, video_path=null, video_id=null, potential=null, "
+                "updated=? where pageid=?", (reason, time.strftime("%Y-%m-%d %H:%M:%S"), pageid))
+    con.commit()
+
+
+def unpublish(con, ep, keep_local=False):
+    """Delete an uploaded episode from YouTube; keep it locally (back to 'rendered') or delete it everywhere."""
+    from googleapiclient.errors import HttpError
+    row = con.execute("select * from pages where ep=? and status='uploaded'", (ep,)).fetchone()
+    if not row:
+        raise SystemExit(f"episode {ep} is not uploaded")
+    print(f"[{ep:03d}] deleting https://youtube.com/shorts/{row['video_id']} from YouTube…")
+    try:
+        youtube(YT_MANAGE).videos().delete(id=row["video_id"]).execute()
+    except HttpError as e:
+        if e.resp.status != 404:  # 404 = already gone from YouTube, carry on
+            raise
+        print("  it was already gone from YouTube")
+    note = f"removed from YouTube (was {row['video_id']})"
+    if keep_local and row["video_path"] and Path(row["video_path"]).exists():
+        upsert(con, row["pageid"], status="rendered", video_id=None, reason=note)
+        print("  deleted from YouTube; local copy kept and ready to upload again")
+    else:
+        delete_local(con, row["pageid"], note)
+        print("  deleted from YouTube and locally")
+
+
+def upload(con, pageid, publish_at=None):
+    from googleapiclient.http import MediaFileUpload
+    row = con.execute("select * from pages where pageid=?", (pageid,)).fetchone()
+    if not row or row["status"] != "rendered":
+        raise SystemExit(f"page {pageid} is not in 'rendered' state")
+    m = json.loads((WORK / str(pageid) / "meta.json").read_text())
     status = {"privacyStatus": "private", "selfDeclaredMadeForKids": False}
     if publish_at:
         status["publishAt"] = publish_at
     body = {"snippet": {"title": m["title"], "description": m["yt_description"],
                         "tags": BRAND["hashtags"] + m["tags"], "categoryId": "27"}, "status": status}
-    yt = build("youtube", "v3", credentials=creds)
-    req = yt.videos().insert(part="snippet,status", body=body,
+    req = youtube(YT_UPLOAD).videos().insert(part="snippet,status", body=body,
                              media_body=MediaFileUpload(row["video_path"], chunksize=-1, resumable=True))
     resp = None
     while resp is None:
@@ -942,6 +988,8 @@ def main():
     u = sub.add_parser("upload"); u.add_argument("--publish-at"); u.add_argument("--ep", type=int)
     lg = sub.add_parser("log"); lg.add_argument("n", nargs="?", type=int, default=30)
     sub.add_parser("selftest")
+    up = sub.add_parser("unpublish"); up.add_argument("--ep", type=int, required=True)
+    up.add_argument("--keep-local", action="store_true")
     rr = sub.add_parser("rerender"); rr.add_argument("--ep", type=int, required=True)
     dc = sub.add_parser("discover"); dc.add_argument("--count", type=int, default=5)
     dc.add_argument("--topic"); dc.add_argument("--degree", choices=["1", "2", "3", "any"], default="any")
@@ -964,6 +1012,8 @@ def main():
             print(f"{row['status']:<9} {row['score'] or '':>2} {row['source']:<8} {row['pageid']:>9}  "
                   f"{row['title'][:45]:<45}  {(row['reason'] or '')[:60]}")
         print(dict(con.execute("select status, count(*) from pages group by status").fetchall()))
+    elif args.cmd == "unpublish":
+        unpublish(con, args.ep, args.keep_local)
     elif args.cmd == "rerender":
         rerender(con, args.ep)
     elif args.cmd == "discover":

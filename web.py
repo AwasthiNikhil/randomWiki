@@ -3,13 +3,13 @@
 Runs the same rw.py commands as the CLI in a subprocess and streams their output.
 Bound to localhost only; POSTs require an X-RW header so other websites can't trigger jobs.
 """
-import json, re, shlex, signal, subprocess, sys, threading, webbrowser
+import json, re, shlex, shutil, signal, subprocess, sys, threading, webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import rw
 
-ALLOWED = {"run", "add", "discover", "upload", "rerender", "log", "score", "selftest"}
+ALLOWED = {"run", "add", "discover", "upload", "unpublish", "rerender", "log", "score", "selftest"}
 NOISE = re.compile(r"Redirects are currently not supported|warn\(|HF_TOKEN|torch/|WeightNorm|dropout option")
 job = {"proc": None, "cmd": "", "lines": [], "code": None}
 lock = threading.Lock()
@@ -150,6 +150,11 @@ class H(BaseHTTPRequestHandler):
         try:
             if self.path == "/api/exec":
                 start(str(body.get("cmd", "")))
+            elif self.path == "/api/clear":  # wipe stored terminal output (only the screen while a job runs)
+                with lock:
+                    if not (job["proc"] and job["proc"].poll() is None):
+                        job.update(lines=[], cmd="", code=None)
+                    return self.send(200, {"next": len(job["lines"])})
             elif self.path == "/api/stop":
                 if job["proc"] and job["proc"].poll() is None:
                     job["proc"].send_signal(signal.SIGINT)  # make() records it as failed
@@ -182,6 +187,33 @@ class H(BaseHTTPRequestHandler):
                     raise ValueError("keep at least one image")
                 m["images"] = out
                 meta.write_text(json.dumps(m, indent=2))
+            elif self.path == "/api/delete_video":  # body: {"pageid"}; keeps the page in the log as skipped
+                pid = int(body["pageid"])
+                con = rw.db()
+                row = con.execute("select status, video_path from pages where pageid=?", (pid,)).fetchone()
+                if not row or row["status"] == "uploaded":
+                    raise ValueError("only videos that are not uploaded can be deleted here")
+                if job["proc"] and job["proc"].poll() is None:
+                    raise RuntimeError("wait for the running command to finish")
+                rw.delete_local(con, pid, "video deleted")
+            elif self.path == "/api/delete":  # body: {"pageids": [...]}; uploaded pages are never deleted
+                con = rw.db()
+                deleted, kept = 0, 0
+                for pid in {int(x) for x in body.get("pageids", [])}:
+                    row = con.execute("select status, video_path from pages where pageid=?", (pid,)).fetchone()
+                    if not row:
+                        continue
+                    if row["status"] == "uploaded":
+                        kept += 1
+                        continue
+                    shutil.rmtree(rw.WORK / str(pid), ignore_errors=True)
+                    video = Path(row["video_path"] or "")
+                    if row["video_path"] and video.resolve().parent == rw.OUT.resolve():  # only files we rendered
+                        video.unlink(missing_ok=True)
+                    con.execute("delete from pages where pageid=?", (pid,))
+                    deleted += 1
+                con.commit()
+                return self.send(200, {"ok": True, "deleted": deleted, "kept_uploaded": kept})
             elif self.path == "/api/skip":
                 con = rw.db()
                 con.execute("update pages set status='skipped' where pageid=? and status in ('rendered','queued','failed')",
