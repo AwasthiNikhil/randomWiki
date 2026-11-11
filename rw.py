@@ -5,6 +5,8 @@
   ./rw discover [--count N] [--topic KEY --degree 1|2|3|any]   queue N Wikipedia ideas (random, or around a topic)
   ./rw discover --source hackernews|apod|arxiv --topic T|rss --feed URL   queue ideas from other sources
   ./rw upload [--ep N] [--publish-at ISO]             upload every rendered video (or just episode N)
+  ./rw auto [--dry-run]                               one scheduled run (make next video, upload)
+  ./rw schedule                                       install/remove the launchd job from brand.json "schedule"
   ./rw unpublish --ep N [--keep-local]                delete an uploaded episode from YouTube (and locally)
   ./rw rerender --ep N                                re-voice/re-render from the saved (edited) script
   ./rw log [N]                                        show the page log
@@ -961,6 +963,101 @@ def produce(con, m, out):
     print(f"  done: {out}")
 
 
+# ---------- automation (macOS launchd) ----------
+SCHEDULE_DEFAULTS = {"enabled": False, "times": ["09:00"], "days": [0, 1, 2, 3, 4, 5, 6], "upload": True,
+                     "publish": "private", "publish_time": "15:00", "fallback": "wikipedia", "fallback_arg": ""}
+LAUNCH_LABEL = "com.shortsmachine.auto"
+LAUNCH_PLIST = Path.home() / "Library" / "LaunchAgents" / f"{LAUNCH_LABEL}.plist"
+AUTO_LOG = DB.parent / "auto.log"
+
+
+def schedule_settings():
+    return SCHEDULE_DEFAULTS | BRAND.get("schedule", {})
+
+
+def notify(msg):
+    import subprocess
+    safe = msg.replace("\\", "").replace('"', "'")[:200]
+    subprocess.run(["osascript", "-e", f'display notification "{safe}" with title "Shorts Machine"'], capture_output=True)
+
+
+def schedule_apply():
+    """Install (or remove) the launchd job that runs `rw auto` at the scheduled times."""
+    import os, plistlib, subprocess
+    sch, domain = schedule_settings(), f"gui/{os.getuid()}"
+    subprocess.run(["launchctl", "bootout", domain, str(LAUNCH_PLIST)], capture_output=True)  # drop any old job
+    if not sch["enabled"]:
+        LAUNCH_PLIST.unlink(missing_ok=True)
+        print("automation is off (launchd job removed)")
+        return
+    days = sorted(set(sch["days"]))
+    slots = [dict(Hour=int(t[:2]), Minute=int(t[3:])) for t in sch["times"]]
+    # launchd: Weekday 0 = Sunday; leave it out when every day is selected
+    intervals = slots if len(days) == 7 else [s | {"Weekday": d} for s in slots for d in days]
+    LAUNCH_PLIST.parent.mkdir(parents=True, exist_ok=True)
+    with open(LAUNCH_PLIST, "wb") as f:
+        plistlib.dump({"Label": LAUNCH_LABEL, "ProgramArguments": ["/bin/bash", str(ROOT / "rw"), "auto"],
+                       "WorkingDirectory": str(ROOT), "StartCalendarInterval": intervals,
+                       "StandardOutPath": str(AUTO_LOG), "StandardErrorPath": str(AUTO_LOG),
+                       "EnvironmentVariables": {"PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"}}, f)
+    r = subprocess.run(["launchctl", "bootstrap", domain, str(LAUNCH_PLIST)], capture_output=True, text=True)
+    if r.returncode:
+        raise SystemExit(f"launchctl refused the job: {r.stderr.strip()}")
+    print(f"automation on: {', '.join(sch['times'])} on {'every day' if len(days) == 7 else ', '.join('Sun Mon Tue Wed Thu Fri Sat'.split()[d] for d in days)}"
+          f"; job {LAUNCH_LABEL}, log data/auto.log")
+
+
+def schedule_loaded():
+    import os, subprocess
+    return subprocess.run(["launchctl", "print", f"gui/{os.getuid()}/{LAUNCH_LABEL}"], capture_output=True).returncode == 0
+
+
+def publish_time_utc(hhmm, min_gap_hours=2):
+    """Next local HH:MM at least `min_gap_hours` from now (time to review), as YouTube's UTC timestamp."""
+    from datetime import datetime, timedelta, timezone
+    now = datetime.now().astimezone()
+    t = now.replace(hour=int(hhmm[:2]), minute=int(hhmm[3:]), second=0, microsecond=0)
+    while t < now + timedelta(hours=min_gap_hours):
+        t += timedelta(days=1)
+    return t.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def auto(con, dry_run=False):
+    """One scheduled run: make the next queued video (discovering one if the queue is empty), then upload."""
+    import fcntl
+    lock = open(DB.parent / "auto.lock", "w")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        raise SystemExit("another automated run is still going; skipping this one")
+    sch = schedule_settings()
+    print(f"=== automated run {time.strftime('%Y-%m-%d %H:%M')}" + (" (dry run)" if dry_run else ""))
+    try:
+        row = con.execute(f"select pageid, title from pages where status='queued' {QUEUE_ORDER} limit 1").fetchone()
+        when = publish_time_utc(sch["publish_time"]) if sch["publish"] == "at" else None
+        plan = (f"make: {row['title']}" if row else f"queue empty: discover 1 idea from {sch['fallback']}"
+                + (f" ({sch['fallback_arg']})" if sch["fallback_arg"] else ""))
+        plan += f"; then {'upload ' + ('public at ' + when + ' UTC' if when else 'as private') if sch['upload'] else 'no upload'}"
+        print(plan)
+        if dry_run:
+            return
+        if row:
+            pid = row["pageid"]
+        elif sch["fallback"] == "wikipedia":
+            pid = (explore(con, sch["fallback_arg"], "any", 1) if sch["fallback_arg"] else discover(con, 1))[0]
+        else:
+            pid = discover_source(con, sch["fallback"], 1, sch["fallback_arg"] or None)[0]
+        make(con, pid)
+        if sch["upload"]:
+            ep = con.execute("select ep from pages where pageid=?", (pid,)).fetchone()["ep"]
+            upload_pending(con, when, ep)
+        print("=== done")
+    except BaseException as e:
+        notify(f"Automated run failed: {e}")
+        print(f"=== failed: {type(e).__name__}: {e}")
+        raise
+
+
 def preview(con):
     """Render one frame with the saved brand settings to data/preview.png (latest episode, or a sample)."""
     row = con.execute("select pageid from pages where ep is not null and video_path is not null order by ep desc").fetchone()
@@ -1120,6 +1217,10 @@ def selftest():
     assert speakable("Mix of I and II") == "Mix of I and II"
     import sources
     sources.selftest()
+    from datetime import datetime, timezone
+    when = datetime.strptime(publish_time_utc("15:00"), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    assert 2 * 3600 <= (when - datetime.now(timezone.utc)).total_seconds() <= 26 * 3600 + 60
+    assert when.astimezone().strftime("%H:%M") == "15:00"
     print("selftest ok")
 
 
@@ -1133,6 +1234,8 @@ def main():
     lg = sub.add_parser("log"); lg.add_argument("n", nargs="?", type=int, default=30)
     sub.add_parser("selftest")
     sub.add_parser("preview")
+    au = sub.add_parser("auto"); au.add_argument("--dry-run", action="store_true")
+    sub.add_parser("schedule")
     vt = sub.add_parser("voicetest"); vt.add_argument("--text")
     up = sub.add_parser("unpublish"); up.add_argument("--ep", type=int, required=True)
     up.add_argument("--keep-local", action="store_true")
@@ -1160,6 +1263,10 @@ def main():
             print(f"{row['status']:<9} {row['score'] or '':>2} {row['source']:<8} {row['pageid']:>9}  "
                   f"{row['title'][:45]:<45}  {(row['reason'] or '')[:60]}")
         print(dict(con.execute("select status, count(*) from pages group by status").fetchall()))
+    elif args.cmd == "auto":
+        auto(con, args.dry_run)
+    elif args.cmd == "schedule":
+        schedule_apply()
     elif args.cmd == "preview":
         preview(con)
     elif args.cmd == "voicetest":

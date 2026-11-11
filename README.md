@@ -70,6 +70,8 @@ A local web UI. It's bound to 127.0.0.1 and runs the same commands as the CLI, s
 ./rw preview                  # render one frame with the saved brand settings -> data/preview.png
 ./rw voicetest [--text ...]   # speak a sample with the saved voice -> data/voice_preview.wav
 ./rw log [N]                  # rejected / queued / rendered / uploaded / failed, with reasons
+./rw auto [--dry-run]         # one scheduled run: make the next video (discover one if the queue is empty), upload
+./rw schedule                 # install/remove the launchd job from brand.json's schedule
 ./rw web [--port 8765]        # the studio
 ./rw selftest
 ```
@@ -94,12 +96,11 @@ New settings apply to new renders. Use **Save & re-render** on a video to update
 
 Videos upload **private**, or scheduled with `--publish-at`. Until the project passes YouTube's API audit, YouTube keeps API uploads private. Quota allows about 6 uploads a day (deleting costs 50 units). The first `unpublish` asks Google once for the extra "manage videos" permission.
 
-## Daily automation
-Keep Ollama running and add this with `crontab -e`:
-```
-0 9 * * * /path/to/shorts-machine/rw run --upload >> /path/to/shorts-machine/data/cron.log 2>&1
-```
-cron skips a run while the Mac is asleep. A launchd job catches up on wake instead.
+## Automation
+In the studio go to **Settings → Automation**: turn it on, pick up to 4 times a day and the weekdays, choose where ideas come from when the queue is empty, and choose whether to upload (kept private, or public at a set time at least 2 hours after the video is made, so you can review it). **Save** installs a macOS launchd job (`~/Library/LaunchAgents/com.shortsmachine.auto.plist`); turning it off removes the job.
+- It runs `./rw auto` even when the studio is closed. If the Mac is asleep at that time, it runs when it wakes. Keep Ollama running.
+- Output goes to `data/auto.log`, and the last runs are shown in Settings. A failed run shows a macOS notification. Overlapping runs are skipped.
+- `./rw auto --dry-run` shows what the next run would do. `./rw schedule` applies the `brand.json` schedule from the command line.
 
 ## Files
 | Path | What |

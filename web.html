@@ -179,7 +179,7 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
 .scard legend { padding: 0 6px; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); font-weight: 600; }
 .sform label { display: grid; gap: 5px; font-size: 13px; color: var(--muted); }
 .sform label small { opacity: .75; }
-.sform input:not([type=range]):not([type=color]):not([type=file]), .sform select, .sform textarea {
+.sform input:not([type=range]):not([type=color]):not([type=file]):not([type=radio]):not([type=checkbox]), .sform select, .sform textarea {
   background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; color: var(--text); font: inherit; width: 100%; }
 .sform input:focus, .sform select:focus, .sform textarea:focus { outline: none; border-color: var(--accent); }
 .sform input[type=range] { accent-color: var(--accent); }
@@ -187,14 +187,26 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
 .colors { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; }
 .crow { display: flex; gap: 8px; align-items: center; }
 .crow input[type=color] { width: 40px; height: 36px; border: 1px solid var(--line); border-radius: 8px; background: none; padding: 2px; cursor: pointer; flex: none; }
-.frole { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; }
+#fontRoles { grid-template-columns: minmax(0, 1fr); }
+.sform select, .sform input, .sform textarea { max-width: 100%; min-width: 0; }
+.frole { min-width: 0; display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; }
 .frole .sample { font-size: 26px; color: var(--text); flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .frole .who { font-size: 12px; color: var(--muted); width: 120px; flex: none; }
+@media (max-width: 640px) { .frole { flex-wrap: wrap; } .frole .who { width: 100%; } .frole .sample { font-size: 20px; } }
 .flist { display: grid; gap: 4px; max-height: 340px; overflow: auto; margin-top: 8px; }
 .fitem { display: flex; justify-content: space-between; align-items: center; gap: 10px; background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; cursor: pointer; text-align: left; color: var(--text); }
 .fitem:hover { border-color: var(--accent); }
 .fitem span { font-size: 22px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .fitem small { color: var(--muted); font: 11px Inter, sans-serif; flex: none; }
+.check { display: flex !important; align-items: center; gap: 8px; color: var(--text) !important; font-size: 14px !important; cursor: pointer; }
+.check input { width: 16px !important; height: 16px; accent-color: var(--accent); }
+.tchip { display: inline-flex; gap: 2px; align-items: center; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 2px 4px 2px 2px; }
+.tchip input { border: 0 !important; padding: 5px 6px !important; width: auto !important; background: transparent !important; color-scheme: dark; }
+.tchip button { background: none; border: 0; color: var(--muted); cursor: pointer; padding: 2px 6px; }
+.schlog { font: 12px/1.5 var(--mono); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; max-height: 170px; overflow: auto; margin: 0; white-space: pre-wrap; color: var(--muted); }
+.sform label.radio { display: flex; gap: 8px; align-items: center; color: var(--text); font-size: 14px; flex-wrap: wrap; }
+.radio input[type=radio] { accent-color: var(--accent); }
+.radio input[type=time] { color-scheme: dark; width: auto !important; }
 .dirty { color: var(--accent); }
 @media (max-width: 1200px) { .settings { grid-template-columns: 1fr; } .spreview { position: static; max-width: 300px; } }
 @media (max-width: 900px) {
@@ -287,7 +299,7 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
               <select name="display_weight"><option>Regular</option><option>Medium</option><option>SemiBold</option><option>Bold</option><option>ExtraBold</option><option>Black</option></select></label>
             <div id="fontPick" hidden>
               <div class="inline"><b id="fpRole" style="font-size:13px"></b>
-                <input id="fq" placeholder="Search Google Fonts…" style="flex:1;min-width:160px" aria-label="Search fonts">
+                <input id="fq" placeholder="Search Google Fonts…" style="flex:1;min-width:min(160px,100%)" aria-label="Search fonts">
                 <select id="fcat" style="width:auto" aria-label="Font category"><option value="">All styles</option><option>Sans Serif</option><option>Serif</option><option>Display</option><option>Handwriting</option><option>Monospace</option></select>
                 <button class="btn sm" type="button" id="fclose">Close</button></div>
               <div class="flist" id="flist"></div>
@@ -295,8 +307,8 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
           </fieldset>
           <fieldset class="scard"><legend>Voice</legend>
             <div class="inline">
-              <label style="flex:1;min-width:200px">Voice<select name="voice" id="voiceSel"></select></label>
-              <label style="flex:1;min-width:200px">Speed <output id="speedOut"></output><input type="range" name="voice_speed" min="0.7" max="1.3" step="0.05"></label>
+              <label style="flex:1;min-width:min(200px,100%)">Voice<select name="voice" id="voiceSel"></select></label>
+              <label style="flex:1;min-width:min(200px,100%)">Speed <output id="speedOut"></output><input type="range" name="voice_speed" min="0.7" max="1.3" step="0.05"></label>
             </div>
             <div class="inline"><button class="btn" type="button" id="hear">Save &amp; hear it</button><audio id="voiceAudio" controls hidden></audio></div>
           </fieldset>
@@ -311,6 +323,31 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
             <label style="max-width:320px">Local LLM <small>from Ollama</small><select name="llm" id="llmSel"></select></label>
             <label style="max-width:320px">Minimum interest score <output id="scoreOut"></output><input type="range" name="min_score" min="1" max="10" step="1"></label>
             <label style="max-width:320px">Maximum video length <small>seconds</small><input type="number" name="max_seconds" min="20" max="175"></label>
+          </fieldset>
+          <fieldset class="scard"><legend>Automation</legend>
+            <label class="check"><input type="checkbox" id="schOn"> Make videos automatically on a schedule</label>
+            <div id="schBody" style="display:grid;gap:12px">
+              <div><div class="hint" style="margin-bottom:6px">Times · up to 4 a day</div>
+                <div class="inline" id="schTimes"></div></div>
+              <div><div class="hint" style="margin-bottom:6px">Days</div>
+                <div class="seg" id="schDays" role="group" aria-label="Days of the week"></div></div>
+              <div class="inline">
+                <label style="flex:1;min-width:min(220px,100%)">If the queue is empty, find an idea from
+                  <select id="schFb"><option value="wikipedia">Wikipedia (random, or a topic)</option><option value="hackernews">Hacker News</option>
+                  <option value="apod">NASA APOD</option><option value="arxiv">arXiv (topic)</option><option value="rss">RSS feed (URL)</option></select></label>
+                <label style="flex:1;min-width:min(220px,100%)"><span id="schArgLabel">Topic (optional)</span><input id="schArg"></label>
+              </div>
+              <label class="check"><input type="checkbox" id="schUp"> Upload to YouTube after making</label>
+              <div id="schPub" style="display:grid;gap:6px;padding-left:24px">
+                <label class="radio"><input type="radio" name="schPub" value="private"> Keep private (you publish it yourself)</label>
+                <label class="radio"><input type="radio" name="schPub" value="at"> Go public at <input type="time" id="schPubTime" aria-label="Publish time">
+                  <span class="hint">next time at least 2 h after it's made, so you can review it</span></label>
+              </div>
+            </div>
+            <div class="hint" id="schStatus"></div>
+            <div class="inline"><button class="btn sm" type="button" id="schDry">Dry run: what would happen now?</button></div>
+            <pre class="schlog" id="schLog" hidden></pre>
+            <div class="hint">Runs as a macOS launchd job, even when the studio is closed. If the Mac is asleep at that time, it runs when it wakes. Keep Ollama running. You get a notification if a run fails. Saving installs or removes <code>~/Library/LaunchAgents/com.shortsmachine.auto.plist</code>.</div>
           </fieldset>
         </form>
         <div class="spreview">
@@ -784,7 +821,9 @@ async function loadSettings() {
   $("#logoState").textContent = j.logo ? "Using uploaded logo image" : "";
   $("#logoRm").hidden = !j.logo;
   $("#musicRm").hidden = !j.music;
-  renderFontRoles(); outputs(); setDirty(false);
+  S.schedule = j.schedule; schLoaded = j.schedule_loaded; savedSchedule = JSON.stringify(j.schedule);
+  $("#schLog").hidden = !j.auto_log.length; $("#schLog").textContent = "Recent automated runs\n" + j.auto_log.join("\n");
+  renderFontRoles(); renderSchedule(); outputs(); setDirty(false);
   $("#previewImg").src = "/data/preview.png?t=" + Date.now();
 }
 function outputs() {
@@ -820,13 +859,17 @@ function collect() {
     hashtags: F("hashtags").value.split(",").map(x => x.trim()).filter(Boolean), voice: F("voice").value, voice_speed: +F("voice_speed").value,
     music_volume: +F("music_volume").value, min_score: +F("min_score").value, max_seconds: +F("max_seconds").value, llm: F("llm").value,
     fonts: {...S.fonts, display_weight: F("display_weight").value}};
+  readSchedule();
   return S;
 }
 async function saveSettings() {
   const r = await fetch("/api/settings", {method: "POST", headers: {"Content-Type": "application/json", "X-RW": "1"}, body: JSON.stringify({brand: collect()})});
   const j = await r.json();
   if (!r.ok) { $("#sState").innerHTML = `<span style="color:var(--bad)">${esc(j.error)}</span>`; return false; }
-  S = j.brand; setDirty(false); loadPages(); return true;
+  S = {...j.brand, schedule: {...j.brand.schedule}}; setDirty(false); loadPages();
+  if (JSON.stringify(S.schedule) !== savedSchedule && await exec("schedule")) { await waitJob(); }
+  await refreshScheduleStatus();
+  return true;
 }
 const waitJob = async () => { do { await new Promise(r => setTimeout(r, 700)); } while ((await (await fetch("/api/job")).json()).running); };
 async function uploadBrand(kind, file) {
@@ -859,6 +902,64 @@ let fqTimer; $("#fq").oninput = () => { clearTimeout(fqTimer); fqTimer = setTime
 $("#fcat").onchange = searchFonts;
 $("#musicFile").onchange = e => e.target.files[0] && uploadBrand("music", e.target.files[0]);
 $("#logoFile").onchange = e => e.target.files[0] && uploadBrand("logo", e.target.files[0]);
+
+// ---- automation ----
+const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+let schLoaded = false, savedSchedule = "";
+function nextRun(sch) {
+  if (!sch.enabled || !sch.times.length || !sch.days.length) return null;
+  const now = new Date();
+  for (let add = 0; add < 8; add++) {
+    const d = new Date(now); d.setDate(now.getDate() + add);
+    if (!sch.days.includes(d.getDay())) continue;
+    for (const t of [...sch.times].sort()) { const x = new Date(d); x.setHours(+t.slice(0, 2), +t.slice(3), 0, 0); if (x > now) return x; }
+  }
+  return null;
+}
+function renderSchedule() {
+  const sch = S.schedule;
+  $("#schOn").checked = sch.enabled; $("#schBody").hidden = !sch.enabled;
+  $("#schTimes").innerHTML = sch.times.map((t, i) => `<span class="tchip"><input type="time" value="${t}" data-ti="${i}" aria-label="Run time ${i + 1}">
+      ${sch.times.length > 1 ? `<button type="button" data-trm="${i}" aria-label="Remove time ${i + 1}">✕</button>` : ""}</span>`).join("")
+    + (sch.times.length < 4 ? `<button class="btn sm" type="button" id="tAdd">+ Add time</button>` : "");
+  $("#schDays").innerHTML = DAY_NAMES.map((n, d) => `<button type="button" data-day="${d}" class="${sch.days.includes(d) ? "on" : ""}" aria-pressed="${sch.days.includes(d)}">${n}</button>`).join("");
+  $("#schFb").value = sch.fallback; $("#schArg").value = sch.fallback_arg;
+  $("#schArgLabel").textContent = {wikipedia: "Topic (optional)", arxiv: "Topic", rss: "Feed URL"}[sch.fallback] || "No input needed";
+  $("#schArg").disabled = ["hackernews", "apod"].includes(sch.fallback);
+  $("#schUp").checked = sch.upload; $("#schPub").hidden = !sch.upload;
+  document.querySelectorAll("[name=schPub]").forEach(r => r.checked = r.value === sch.publish);
+  $("#schPubTime").value = sch.publish_time;
+  const nr = nextRun(sch), changed = JSON.stringify(sch) !== savedSchedule;
+  $("#schStatus").innerHTML = !sch.enabled ? (schLoaded && !changed ? "Off" : "Off") :
+    changed ? `<span class="dirty">Not active yet: click Save to install the schedule</span>` :
+    schLoaded ? `<b style="color:var(--ok)">Active</b> · next run ${nr ? nr.toLocaleString([], {weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit"}) : "—"}`
+    : `<span style="color:var(--bad)">Saved but the launchd job isn't loaded: click Save again</span>`;
+}
+function readSchedule() {
+  const sch = S.schedule;
+  sch.enabled = $("#schOn").checked;
+  sch.times = [...document.querySelectorAll("[data-ti]")].map(i => i.value).filter(Boolean);
+  sch.fallback = $("#schFb").value; sch.fallback_arg = $("#schArg").value.trim();
+  sch.upload = $("#schUp").checked;
+  sch.publish = document.querySelector("[name=schPub]:checked")?.value || "private";
+  sch.publish_time = $("#schPubTime").value || "15:00";
+}
+$("#sform").addEventListener("change", e => { if (e.target.closest(".scard")?.querySelector("#schOn")) { readSchedule(); renderSchedule(); setDirty(true); } });
+$("#sform").addEventListener("click", e => {
+  const t = e.target.closest("button"); if (!t) return;
+  if (t.dataset.day) { const d = +t.dataset.day, ds = S.schedule.days; S.schedule.days = ds.includes(d) ? ds.filter(x => x !== d) : [...ds, d].sort(); }
+  else if (t.dataset.trm) { readSchedule(); S.schedule.times.splice(+t.dataset.trm, 1); }
+  else if (t.id === "tAdd") { readSchedule(); S.schedule.times.push("18:00"); }
+  else return;
+  renderSchedule(); setDirty(true);
+});
+$("#schDry").onclick = async () => { if (await saveSettings() && await exec("auto --dry-run")) { await waitJob(); } };
+async function refreshScheduleStatus() {
+  const j = await (await fetch("/api/settings")).json();
+  schLoaded = j.schedule_loaded; savedSchedule = JSON.stringify(j.schedule);
+  $("#schLog").hidden = !j.auto_log.length; $("#schLog").textContent = "Recent automated runs\n" + j.auto_log.join("\n");
+  renderSchedule();
+}
 $("#sSave").onclick = saveSettings;
 $("#sPreview").onclick = async () => { if (await saveSettings() && await exec("preview")) { await waitJob(); $("#previewImg").src = "/data/preview.png?t=" + Date.now(); } };
 
