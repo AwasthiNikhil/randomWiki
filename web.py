@@ -1,4 +1,4 @@
-"""Local studio UI: ./rw web  ->  http://127.0.0.1:8765
+"""Shorts Machine studio UI: ./rw web  ->  http://127.0.0.1:8765
 
 Runs the same rw.py commands as the CLI in a subprocess and streams their output.
 Bound to localhost only; POSTs require an X-RW header so other websites can't trigger jobs.
@@ -9,7 +9,52 @@ from pathlib import Path
 
 import rw
 
-ALLOWED = {"run", "add", "discover", "upload", "unpublish", "rerender", "log", "score", "selftest"}
+ALLOWED = {"run", "add", "discover", "upload", "unpublish", "rerender", "log", "score", "selftest", "preview", "voicetest"}
+BRAND_FILE = rw.ROOT / "brand.json"
+HEX = re.compile(r"^#[0-9a-fA-F]{6}$")
+
+
+def brand():
+    return json.loads(BRAND_FILE.read_text())  # always fresh: settings can change while the server runs
+
+
+def save_brand(new):
+    """Validate a settings form and merge it into brand.json (unknown keys are kept)."""
+    b = brand()
+
+    def text(k, lo, hi):
+        v = str(new[k]).strip()
+        if not lo <= len(v) <= hi:
+            raise ValueError(f"{k}: {lo}-{hi} characters")
+        return v
+
+    def num(k, lo, hi, cast=float):
+        v = cast(new[k])
+        if not lo <= v <= hi:
+            raise ValueError(f"{k}: must be {lo}-{hi}")
+        return v
+
+    b["channel"], b["tagline"], b["outro_line"] = text("channel", 1, 40), text("tagline", 0, 120), text("outro_line", 0, 200)
+    b["logo_text"] = text("logo_text", 0, 2)
+    b["hashtags"] = [h for h in (re.sub(r"\W", "", str(x)) for x in new["hashtags"]) if h][:10]
+    if any(not HEX.match(str(new["colors"].get(k, ""))) for k in ("bg", "panel", "accent", "text", "muted")):
+        raise ValueError("colours must be #RRGGBB")
+    b["colors"] = {k: new["colors"][k] for k in ("bg", "panel", "accent", "text", "muted")}
+    for kind in ("display", "body"):
+        path = str(new["fonts"][kind])
+        if not (rw.ROOT / path).is_file() or not path.startswith("brand/fonts/"):
+            raise ValueError(f"{kind} font file missing: {path}")
+        b["fonts"][kind], b["fonts"][f"{kind}_family"] = path, str(new["fonts"].get(f"{kind}_family", ""))
+    if new["fonts"].get("display_weight") not in ("Regular", "Medium", "SemiBold", "Bold", "ExtraBold", "Black"):
+        raise ValueError("display weight not recognised")
+    b["fonts"]["display_weight"] = new["fonts"]["display_weight"]
+    if new["voice"] not in rw.KOKORO_VOICES:
+        raise ValueError("unknown voice")
+    b["voice"], b["voice_lang"], b["voice_speed"] = new["voice"], new["voice"][0], num("voice_speed", 0.7, 1.3)
+    b["music_volume"], b["min_score"], b["max_seconds"] = num("music_volume", 0, 0.5), num("min_score", 1, 10, int), num("max_seconds", 20, 175, int)
+    b["llm"] = text("llm", 1, 80)
+    BRAND_FILE.write_text(json.dumps(b, indent=2) + "\n")
+    return b
 NOISE = re.compile(r"Redirects are currently not supported|warn\(|HF_TOKEN|torch/|WeightNorm|dropout option")
 job = {"proc": None, "cmd": "", "lines": [], "code": None}
 lock = threading.Lock()
@@ -108,12 +153,57 @@ class H(BaseHTTPRequestHandler):
         self.send(200, {"image": {"source": "own", "name": "Own image", "artist": "", "license": "", "page": "",
                                   "file": name, "credit": ""}})
 
+    def upload_brand(self, raw):
+        """POST /api/upload_brand?kind=music|logo with the file as the body."""
+        import io
+        kind = (re.search(r"kind=(music|logo)", self.path) or [None, None])[1]
+        if not kind or not 0 < len(raw) <= 30_000_000:
+            return self.send(400, {"error": "bad upload"})
+        b = brand()
+        if kind == "logo":
+            from PIL import Image
+            try:
+                im = Image.open(io.BytesIO(raw)).convert("RGBA")
+            except Exception:
+                return self.send(400, {"error": "not an image"})
+            im.thumbnail((512, 512))
+            im.save(rw.ROOT / "brand" / "logo.png")
+            b["logo"] = "brand/logo.png"
+            BRAND_FILE.write_text(json.dumps(b, indent=2) + "\n")
+        else:
+            if raw[:3] != b"ID3" and raw[:2] not in (b"\xff\xfb", b"\xff\xf3", b"\xff\xf2"):
+                return self.send(400, {"error": "music must be an MP3 file"})
+            (rw.ROOT / b["music"]).write_bytes(raw)
+        return self.send(200, {"ok": True})
+
     def do_GET(self):
         path, _, query = self.path.partition("?")
         if path == "/":
             return self.send(200, (rw.ROOT / "web.html").read_bytes(), "text/html; charset=utf-8")
         if path == "/api/pages":
-            return self.send(200, {"pages": pages(), "brand": rw.BRAND})
+            return self.send(200, {"pages": pages(), "brand": brand()})
+        if path == "/api/settings":
+            try:
+                models = sorted(m["name"] for m in rw.get_json(brand()["ollama_url"] + "/api/tags")["models"])
+            except Exception:
+                models = []
+            b = brand()
+            return self.send(200, {"brand": b, "voices": sorted(rw.KOKORO_VOICES), "models": models,
+                                   "music": (rw.ROOT / b["music"]).is_file(),
+                                   "logo": bool(b.get("logo")) and (rw.ROOT / b["logo"]).is_file()})
+        if path == "/api/fonts":
+            from urllib.parse import parse_qs
+            qs = {k: v[0] for k, v in parse_qs(query).items()}
+            ql, cat = qs.get("q", "").lower(), qs.get("category", "")
+            try:
+                found = [f for f in rw.google_fonts() if ql in f["family"].lower() and (not cat or f["category"] == cat)]
+            except Exception as e:
+                return self.send(502, {"error": f"Google Fonts unavailable: {e}"})
+            return self.send(200, {"fonts": sorted(found, key=lambda f: f["popularity"])[:40]})
+        m = re.fullmatch(r"/(data|brand)/(preview\.png|voice_preview\.wav|logo\.png|music\.mp3)", path)
+        if m and (rw.ROOT / m[1] / m[2]).is_file():
+            types = {"png": "image/png", "wav": "audio/wav", "mp3": "audio/mpeg"}
+            return self.send_file(rw.ROOT / m[1] / m[2], types[m[2].rsplit(".", 1)[1]])
         if path == "/api/job":
             since = int((re.search(r"since=(\d+)", query) or [0, 0])[1])
             running = bool(job["proc"] and job["proc"].poll() is None)
@@ -146,6 +236,8 @@ class H(BaseHTTPRequestHandler):
         raw = self.rfile.read(int(self.headers.get("Content-Length", 0)))
         if self.path.startswith("/api/upload_image"):
             return self.upload_image(raw)
+        if self.path.startswith("/api/upload_brand"):
+            return self.upload_brand(raw)
         body = json.loads(raw or "{}")
         try:
             if self.path == "/api/exec":
@@ -187,6 +279,21 @@ class H(BaseHTTPRequestHandler):
                     raise ValueError("keep at least one image")
                 m["images"] = out
                 meta.write_text(json.dumps(m, indent=2))
+            elif self.path == "/api/settings":
+                return self.send(200, {"ok": True, "brand": save_brand(body["brand"])})
+            elif self.path == "/api/fonts/install":
+                family = str(body["family"])
+                if not any(f["family"] == family for f in rw.google_fonts()):
+                    raise ValueError("unknown font family")
+                return self.send(200, {"path": rw.install_font(family), "family": family})
+            elif self.path == "/api/remove_brand":  # body: {"kind": "music"|"logo"}
+                b = brand()
+                if body.get("kind") == "music":
+                    (rw.ROOT / b["music"]).unlink(missing_ok=True)
+                elif body.get("kind") == "logo":
+                    (rw.ROOT / "brand" / "logo.png").unlink(missing_ok=True)
+                    b.pop("logo", None)
+                    BRAND_FILE.write_text(json.dumps(b, indent=2) + "\n")
             elif self.path == "/api/delete_video":  # body: {"pageid"}; keeps the page in the log as skipped
                 pid = int(body["pageid"])
                 con = rw.db()
@@ -229,7 +336,7 @@ class H(BaseHTTPRequestHandler):
 def serve(port=8765, open_browser=True):
     srv = ThreadingHTTPServer(("127.0.0.1", port), H)
     url = f"http://127.0.0.1:{port}"
-    print(f"Random Wiki studio: {url}  (Ctrl+C to stop)")
+    print(f"Shorts Machine studio: {url}  (Ctrl+C to stop)")
     if open_browser:
         webbrowser.open(url)
     try:

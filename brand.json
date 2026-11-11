@@ -23,5 +23,5 @@
   "min_score": 7,
   "max_seconds": 58,
   "hashtags": ["wikipedia", "didyouknow", "history", "facts"],
-  "user_agent": "RandomWikiShorts/0.1 (personal non-commercial project)"
+  "user_agent": "ShortsMachine/0.1 (personal non-commercial project)"
 }

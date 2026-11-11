@@ -1,4 +1,4 @@
-"""Random Wiki Shorts: random Wikipedia page -> branded YouTube Short.
+"""Shorts Machine: Wikipedia pages -> branded YouTube Shorts.
 
   ./rw run [--url URL] [--upload] [--publish-at ISO]   make one video
   ./rw add URL [URL ...]                              queue curated pages
@@ -568,15 +568,71 @@ def group_words(words, max_words=3):
             for i, g in enumerate(groups)]
 
 
+# ---------- typography (Google Fonts, open licences) ----------
+KOKORO_VOICES = {  # English voices bundled with Kokoro-82M: a* = American, b* = British; f = female, m = male
+    "af_heart", "af_bella", "af_nicole", "af_sarah", "af_sky", "af_aoede", "af_kore", "af_nova", "af_river",
+    "am_adam", "am_michael", "am_fenrir", "am_puck", "am_echo", "am_eric", "am_liam", "am_onyx",
+    "bf_emma", "bf_isabella", "bf_alice", "bf_lily", "bm_george", "bm_lewis", "bm_daniel", "bm_fable"}
+
+
+def google_fonts():
+    """The Google Fonts catalogue (family, category, popularity), cached for a week in data/."""
+    cache = DB.parent / "google_fonts.json"
+    if not cache.exists() or time.time() - cache.stat().st_mtime > 7 * 86400:
+        d = get_json("https://fonts.google.com/metadata/fonts")
+        cache.write_text(json.dumps([{"family": f["family"], "category": f["category"], "popularity": f["popularity"]}
+                                     for f in d["familyMetadataList"] if f.get("isOpenSource", True)]))
+    return json.loads(cache.read_text())
+
+
+def install_font(family):
+    """Download a Google Fonts family's .ttf (plus licence) into brand/fonts/. Returns its project-relative path."""
+    slug = re.sub(r"[^a-z0-9]", "", family.lower())
+    for lic in ("ofl", "apache", "ufl"):
+        try:
+            files = get_json(f"https://api.github.com/repos/google/fonts/contents/{lic}/{slug}")
+        except urllib.error.HTTPError:
+            continue
+        ttfs = [f for f in files if f["name"].endswith(".ttf") and "Italic" not in f["name"]]
+        if not ttfs:
+            continue
+        # prefer a variable font (has every weight), then Bold/Black, then Regular
+        rank = lambda f: (0 if "[" in f["name"] else 1 if re.search(r"-(Bold|Black|ExtraBold)\.ttf", f["name"])
+                          else 2 if "-Regular" in f["name"] else 3)
+        pick = sorted(ttfs, key=rank)[0]
+        dest = ROOT / "brand" / "fonts" / f"{re.sub(r'[^A-Za-z0-9]', '', family)}.ttf"
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(fetch(pick["download_url"]))
+        for f in files:
+            if f["name"] in ("OFL.txt", "LICENSE.txt", "UFL.txt"):
+                (dest.parent / f"{dest.stem}-{f['name']}").write_bytes(fetch(f["download_url"]))
+        return str(dest.relative_to(ROOT))
+    raise SystemExit(f"Font '{family}' not found in the Google Fonts repository")
+
+
+def ensure_fonts():
+    """Fresh clone: re-download any brand font that is missing locally (brand/fonts is git-ignored)."""
+    for kind in ("display", "body"):
+        if not (ROOT / BRAND["fonts"][kind]).exists():
+            family = BRAND["fonts"].get(f"{kind}_family") or {"display": "Anton", "body": "Inter"}[kind]
+            print(f"  downloading font {family}…")
+            BRAND["fonts"][kind] = install_font(family)
+
+
 # ---------- rendering ----------
-def render(meta, words, audio_path, duration, out_path):
+def render(meta, words, audio_path, duration, out_path, frame_at=None):
+    """Draw the branded video and encode it to out_path. With frame_at=seconds, save just that frame as an image."""
     import subprocess, imageio_ffmpeg
     from PIL import Image, ImageDraw, ImageFont
+    ensure_fonts()
 
     def font(kind, size, weight=None):
         f = ImageFont.truetype(str(ROOT / BRAND["fonts"][kind]), size)
-        if weight:
-            f.set_variation_by_name(weight)
+        weight = weight or (BRAND["fonts"].get("display_weight", "Bold") if kind == "display" else None)
+        try:
+            f.set_variation_by_name(weight)  # variable fonts only; static fonts keep their single weight
+        except Exception:
+            pass
         return f
 
     def wrap(text, f, width):
@@ -604,7 +660,13 @@ def render(meta, words, audio_path, duration, out_path):
     bg = Image.new("RGB", (W, H), C["bg"])
     d = ImageDraw.Draw(bg)
     d.rounded_rectangle((60, 66, 150, 156), 20, fill=C["accent"])
-    d.text((105, 113), "?", font=font("display", 70), fill=C["bg"], anchor="mm")
+    logo, mark = ROOT / BRAND.get("logo", "brand/logo.png"), BRAND.get("logo_text", "?")[:2]
+    if BRAND.get("logo") and logo.exists():  # uploaded logo image, fitted into the mark
+        lm = Image.open(logo).convert("RGBA")
+        lm.thumbnail((78, 78), Image.LANCZOS)
+        bg.paste(lm, (105 - lm.width // 2, 111 - lm.height // 2), lm)
+    else:
+        d.text((105, 113), mark, font=font("display", 70 if len(mark) < 2 else 46), fill=C["bg"], anchor="mm")
     d.text((176, 111), BRAND["channel"].upper(), font=font("display", 62), fill=C["text"], anchor="lm")
     d.text((W - 60, 111), f"EP {meta['ep']:03d}", font=font("body", 38, "Bold"), fill=C["accent"], anchor="rm")
     # title (<=3 lines) + description (<=2 lines) scaled together to fit the header block
@@ -691,6 +753,33 @@ def render(meta, words, audio_path, duration, out_path):
             cap_cache[key] = im
         return cap_cache[key]
 
+    n, seg, fade = len(srcs), duration / len(srcs), 0.4
+
+    def frame(t):
+        i = min(int(t / seg), n - 1)
+        panel = kb(i, (t - i * seg) / seg)
+        if i < n - 1 and t > (i + 1) * seg - fade:
+            panel = Image.blend(panel, kb(i + 1, 0), 1 - ((i + 1) * seg - t) / fade)
+        im = bg.copy()
+        im.paste(panel, (PX, PY), mask)
+        fd = ImageDraw.Draw(im)
+        if srcs[i][1]:
+            cf, cl = srcs[i][1]
+            for k, line in enumerate(cl):
+                fd.text((PX, PY + PH + 14 + k * cf.size * 1.25), line, font=cf, fill=C["muted"])
+        gi = max([k for k, g in enumerate(groups) if g[0] <= t] or [0])
+        if groups and groups[gi][0] <= t < groups[gi][1]:
+            active = max([j for j, w in enumerate(groups[gi][2]) if w[1] <= t] or [0])
+            cap = caption(gi, active)
+            im.paste(cap, (0, 1560), cap)
+        fd.rounded_rectangle((PX, 1826, PX + PW, 1836), 5, fill=C["panel"])
+        fd.rounded_rectangle((PX, 1826, PX + max(10, int(PW * t / duration)), 1836), 5, fill=C["accent"])
+        return im
+
+    if frame_at is not None:
+        frame(frame_at).save(out_path)
+        return
+
     ff = imageio_ffmpeg.get_ffmpeg_exe()
     music = ROOT / BRAND["music"]
     cmd = [ff, "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}",
@@ -705,30 +794,8 @@ def render(meta, words, audio_path, duration, out_path):
             "-c:a", "aac", "-ar", "48000", "-b:a", "192k", "-movflags", "+faststart", "-shortest", str(out_path)]
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
 
-    n, seg, fade = len(srcs), duration / len(srcs), 0.4
-    gi = 0
     for fi in range(int(duration * FPS)):
-        t = fi / FPS
-        i = min(int(t / seg), n - 1)
-        panel = kb(i, (t - i * seg) / seg)
-        if i < n - 1 and t > (i + 1) * seg - fade:
-            panel = Image.blend(panel, kb(i + 1, 0), 1 - ((i + 1) * seg - t) / fade)
-        frame = bg.copy()
-        frame.paste(panel, (PX, PY), mask)
-        fd = ImageDraw.Draw(frame)
-        if srcs[i][1]:
-            cf, cl = srcs[i][1]
-            for k, line in enumerate(cl):
-                fd.text((PX, PY + PH + 14 + k * cf.size * 1.25), line, font=cf, fill=C["muted"])
-        while gi < len(groups) - 1 and t >= groups[gi + 1][0]:
-            gi += 1
-        if groups and groups[gi][0] <= t < groups[gi][1]:
-            active = max([j for j, w in enumerate(groups[gi][2]) if w[1] <= t] or [0])
-            cap = caption(gi, active)
-            frame.paste(cap, (0, 1560), cap)
-        fd.rounded_rectangle((PX, 1826, PX + PW, 1836), 5, fill=C["panel"])
-        fd.rounded_rectangle((PX, 1826, PX + max(10, int(PW * t / duration)), 1836), 5, fill=C["accent"])
-        proc.stdin.write(frame.tobytes())
+        proc.stdin.write(frame(fi / FPS).tobytes())
     proc.stdin.close()
     if proc.wait():
         raise RuntimeError("ffmpeg failed")
@@ -836,6 +903,25 @@ def produce(con, m, out):
     render(m, words, work / "voice.wav", dur, out)
     upsert(con, m["pageid"], status="rendered", video_path=str(out))
     print(f"  done: {out}")
+
+
+def preview(con):
+    """Render one frame with the saved brand settings to data/preview.png (latest episode, or a sample)."""
+    row = con.execute("select pageid from pages where ep is not null and video_path is not null order by ep desc").fetchone()
+    mpath = WORK / str(row["pageid"]) / "meta.json" if row else None
+    m = json.loads(mpath.read_text()) if mpath and mpath.exists() else dict(
+        ep=1, article_title="Emu War", description="1932 Australian wildlife management operation", images=[],
+        script="In 1932, Australia went to war with emus, and the emus won.")
+    m["images"] = [i for i in m["images"] if Path(i.get("path", "")).exists()][:1]
+    words = [[w, k * 0.35, k * 0.35 + 0.35] for k, w in enumerate(m["script"].split()[:12])]
+    render(m, words, None, 12, DB.parent / "preview.png", frame_at=0.75)
+    print("preview saved: data/preview.png")
+
+
+def voicetest(text=None):
+    """Speak a sample with the saved voice settings to data/voice_preview.wav."""
+    tts(text or "In 1932, Australia went to war with emus. " + BRAND["outro_line"], DB.parent / "voice_preview.wav")
+    print("voice sample saved: data/voice_preview.wav")
 
 
 def rerender(con, ep):
@@ -988,6 +1074,8 @@ def main():
     u = sub.add_parser("upload"); u.add_argument("--publish-at"); u.add_argument("--ep", type=int)
     lg = sub.add_parser("log"); lg.add_argument("n", nargs="?", type=int, default=30)
     sub.add_parser("selftest")
+    sub.add_parser("preview")
+    vt = sub.add_parser("voicetest"); vt.add_argument("--text")
     up = sub.add_parser("unpublish"); up.add_argument("--ep", type=int, required=True)
     up.add_argument("--keep-local", action="store_true")
     rr = sub.add_parser("rerender"); rr.add_argument("--ep", type=int, required=True)
@@ -1012,6 +1100,10 @@ def main():
             print(f"{row['status']:<9} {row['score'] or '':>2} {row['source']:<8} {row['pageid']:>9}  "
                   f"{row['title'][:45]:<45}  {(row['reason'] or '')[:60]}")
         print(dict(con.execute("select status, count(*) from pages group by status").fetchall()))
+    elif args.cmd == "preview":
+        preview(con)
+    elif args.cmd == "voicetest":
+        voicetest(args.text)
     elif args.cmd == "unpublish":
         unpublish(con, args.ep, args.keep_local)
     elif args.cmd == "rerender":
