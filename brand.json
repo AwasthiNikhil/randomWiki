@@ -11,7 +11,10 @@
   },
   "fonts": {
     "display": "brand/fonts/Anton-Regular.ttf",
-    "body": "brand/fonts/Inter.ttf"
+    "body": "brand/fonts/Inter.ttf",
+    "display_family": "",
+    "body_family": "",
+    "display_weight": "Bold"
   },
   "voice": "bm_george",
   "voice_lang": "b",
@@ -22,6 +25,12 @@
   "ollama_url": "http://localhost:11434",
   "min_score": 7,
   "max_seconds": 58,
-  "hashtags": ["wikipedia", "didyouknow", "history", "facts"],
-  "user_agent": "ShortsMachine/0.1 (personal non-commercial project)"
+  "hashtags": [
+    "wikipedia",
+    "didyouknow",
+    "history",
+    "facts"
+  ],
+  "user_agent": "ShortsMachine/0.1 (personal non-commercial project)",
+  "logo_text": "?"
 }

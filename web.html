@@ -237,16 +237,21 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
     </section>
     <section id="queue" hidden>
       <div class="qadd">
-        <textarea id="qText" placeholder="Paste Wikipedia links or titles, one per line, to queue them" aria-label="Links to queue"></textarea>
+        <textarea id="qText" placeholder="Paste links (Wikipedia, any article, Hacker News, arXiv, APOD) or Wikipedia titles, one per line" aria-label="Links to queue"></textarea>
         <button class="btn primary" id="qAdd">Add to queue</button>
       </div>
       <div class="explore">
         <h4 style="margin:0;font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--muted)">Find ideas</h4>
         <div class="row">
-          <input id="qTopic" placeholder="Topic to explore, e.g. Nepal, jazz, black holes (empty = fully random)" aria-label="Topic">
+          <select class="sort" id="qSource" aria-label="Source" style="margin-left:0">
+            <option value="wikipedia">Wikipedia</option><option value="hackernews">Hacker News (top stories)</option>
+            <option value="apod">NASA Astronomy Picture of the Day</option><option value="arxiv">arXiv papers</option>
+            <option value="rss">RSS / Atom feed</option>
+          </select>
+          <input id="qTopic" placeholder="Topic to explore, e.g. Nepal, jazz, black holes (empty = fully random)" aria-label="Topic or feed URL">
         </div>
         <div class="row" style="align-items:center">
-          <span class="count">Degree of relation</span>
+          <span class="count" id="qDegLabel">Degree of relation</span>
           <div class="seg" id="qDegree" role="radiogroup" aria-label="Degree of relation">
             <button data-deg="1" class="on" title="Pages the topic links to, that link to it, or mention it">1 · direct</button>
             <button data-deg="2" title="One hop further: linked from those pages">2</button>
@@ -336,9 +341,9 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
         </div>
       </div>
       <div>
-        <h4>From a Wikipedia link</h4>
+        <h4>From a link</h4>
         <div class="row wrap">
-          <input id="url" placeholder="https://en.wikipedia.org/wiki/…" aria-label="Wikipedia URL">
+          <input id="url" placeholder="Wikipedia, article, Hacker News, arXiv or APOD link" aria-label="Link to make a video from">
           <button class="btn" id="makeUrl">Make now</button>
           <button class="btn" id="queueUrl">Queue</button>
         </div>
@@ -438,6 +443,9 @@ function potDetail(p) {
     <div class="hint">${esc(i.why)} · ${i.views60.toLocaleString()} article views in 60 days · ${i.languages} languages · ${i.seconds}s</div>`;
 }
 
+const ORIGIN_NAMES = {wikipedia: "Wikipedia", web: "Article", hackernews: "Hacker News", arxiv: "arXiv", apod: "NASA APOD"};
+const originName = p => ORIGIN_NAMES[p.origin || "wikipedia"] || p.origin;
+
 function renderQueue() {
   // same order rw run uses: curated first, then oldest
   const qs = pages.filter(p => p.status === "queued").sort((a, b) =>
@@ -456,7 +464,7 @@ function renderQueue() {
             <span class="tag ${p.source}">${p.source}</span>
             ${p.score ? `<span>interest ${p.score}/10</span>` : ""}
             <span>added ${esc(localTime(p.created))}</span>
-            <a href="${esc(p.url)}" target="_blank" rel="noopener">Wikipedia ↗</a>
+            <a href="${esc(p.url)}" target="_blank" rel="noopener">${originName(p)} ↗</a>
           </div>
           ${p.reason && p.reason !== "curated" ? `<div class="qwhy">${esc(p.reason.replace(/^llm: /, ""))}</div>` : ""}
           ${p.via ? `<div class="via">${p.via.split(" → ").length - 1}° · ${p.via.split(" → ").map((x, j, a) => j === 0 ? `<b>${esc(x)}</b>` : esc(x)).join(" → ")}</div>` : ""}
@@ -543,7 +551,7 @@ function renderLog() {
   const val = p => p[logSort.key] ?? null;
   const rows = pages
     .filter(p => statusFilter === "all" || p.status === statusFilter)
-    .filter(p => !ql || [p.title, p.reason, p.source, p.via, p.yt_title].some(x => (x || "").toLowerCase().includes(ql)))
+    .filter(p => !ql || [p.title, p.reason, p.source, p.via, p.yt_title, originName(p)].some(x => (x || "").toLowerCase().includes(ql)))
     .sort((a, b) => {
       const x = val(a), y = val(b);
       if (x === y) return 0;
@@ -561,7 +569,7 @@ function renderLog() {
   $("#logrows").innerHTML = shown.map(p => `<tr class="${selected.has(p.pageid) ? "sel" : ""}">
     <td class="ck"><input type="checkbox" data-sel="${p.pageid}" ${selected.has(p.pageid) ? "checked" : ""} aria-label="Select ${esc(p.title)}"></td>
     <td><span class="chip s-${p.status}">${p.status}</span></td><td class="num">${p.score ?? ""}</td>
-    <td><a href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.title)}</a></td><td>${esc(p.source)}</td>
+    <td><a href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.title)}</a></td><td>${esc(p.source)}${p.origin && p.origin !== "wikipedia" ? `<br><span class="tag seed">${esc(originName(p))}</span>` : ""}</td>
     <td class="reason">${esc(p.reason)}</td><td class="num">${esc((p.updated || "").slice(5, 16))}</td></tr>`).join("");
   renderSelbar();
 }
@@ -574,7 +582,7 @@ function openDetail(id) {
     <div class="info">
       <div class="ep">${p.ep ? "EP " + String(p.ep).padStart(3, "0") : ""} &nbsp;<span class="chip s-${p.status}">${p.status}</span></div>
       <h2>${esc(p.yt_title || p.title)}</h2>
-      <div class="sub">${esc(p.title)} · <a href="${esc(p.url)}" target="_blank" rel="noopener">Wikipedia ↗</a>${yt ? ` · <a href="${yt}" target="_blank" rel="noopener">YouTube ↗</a>` : ""}</div>
+      <div class="sub">${esc(p.title)} · <a href="${esc(p.url)}" target="_blank" rel="noopener">${originName(p)} ↗</a>${yt ? ` · <a href="${yt}" target="_blank" rel="noopener">YouTube ↗</a>` : ""}</div>
       <div class="btns">
         ${p.status === "rendered" ? `<button class="btn primary" data-upload="${p.ep}">Upload this video</button>` : ""}
         ${p.status !== "uploaded" ? `<button class="btn" data-remake="${esc(p.url)}">Remake</button>` : ""}
@@ -683,9 +691,23 @@ document.addEventListener("click", async e => {
 $("#makeUrl").onclick = () => { const u = $("#url").value.trim(); if (u) exec(`run --url ${quote(u)}`).then(ok => ok && ($("#url").value = "")); };
 $("#queueUrl").onclick = () => { const u = $("#url").value.trim(); if (u) exec(`add ${quote(u)}`).then(ok => ok && ($("#url").value = "")); };
 const publishArg = () => { const v = $("#publishAt").value; return v ? " --publish-at " + new Date(v).toISOString().replace(/\.\d+Z$/, "Z") : ""; };
+const SOURCE_HINT = {
+  wikipedia: "Topic to explore, e.g. Nepal, jazz, black holes (empty = fully random)",
+  hackernews: "No input needed: today's top stories", apod: "No input needed: latest Astronomy Pictures of the Day",
+  arxiv: "Topic to search papers for, e.g. black holes", rss: "Feed URL, e.g. https://www.nasa.gov/feed/",
+};
+const syncSource = () => {
+  const src = $("#qSource").value;
+  $("#qTopic").placeholder = SOURCE_HINT[src];
+  $("#qTopic").disabled = ["hackernews", "apod"].includes(src);
+  $("#qDegree").hidden = $("#qDegLabel").hidden = src !== "wikipedia";
+};
+$("#qSource").onchange = syncSource;
 $("#qFind").onclick = () => {
-  const topic = $("#qTopic").value.trim();
-  exec(`discover --count ${$("#qCount").value}` + (topic ? ` --topic ${quote(topic)} --degree ${qDegree}` : ""));
+  const src = $("#qSource").value, v = $("#qTopic").value.trim(), n = $("#qCount").value;
+  if (src === "wikipedia") return exec(`discover --count ${n}` + (v ? ` --topic ${quote(v)} --degree ${qDegree}` : ""));
+  if (["arxiv", "rss"].includes(src) && !v) return termLine(`! ${src === "rss" ? "enter a feed URL" : "enter a topic"} first`, "err");
+  exec(`discover --source ${src} --count ${n}` + (src === "rss" ? ` --feed ${quote(v)}` : src === "arxiv" ? ` --topic ${quote(v)}` : ""));
 };
 $("#qDegree").onclick = e => {
   const b = e.target.closest("[data-deg]"); if (!b) return;

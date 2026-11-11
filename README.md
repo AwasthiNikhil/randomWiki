@@ -1,6 +1,6 @@
 # Shorts Machine
 
-Wikipedia pages go in, and branded YouTube Shorts come out. Everything runs locally and costs nothing.
+Articles go in, and branded YouTube Shorts come out. Wikipedia is the main source; any web article, RSS/Atom feeds, Hacker News, arXiv and NASA's Astronomy Picture of the Day also work. Everything runs locally and costs nothing.
 
 1. **Pick:** random articles, or ideas found around a topic through its Wikipedia link network (1–3 hops). Stubs, lists and disambiguation pages are dropped, and a local LLM scores the rest out of 10.
 2. **Log:** every page that comes up is stored in SQLite with a status and the reason, so nothing is ever processed twice.
@@ -10,6 +10,26 @@ Wikipedia pages go in, and branded YouTube Shorts come out. Everything runs loca
 6. **Render:** a branded 1080×1920 layout drawn with Pillow and encoded with ffmpeg.
 7. **Score:** each video gets a 0–100 potential score from topic demand, hook, appeal, reach, visuals and length.
 8. **Publish:** YouTube Data API upload, private or scheduled, best potential first. Credits go into the description automatically.
+
+## Sources
+| Source | Find ideas | What the script is written from | Images |
+|---|---|---|---|
+| Wikipedia | random, or a topic's link network (1–3 hops) | the article | the article's own, then Commons |
+| Any web page | paste a link | the page's main text (extracted with trafilatura; robots.txt respected) | Commons/Openverse search, never the page's own images |
+| RSS / Atom | the latest items of a feed URL | each item's linked page | as web |
+| Hacker News | today's top stories | the linked article, or the post text | as web |
+| arXiv | papers matching a topic | the abstract (arXiv metadata is CC0) | Commons search, else a title card |
+| NASA APOD | the latest pictures (via NASA's RSS feed) | the explanation | search; APOD photos are often copyrighted, so they're not reused automatically |
+
+Credits name the source and link back. Non-Wikipedia text is copyrighted by its authors: the narration is a short summary in new words, so review it before publishing.
+
+```
+./rw run --url https://news.ycombinator.com/item?id=8863     # any supported link works
+./rw discover --source hackernews --count 5
+./rw discover --source rss --feed https://www.nasa.gov/feed/
+./rw discover --source arxiv --topic "dark matter"
+./rw discover --source apod
+```
 
 ## Requirements
 - macOS or Linux, about 2 GB of disk, `curl` and `bash`
@@ -85,6 +105,7 @@ cron skips a run while the Mac is asleep. A launchd job catches up on wake inste
 | Path | What |
 |---|---|
 | `rw.py` | the pipeline and CLI |
+| `sources.py` | non-Wikipedia sources: web, RSS, Hacker News, arXiv, APOD |
 | `web.py`, `web.html` | the studio (Python standard library server and a single page) |
 | `rw` | wrapper that runs `rw.py` with the project's own Python |
 | `brand.json` | channel identity and settings |

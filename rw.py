@@ -1,8 +1,9 @@
-"""Shorts Machine: Wikipedia pages -> branded YouTube Shorts.
+"""Shorts Machine: Wikipedia pages, web articles, feeds, Hacker News, arXiv and NASA APOD -> branded YouTube Shorts.
 
   ./rw run [--url URL] [--upload] [--publish-at ISO]   make one video
   ./rw add URL [URL ...]                              queue curated pages
-  ./rw discover [--count N] [--topic KEY --degree 1|2|3|any]   queue N ideas (random, or around a topic)
+  ./rw discover [--count N] [--topic KEY --degree 1|2|3|any]   queue N Wikipedia ideas (random, or around a topic)
+  ./rw discover --source hackernews|apod|arxiv --topic T|rss --feed URL   queue ideas from other sources
   ./rw upload [--ep N] [--publish-at ISO]             upload every rendered video (or just episode N)
   ./rw unpublish --ep N [--keep-local]                delete an uploaded episode from YouTube (and locally)
   ./rw rerender --ep N                                re-voice/re-render from the saved (edited) script
@@ -56,7 +57,7 @@ def db():
         pageid integer primary key, title text, url text, source text, status text,
         score integer, reason text, ep integer, video_path text, video_id text,
         created text default current_timestamp, updated text default current_timestamp)""")
-    for col in ("potential integer", "rank integer", "via text"):  # added after v1; ignore if present
+    for col in ("potential integer", "rank integer", "via text", "origin text", "ref text"):  # added after v1; ignore if present
         try:
             con.execute(f"alter table pages add column {col}")
         except sqlite3.OperationalError:
@@ -85,7 +86,7 @@ def llm(prompt, temperature=0.7):
     return json.loads(r["message"]["content"])
 
 
-SCORE_PROMPT = """You choose topics for a YouTube Shorts channel that turns random Wikipedia articles into 50-second stories.
+SCORE_PROMPT = """You choose topics for a YouTube Shorts channel that turns articles (Wikipedia, news, papers, blogs) into 50-second stories.
 Rate how likely this article is to make a viewer think "wait, what?".
 Most random articles (minor species, small villages, obscure athletes, routine politicians, ordinary companies, albums) score 1-4.
 Score 7+ only if the text contains a genuinely surprising fact, strange event, record, mystery, scandal or conflict.
@@ -95,12 +96,12 @@ Text: {text}
 
 Reply as JSON: {{"score": <1-10>, "hook": "<the single most surprising fact, one sentence>", "reason": "<short>"}}"""
 
-SCRIPT_PROMPT = """Write the narration for a YouTube Short about the Wikipedia article below.
+SCRIPT_PROMPT = """Write the narration for a YouTube Short about the article below.
 Rules:
 - 100 to 120 words (about 7 sentences of 15 words). Plain spoken English, short sentences, no lists, no emojis, no hashtags.
 - The first sentence is a hook of under 14 words built on the most surprising fact.
 - Tell it as a story with a payoff at the end. Use ONLY facts stated in the article. Do not invent anything.
-- Do not say "Wikipedia", "did you know", "in this video", or ask viewers to like or subscribe.
+- Do not say "Wikipedia", "this article", "did you know", "in this video", or ask viewers to like or subscribe.
 
 Article title: {title}
 Article text:
@@ -191,6 +192,37 @@ def discover(con, want=1):
     if not found:
         raise SystemExit("No interesting page found; run again.")
     print(f"found {len(found)} of {want}; run again for more")
+    return found
+
+
+def discover_source(con, origin, want=5, arg=None):
+    """Queue up to `want` interesting items from another source (hackernews, rss, arxiv, apod)."""
+    import sources
+    cands = sources.discover(origin, want * 4, arg)
+    print(f"{len(cands)} candidates from {origin}" + (f" ({arg})" if arg else ""))
+    found = []
+    for c in cands:
+        if len(found) >= want:
+            break
+        origin_c = c["origin"]
+        try:
+            a = sources.fetch_article(origin_c, c["ref"])
+        except (SystemExit, Exception) as e:
+            print(f"   –  {c['title'][:60]}  ({e})")
+            continue
+        pid = sources.synthetic_id(a["key"])
+        if con.execute("select 1 from pages where pageid=?", (pid,)).fetchone():
+            continue
+        base = dict(title=a["title"], url=a["url"], source=origin if origin == "rss" else "random", origin=a["origin"], ref=c["ref"])
+        s = llm(SCORE_PROMPT.format(title=a["title"], text=a["text"][:3000], context=""), 0.2)
+        score = int(s.get("score", 0) or 0)
+        ok = score >= BRAND["min_score"]
+        upsert(con, pid, status="queued" if ok else "rejected", score=score,
+               reason=f"llm: {s.get('hook') if ok else s.get('reason')}", **base)
+        print(f"  {score:>2}/10  {a['title'][:70]}" + ("  -> queued" if ok else ""))
+        if ok:
+            found.append(pid)
+    print(f"found {len(found)} of {want}")
     return found
 
 
@@ -301,15 +333,23 @@ def resolve(url_or_title):
 
 
 def add_curated(con, url, force=False, make_now=False):
-    pageid, title = resolve(url)
+    import sources
+    origin, ref = sources.detect(url)
+    if origin == "wikipedia":
+        pageid, title = resolve(url)
+        extra = dict(url=page_url(title), origin="wikipedia")
+    else:
+        a = sources.fetch_article(origin, ref)  # also validates the link has usable text
+        pageid, title = sources.synthetic_id(a["key"]), a["title"]
+        extra = dict(url=a["url"], origin=a["origin"], ref=ref)
     row = con.execute("select status from pages where pageid=?", (pageid,)).fetchone()
     if make_now and row and row["status"] == "queued":
         return pageid  # already waiting in the queue: just make it, keep its source/reason
     if row and row["status"] in ("rendered", "uploaded", "queued") and not force:
         print(f"skip: {title} is already {row['status']} (use --force)")
         return None
-    upsert(con, pageid, title=title, url=page_url(title), source="curated", status="queued", reason="curated")
-    print(f"queued: {title}")
+    upsert(con, pageid, title=title, source="curated", status="queued", reason="curated", **extra)
+    print(f"queued: {title}" + ("" if extra["origin"] == "wikipedia" else f"  [{extra['origin']}]"))
     return pageid
 
 
@@ -452,9 +492,10 @@ def download_image(img, dest):
     return {k: v for k, v in img.items() if k not in ("thumb", "tags")} | {"path": str(path)}
 
 
-def fetch_images(title, pageimage, dest, want=4, limit=6):
-    """Automatic pick: the article's own images, topped up from a Commons search, then on-topic Openverse."""
-    got = src_article(title, limit, pageimage)
+def fetch_images(title, pageimage, dest, want=4, limit=6, own=None):
+    """Automatic pick: the article's own images (Wikipedia, or `own` from another source),
+    topped up from a Commons search, then on-topic Openverse."""
+    got = list(own) if own is not None else src_article(title, limit, pageimage)
     for extra in (lambda: src_commons(title, 10), lambda: src_openverse(title, 10)):
         if len(got) >= want:
             break
@@ -685,7 +726,7 @@ def render(meta, words, audio_path, duration, out_path, frame_at=None):
     for line in dl:
         d.text((60, y), line, font=df, fill=C["muted"])
         y += df.size * 1.3
-    d.text((W // 2, 1878), "Source: Wikipedia · CC BY-SA 4.0", font=font("body", 28, "Medium"), fill=C["muted"], anchor="mm")
+    d.text((W // 2, 1878), meta.get("source_label") or "Source: Wikipedia · CC BY-SA 4.0", font=font("body", 28, "Medium"), fill=C["muted"], anchor="mm")
 
     mask = Image.new("L", (PW, PH), 0)
     ImageDraw.Draw(mask).rounded_rectangle((0, 0, PW, PH), 36, fill=255)
@@ -804,9 +845,9 @@ def render(meta, words, audio_path, duration, out_path, frame_at=None):
 # ---------- orchestration ----------
 def description(m):
     lines = [m["script"].split(". ")[0].rstrip(".") + ".", "",
-             f"Read the full article: {m['url']}", "",
+             f"Source: {m['url']}", "",
              f"Episode {m['ep']} of {BRAND['channel']}. {BRAND['tagline']}", "", "CREDITS",
-             f"Text adapted from the Wikipedia article \"{m['article_title']}\", CC BY-SA 4.0: {m['url']}"]
+             m.get("credit") or f"Text adapted from the Wikipedia article \"{m['article_title']}\", CC BY-SA 4.0: {m['url']}"]
     lines += [f"Image: \"{i['name']}\", {credit(i).replace(' · ', ', ')}: {i['page']}" for i in m["images"] if credit(i)]
     lines += ["Narration: AI voice (Kokoro TTS). Fonts: Anton, Inter (SIL OFL).", "",
               " ".join("#" + re.sub(r"\W", "", t) for t in BRAND["hashtags"] + m["tags"][:3])]
@@ -847,9 +888,15 @@ def score_video(con, pageid):
     row = con.execute("select * from pages where pageid=?", (pageid,)).fetchone()
     mpath = WORK / str(pageid) / "meta.json"
     m = json.loads(mpath.read_text())
-    p = wiki(pageids=pageid, prop="pageviews|langlinks", pvipdays=60, lllimit="max")["query"]["pages"][0]
-    views = sum(v or 0 for v in (p.get("pageviews") or {}).values())
-    langs = len(p.get("langlinks") or [])
+    if m.get("origin", "wikipedia") == "wikipedia":
+        p = wiki(pageids=pageid, prop="pageviews|langlinks", pvipdays=60, lllimit="max")["query"]["pages"][0]
+        views = sum(v or 0 for v in (p.get("pageviews") or {}).values())
+        langs = len(p.get("langlinks") or [])
+    else:
+        # ponytail: no pageviews/language editions outside Wikipedia; use the source's popularity
+        # (e.g. HN points) for demand, else a neutral midpoint, and a neutral reach
+        views = int(10 ** (5 * (m.get("popularity") if m.get("popularity") is not None else 0.5))) - 1
+        langs = 30
     hook_line = m["script"].split(". ")[0]
     a = llm(APPEAL_PROMPT.format(title=m["title"], hook=hook_line, topic=m["article_title"], desc=m.get("description", "")), 0.2)
     clamp = lambda v: max(1, min(10, int(v or 5)))
@@ -872,14 +919,23 @@ def make(con, pageid):
     ep = row["ep"] or (con.execute("select coalesce(max(ep), 0) + 1 from pages").fetchone()[0])
     upsert(con, pageid, ep=ep)
     try:
-        title, desc, text, pageimage = fetch_article(pageid)
-        print(f"[{ep:03d}] {title}\n  writing script…")
+        origin = row["origin"] or "wikipedia"
+        if origin == "wikipedia":
+            title, desc, text, pageimage = fetch_article(pageid)
+            src = dict(url=page_url(title), own=None)
+        else:
+            import sources
+            a = sources.fetch_article(origin, row["ref"])
+            title, desc, text, pageimage = a["title"], a["description"], a["text"], None
+            src = dict(url=a["url"], own=a["images"], credit=a["credit"], source_label=a["source_label"],
+                       popularity=a.get("popularity"))
+        print(f"[{ep:03d}] {title}" + ("" if origin == "wikipedia" else f"  [{origin}]") + "\n  writing script…")
         s = write_script(title, text)
         print(f"  \"{s['title']}\"\n  fetching images…")
-        images = fetch_images(title, pageimage, work)
+        images = fetch_images(title, pageimage, work, own=src.pop("own"))
         print(f"  {len(images)} images")
-        m = dict(ep=ep, pageid=pageid, article_title=title, description=desc, url=page_url(title),
-                 title=s["title"], script=s["script"], tags=s["tags"], images=images)
+        m = dict(ep=ep, pageid=pageid, origin=origin, article_title=title, description=desc,
+                 title=s["title"], script=s["script"], tags=s["tags"], images=images, **src)
         out = OUT / f"{ep:03d}-{re.sub(r'[^a-z0-9]+', '-', title.lower()).strip('-')[:50]}.mp4"
         produce(con, m, out)
     except BaseException as e:
@@ -1062,6 +1118,8 @@ def selftest():
     assert speakable("Henry VIII's wives; Apollo XI") == "Henry the Eighth's wives; Apollo Eleven"
     assert [roman(x) for x in ["II", "IV", "IX", "XIV", "XL", "XC", "LVII", "IIII", "VX", "IC"]] == [2, 4, 9, 14, 40, 90, 57, None, None, None]
     assert speakable("Mix of I and II") == "Mix of I and II"
+    import sources
+    sources.selftest()
     print("selftest ok")
 
 
@@ -1081,6 +1139,8 @@ def main():
     rr = sub.add_parser("rerender"); rr.add_argument("--ep", type=int, required=True)
     dc = sub.add_parser("discover"); dc.add_argument("--count", type=int, default=5)
     dc.add_argument("--topic"); dc.add_argument("--degree", choices=["1", "2", "3", "any"], default="any")
+    dc.add_argument("--source", choices=["wikipedia", "hackernews", "rss", "arxiv", "apod"], default="wikipedia")
+    dc.add_argument("--feed", help="RSS/Atom feed URL (for --source rss)")
     sc = sub.add_parser("score"); sc.add_argument("--all", action="store_true")
     wb = sub.add_parser("web"); wb.add_argument("--port", type=int, default=8765); wb.add_argument("--no-open", action="store_true")
     args = ap.parse_args()
@@ -1108,6 +1168,8 @@ def main():
         unpublish(con, args.ep, args.keep_local)
     elif args.cmd == "rerender":
         rerender(con, args.ep)
+    elif args.cmd == "discover" and args.source != "wikipedia":
+        discover_source(con, args.source, args.count, args.feed if args.source == "rss" else args.topic)
     elif args.cmd == "discover":
         if args.topic:
             explore(con, args.topic, args.degree, args.count)
