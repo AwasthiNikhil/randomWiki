@@ -4,6 +4,7 @@
   ./rw add URL [URL ...]                              queue curated pages
   ./rw discover [--count N] [--topic KEY --degree 1|2|3|any]   queue N Wikipedia ideas (random, or around a topic)
   ./rw discover --source hackernews|apod|arxiv --topic T|rss --feed URL   queue ideas from other sources
+  ./rw discover --source link --link URL              ideas from any link (feed, site, subreddit, category, list...)
   ./rw upload [--ep N] [--publish-at ISO]             upload every rendered video (or just episode N)
   ./rw auto [--dry-run]                               one scheduled run (make next video, upload)
   ./rw schedule                                       install/remove the launchd job from brand.json "schedule"
@@ -203,15 +204,28 @@ def discover(con, want=1):
 
 
 def discover_source(con, origin, want=5, arg=None):
-    """Queue up to `want` interesting items from another source (hackernews, rss, arxiv, apod)."""
+    """Queue up to `want` interesting items from another source (hackernews, rss, arxiv, apod, or any link)."""
     import sources
     cands = sources.discover(origin, want * 4, arg)
     print(f"{len(cands)} candidates from {origin}" + (f" ({arg})" if arg else ""))
+    if cands and cands[0]["origin"] == "topic":  # a Wikipedia article link: explore around it
+        return explore(con, cands[0]["ref"], "1", want)
     found = []
+    wiki_titles = [c["ref"] for c in cands if c["origin"] == "wikipedia"]
+    for i in range(0, len(wiki_titles), 20):  # Wikipedia items (category/list members, links in feeds): normal Wikipedia scoring
+        if len(found) >= want:
+            break
+        titles = [t.split("/wiki/", 1)[-1].replace("_", " ") for t in wiki_titles[i:i + 20]]
+        res = wiki(titles="|".join(urllib.parse.unquote(t) for t in titles), redirects=1, **CANDIDATE_PROPS)
+        for pg in res["query"]["pages"]:
+            if len(found) < want and evaluate(con, pg, "link", via=arg if origin == "link" else None):
+                found.append(pg["pageid"])
     for c in cands:
         if len(found) >= want:
             break
         origin_c = c["origin"]
+        if origin_c == "wikipedia":
+            continue
         try:
             a = sources.fetch_article(origin_c, c["ref"])
         except (SystemExit, Exception) as e:
@@ -220,7 +234,8 @@ def discover_source(con, origin, want=5, arg=None):
         pid = sources.synthetic_id(a["key"])
         if con.execute("select 1 from pages where pageid=?", (pid,)).fetchone():
             continue
-        base = dict(title=a["title"], url=a["url"], source=origin if origin == "rss" else "random", origin=a["origin"], ref=c["ref"])
+        base = dict(title=a["title"], url=a["url"], source=origin if origin in ("rss", "link") else "random",
+                    origin=a["origin"], ref=c["ref"], via=arg if origin == "link" else None)
         s = llm(SCORE_PROMPT.format(title=a["title"], text=a["text"][:3000], context=""), 0.2)
         score = int(s.get("score", 0) or 0)
         ok = score >= BRAND["min_score"]
@@ -1253,8 +1268,9 @@ def main():
     rr = sub.add_parser("rerender"); rr.add_argument("--ep", type=int, required=True)
     dc = sub.add_parser("discover"); dc.add_argument("--count", type=int, default=5)
     dc.add_argument("--topic"); dc.add_argument("--degree", choices=["1", "2", "3", "any"], default="any")
-    dc.add_argument("--source", choices=["wikipedia", "hackernews", "rss", "arxiv", "apod"], default="wikipedia")
+    dc.add_argument("--source", choices=["wikipedia", "link", "hackernews", "rss", "arxiv", "apod"], default="wikipedia")
     dc.add_argument("--feed", help="RSS/Atom feed URL (for --source rss)")
+    dc.add_argument("--link", help="any link (for --source link): feed, site, subreddit, Wikipedia category/list, ...")
     sc = sub.add_parser("score"); sc.add_argument("--all", action="store_true")
     wb = sub.add_parser("web"); wb.add_argument("--port", type=int, default=8765); wb.add_argument("--no-open", action="store_true")
     args = ap.parse_args()
@@ -1287,7 +1303,7 @@ def main():
     elif args.cmd == "rerender":
         rerender(con, args.ep)
     elif args.cmd == "discover" and args.source != "wikipedia":
-        discover_source(con, args.source, args.count, args.feed if args.source == "rss" else args.topic)
+        discover_source(con, args.source, args.count, {"rss": args.feed, "link": args.link}.get(args.source, args.topic))
     elif args.cmd == "discover":
         if args.topic:
             explore(con, args.topic, args.degree, args.count)

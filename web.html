@@ -265,7 +265,8 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
         <h4 style="margin:0;font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--muted)">Find ideas</h4>
         <div class="row">
           <select class="sort" id="qSource" aria-label="Source" style="margin-left:0">
-            <option value="wikipedia">Wikipedia</option><option value="hackernews">Hacker News (top stories)</option>
+            <option value="link">Any link: feed, site, subreddit, Wikipedia category or list…</option>
+            <option value="wikipedia" selected>Wikipedia</option><option value="hackernews">Hacker News (top stories)</option>
             <option value="apod">NASA Astronomy Picture of the Day</option><option value="arxiv">arXiv papers</option>
             <option value="rss">RSS / Atom feed</option>
           </select>
@@ -342,7 +343,7 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
                 <div class="seg" id="schDays" role="group" aria-label="Days of the week"></div></div>
               <div class="inline">
                 <label style="flex:1;min-width:min(220px,100%)">If the ideabank is empty, find an idea from
-                  <select id="schFb"><option value="wikipedia">Wikipedia (random, or a topic)</option><option value="hackernews">Hacker News</option>
+                  <select id="schFb"><option value="wikipedia">Wikipedia (random, or a topic)</option><option value="link">Any link (feed, site, subreddit, category…)</option><option value="hackernews">Hacker News</option>
                   <option value="apod">NASA APOD</option><option value="arxiv">arXiv (topic)</option><option value="rss">RSS feed (URL)</option></select></label>
                 <label style="flex:1;min-width:min(220px,100%)"><span id="schArgLabel">Topic (optional)</span><input id="schArg"></label>
               </div>
@@ -548,7 +549,9 @@ function renderQueue() {
             <a href="${esc(p.url)}" target="_blank" rel="noopener">${originName(p)} ↗</a>
           </div>
           ${p.reason && p.reason !== "curated" ? `<div class="qwhy">${esc(p.reason.replace(/^llm: /, ""))}</div>` : ""}
-          ${p.via ? `<div class="via">${p.via.split(" → ").length - 1}° · ${p.via.split(" → ").map((x, j, a) => j === 0 ? `<b>${esc(x)}</b>` : esc(x)).join(" → ")}</div>` : ""}
+          ${!p.via ? "" : p.via.includes(" → ")
+            ? `<div class="via">${p.via.split(" → ").length - 1}° · ${p.via.split(" → ").map((x, j) => j === 0 ? `<b>${esc(x)}</b>` : esc(x)).join(" → ")}</div>`
+            : `<div class="via">from <a href="${esc(p.via)}" target="_blank" rel="noopener">${esc(p.via.replace(/^https?:\/\/(www\.)?/, "").slice(0, 70))}</a></div>`}
         </div>
         <div class="qbtns">
           <button class="btn primary" data-make="${esc(p.url)}">Make now</button>
@@ -773,6 +776,7 @@ $("#makeUrl").onclick = () => { const u = $("#url").value.trim(); if (u) exec(`r
 $("#queueUrl").onclick = () => { const u = $("#url").value.trim(); if (u) exec(`add ${quote(u)}`).then(ok => ok && ($("#url").value = "")); };
 const publishArg = () => { const v = $("#publishAt").value; return v ? " --publish-at " + new Date(v).toISOString().replace(/\.\d+Z$/, "Z") : ""; };
 const SOURCE_HINT = {
+  link: "Paste any link: a blog, news section, RSS feed, r/subreddit, Wikipedia Category: or List of… page, HN list…",
   wikipedia: "Topic to explore, e.g. Nepal, jazz, black holes (empty = fully random)",
   hackernews: "No input needed: today's top stories", apod: "No input needed: latest Astronomy Pictures of the Day",
   arxiv: "Topic to search papers for, e.g. black holes", rss: "Feed URL, e.g. https://www.nasa.gov/feed/",
@@ -787,8 +791,8 @@ $("#qSource").onchange = syncSource;
 $("#qFind").onclick = () => {
   const src = $("#qSource").value, v = $("#qTopic").value.trim(), n = $("#qCount").value;
   if (src === "wikipedia") return exec(`discover --count ${n}` + (v ? ` --topic ${quote(v)} --degree ${qDegree}` : ""));
-  if (["arxiv", "rss"].includes(src) && !v) return termLine(`! ${src === "rss" ? "enter a feed URL" : "enter a topic"} first`, "err");
-  exec(`discover --source ${src} --count ${n}` + (src === "rss" ? ` --feed ${quote(v)}` : src === "arxiv" ? ` --topic ${quote(v)}` : ""));
+  if (["arxiv", "rss", "link"].includes(src) && !v) return termLine(`! ${src === "arxiv" ? "enter a topic" : "paste a link"} first`, "err");
+  exec(`discover --source ${src} --count ${n}` + (src === "rss" ? ` --feed ${quote(v)}` : src === "link" ? ` --link ${quote(v)}` : src === "arxiv" ? ` --topic ${quote(v)}` : ""));
 };
 $("#qDegree").onclick = e => {
   const b = e.target.closest("[data-deg]"); if (!b) return;
@@ -972,7 +976,7 @@ function renderSchedule() {
     + (sch.times.length < 4 ? `<button class="btn sm" type="button" id="tAdd">+ Add time</button>` : "");
   $("#schDays").innerHTML = DAY_NAMES.map((n, d) => `<button type="button" data-day="${d}" class="${sch.days.includes(d) ? "on" : ""}" aria-pressed="${sch.days.includes(d)}">${n}</button>`).join("");
   $("#schFb").value = sch.fallback; $("#schArg").value = sch.fallback_arg;
-  $("#schArgLabel").textContent = {wikipedia: "Topic (optional)", arxiv: "Topic", rss: "Feed URL"}[sch.fallback] || "No input needed";
+  $("#schArgLabel").textContent = {wikipedia: "Topic (optional)", arxiv: "Topic", rss: "Feed URL", link: "Link"}[sch.fallback] || "No input needed";
   $("#schArg").disabled = ["hackernews", "apod"].includes(sch.fallback);
   $("#schUp").checked = sch.upload; $("#schPub").hidden = $("#schPick").hidden = !sch.upload;
   document.querySelectorAll("[name=schPick]").forEach(r => r.checked = r.value === (sch.pick || "order"));

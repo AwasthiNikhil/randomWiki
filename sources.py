@@ -6,7 +6,7 @@ key is a stable unique id ("hackernews:8863"); credit goes in the YouTube descri
 video footer; images are free-licensed picks only (never a web page's own images: they are copyrighted);
 popularity (0-1, optional) feeds the potential score. Wikipedia itself stays on rw.py's optimised path.
 """
-import hashlib, html, math, re, urllib.parse, urllib.robotparser
+import hashlib, html, math, random, re, urllib.parse, urllib.robotparser
 import xml.etree.ElementTree as ET
 
 from rw import fetch, get_json
@@ -80,15 +80,37 @@ def fetch_web(url, extra_credit=""):
                 source_label=f"Source: {site}", images=[], popularity=None)
 
 
-# ---------- RSS / Atom feeds (items are web pages) ----------
+# ---------- RSS / Atom feeds ----------
+REDDIT_MEDIA = re.compile(r"//(www\.|old\.)?reddit\.com/|//(i|v|preview)\.redd\.it/|//redd\.it/")
+
+
+def parse_feed(data, limit):
+    """RSS/Atom bytes -> candidates. Each item is classified by its link (web, arXiv, Wikipedia, ...).
+    Reddit link posts use the article they point to; Reddit text/image posts are skipped (no source to credit)."""
+    root = ET.fromstring(data)
+    a = "{http://www.w3.org/2005/Atom}"
+    items = [(i.findtext("title"), i.findtext("link"), i.findtext("description") or "") for i in root.iter("item")]
+    for e in root.iter(a + "entry"):
+        link = next((l.get("href") for l in e.findall(a + "link") if l.get("rel", "alternate") == "alternate"), None)
+        items.append((e.findtext(a + "title"), link, e.findtext(a + "summary") or e.findtext(a + "content") or ""))
+    out = []
+    for title, link, body in items:
+        if not (title and link):
+            continue
+        if REDDIT_MEDIA.search(link):  # Reddit post: follow its "[link]" to the real source
+            src = re.findall(r'<a href="([^"]+)">\[link\]</a>', body)
+            if not src or REDDIT_MEDIA.search(src[0]):
+                continue
+            link = html.unescape(src[0])
+        origin, ref = detect(link.strip())
+        out.append(dict(origin=origin, ref=ref, title=strip_tags(title), summary=strip_tags(body)[:400]))
+        if len(out) >= limit:
+            break
+    return out
+
+
 def discover_rss(feed_url, limit):
-    root = ET.fromstring(fetch(feed_url))
-    ns = {"a": "http://www.w3.org/2005/Atom"}
-    items = [(i.findtext("title"), i.findtext("link"), i.findtext("description")) for i in root.iter("item")]
-    items += [(e.findtext("a:title", namespaces=ns), (e.find("a:link", ns).get("href") if e.find("a:link", ns) is not None else None),
-               e.findtext("a:summary", namespaces=ns)) for e in root.iter("{http://www.w3.org/2005/Atom}entry")]
-    return [dict(origin="web", ref=link.strip(), title=strip_tags(t), summary=strip_tags(s)[:400])
-            for t, link, s in items[:limit] if link and t]
+    return parse_feed(fetch(feed_url), limit)
 
 
 # ---------- Hacker News ----------
@@ -167,6 +189,81 @@ def fetch_apod(url):
                     credit=f'Based on NASA\'s Astronomy Picture of the Day "{title}": {a["url"]}')
 
 
+# ---------- any link: work out what it is, then find ideas in it ----------
+SKIP_PATH = re.compile(r"/(tags?|categor(y|ies)|topics?|authors?|about|contact|privacy|terms|login|sign-?in|sign-?up|"
+                       r"subscribe|search|account|newsletters?|feed|rss|page/\d+)(/|$)|\.(jpe?g|png|gif|svg|pdf|zip|mp[34])$", re.I)
+HN_LISTS = {"": "topstories", "news": "topstories", "best": "beststories", "newest": "newstories",
+            "show": "showstories", "ask": "askstories"}
+
+
+def page_links(html_text, base, limit):
+    """Article-looking links on a listing page (same site, headline-length text, not navigation)."""
+    host = urllib.parse.urlsplit(base).netloc.removeprefix("www.")
+    seen, out = set(), []
+    for href, inner in re.findall(r'<a\s[^>]*?href=["\']([^"\'#]+)["\'][^>]*>(.*?)</a>', html_text, re.S | re.I):
+        url, text = urllib.parse.urljoin(base, html.unescape(href)), strip_tags(inner)
+        u = urllib.parse.urlsplit(url)
+        path = u.path.rstrip("/")
+        if (u.scheme not in ("http", "https") or not u.netloc.removeprefix("www.").endswith(host) or SKIP_PATH.search(path)
+                or len(text) < 25 or path.count("/") < 1 or not re.search(r"[-_]|\d", path.rsplit("/", 1)[-1]) or url in seen):
+            continue
+        seen.add(url)
+        origin, ref = detect(url)
+        out.append(dict(origin=origin, ref=ref, title=text[:200], summary=""))
+        if len(out) >= limit:
+            break
+    return out
+
+
+def discover_link(url, limit):
+    """Any link -> (what it is, candidates). Candidates may be Wikipedia titles (origin "wikipedia")."""
+    import trafilatura
+    url = url.strip()
+    u = urllib.parse.urlsplit(url if "://" in url else "https://" + url)
+    host, path = u.netloc.removeprefix("www.").lower(), u.path
+    if host.endswith("wikipedia.org") and "/wiki/" in path:
+        title = urllib.parse.unquote(path.split("/wiki/", 1)[1]).replace("_", " ")
+        if title.startswith("Category:"):
+            r = get_json("https://en.wikipedia.org/w/api.php", {"action": "query", "format": "json", "formatversion": 2,
+                         "list": "categorymembers", "cmtitle": title, "cmtype": "page", "cmlimit": 500})
+            members = random.sample(r["query"]["categorymembers"], len(r["query"]["categorymembers"]))  # not just A, B, C...
+            return f"Wikipedia category ({title[9:]})", [dict(origin="wikipedia", ref=m["title"], title=m["title"], summary="")
+                                                        for m in members[:limit]]
+        if title.startswith(("List of", "Lists of", "Index of", "Outline of")):
+            r = get_json("https://en.wikipedia.org/w/api.php", {"action": "query", "format": "json", "formatversion": 2,
+                         "titles": title, "prop": "links", "plnamespace": 0, "pllimit": "max", "redirects": 1})
+            links = [l["title"] for pg in r["query"]["pages"] for l in pg.get("links", [])]
+            links = random.sample(links, len(links))
+            return f"Wikipedia list ({title})", [dict(origin="wikipedia", ref=t, title=t, summary="") for t in links[:limit]]
+        return "Wikipedia article: exploring around it", [dict(origin="topic", ref=title, title=title, summary="")]
+    if host == "news.ycombinator.com" and "item" not in path:
+        kind = HN_LISTS.get(path.strip("/"), "topstories")
+        ids = get_json(f"{HN}/{kind}.json")[:limit]
+        return f"Hacker News ({kind.replace('stories', '')})", [dict(origin="hackernews", ref=str(i), title=f"HN {i}", summary="") for i in ids]
+    if host == "arxiv.org" and (m := re.match(r"/list/([\w.\-]+)", path)):
+        return f"arXiv {m[1]}", discover_rss(f"https://rss.arxiv.org/rss/{m[1]}", limit)
+    if host in ("reddit.com", "old.reddit.com") and (m := re.match(r"/r/(\w+)", path)) and "/comments/" not in path:
+        return f"r/{m[1]}", discover_rss(f"https://www.reddit.com/r/{m[1]}/.rss", limit)
+    data = fetch(u.geturl())
+    head = data[:500].lstrip().lower()
+    if head.startswith(b"<?xml") or b"<rss" in head or b"<feed" in head:
+        return "feed", parse_feed(data, limit)
+    page = data.decode("utf-8", "ignore")
+    doc = trafilatura.bare_extraction(page, url=u.geturl())
+    text = ((doc if isinstance(doc, dict) else doc.as_dict() if doc else {}).get("text") or "")
+    links = page_links(page, u.geturl(), 40)
+    declared = re.search(r'og:type["\']\s+content=["\']article|"@type"\s*:\s*"(News|Blog|Scholarly|Reportage)?(Article|Posting)"', page, re.I)
+    if declared or (len(text) >= 1500 and path.strip("/") and len(links) < 10):  # an article, not a section/home page
+        origin, ref = detect(u.geturl())
+        return "single article", [dict(origin=origin, ref=ref, title=u.geturl(), summary="")]
+    feed = re.search(r'<link[^>]+type=["\']application/(?:rss|atom)\+xml["\'][^>]*>', page, re.I)
+    href = re.search(r'href=["\']([^"\']+)', feed[0]) if feed else None
+    if href:
+        feed_url = urllib.parse.urljoin(u.geturl(), html.unescape(href[1]))
+        return f"site feed ({feed_url})", discover_rss(feed_url, limit)
+    return "links on the page", links[:limit]
+
+
 # ---------- dispatch ----------
 FETCH = {"web": fetch_web, "hackernews": fetch_hackernews, "arxiv": fetch_arxiv, "apod": fetch_apod}
 
@@ -177,6 +274,12 @@ def fetch_article(origin, ref):
 
 def discover(origin, limit, arg=None):
     """Candidates [{origin, ref, title, summary}] from a source. arg = topic (arxiv) or feed URL (rss)."""
+    if origin == "link":
+        if not arg:
+            raise SystemExit("paste a link")
+        kind, cands = discover_link(arg, limit)
+        print(f"link is: {kind}")
+        return cands
     if origin == "rss":
         if not arg:
             raise SystemExit("rss needs a feed URL")
@@ -198,6 +301,14 @@ def selftest():  # link detection and id stability (no network)
     assert detect("https://example.com/story") == ("web", "https://example.com/story")
     assert synthetic_id("web:x") == synthetic_id("web:x") > 10 ** 12 > synthetic_id("web:y") - 10 ** 13
     assert strip_tags("<p>a &amp; <b>b</b></p>") == "a & b"
+    listing = ('<a href="/2026/11/why-octopuses-dream">Why octopuses dream, according to new sleep research</a>'
+               '<a href="/about">About us and our long editorial history here</a><a href="/tag/science">Science</a>'
+               '<a href="https://other.com/x-1">An external story that should be ignored entirely</a>')
+    assert [c["ref"] for c in page_links(listing, "https://news.example.com/", 10)] == ["https://news.example.com/2026/11/why-octopuses-dream"]
+    feed = (b'<feed xmlns="http://www.w3.org/2005/Atom"><entry><title>TIL emus won a war</title>'
+            b'<link href="https://www.reddit.com/r/todayilearned/comments/abc/til/"/><content>&lt;a href="https://en.wikipedia.org/wiki/Emu_War"&gt;[link]&lt;/a&gt;</content></entry>'
+            b'<entry><title>A selfie</title><link href="https://www.reddit.com/r/pics/comments/x/"/><content>&lt;a href="https://i.redd.it/x.jpg"&gt;[link]&lt;/a&gt;</content></entry></feed>')
+    assert [(c["origin"], c["ref"]) for c in parse_feed(feed, 10)] == [("wikipedia", "https://en.wikipedia.org/wiki/Emu_War")]
     assert clean_title("GitHub - gmkurtzer/ginux: A userspace kernel", "GitHub") == "gmkurtzer/ginux"
     assert clean_title("GitHub - gmkurtzer/ginux", "GitHub") == "gmkurtzer/ginux"
     assert clean_title("Why the sky is blue | The Atlantic", "The Atlantic") == "Why the sky is blue"

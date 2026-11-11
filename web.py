@@ -62,11 +62,11 @@ def save_brand(new):
         raise ValueError("automation needs at least one time and one day")
     if not all(HHMM.match(t) for t in times) or len(times) > 4 or not HHMM.match(str(sch.get("publish_time", ""))):
         raise ValueError("times must be HH:MM (up to 4 a day)")
-    if (sch.get("fallback") not in ("wikipedia", "hackernews", "apod", "arxiv", "rss") or sch.get("publish") not in ("private", "at")
+    if (sch.get("fallback") not in ("wikipedia", "link", "hackernews", "apod", "arxiv", "rss") or sch.get("publish") not in ("private", "at")
             or sch.get("pick", "order") not in ("order", "newest")):
         raise ValueError("unknown automation option")
-    if sch["fallback"] in ("arxiv", "rss") and not str(sch.get("fallback_arg", "")).strip():
-        raise ValueError(f"{sch['fallback']} needs a {'feed URL' if sch['fallback'] == 'rss' else 'topic'}")
+    if sch["fallback"] in ("arxiv", "rss", "link") and not str(sch.get("fallback_arg", "")).strip():
+        raise ValueError(f"{sch['fallback']} needs {'a topic' if sch['fallback'] == 'arxiv' else 'a link'}")
     b["schedule"] = {"enabled": bool(sch.get("enabled")), "times": times, "days": days, "upload": bool(sch.get("upload")),
                      "publish": sch["publish"], "publish_time": sch["publish_time"], "fallback": sch["fallback"],
                      "fallback_arg": str(sch.get("fallback_arg", "")).strip()[:300], "pick": sch.get("pick", "order")}

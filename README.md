@@ -21,6 +21,8 @@ Articles go in, and branded YouTube Shorts come out. Wikipedia is the main sourc
 | arXiv | papers matching a topic | the abstract (arXiv metadata is CC0) | Commons search, else a title card |
 | NASA APOD | the latest pictures (via NASA's RSS feed) | the explanation | search; APOD photos are often copyrighted, so they're not reused automatically |
 
+**Any link** (Find ideas → *Any link*, or `./rw discover --source link --link URL`) works out what you pasted: an RSS/Atom feed, a site or blog (its feed is found automatically), a subreddit (link posts are read from the article they point to), a Wikipedia `Category:` or `List of…` page (its articles), a Wikipedia article (explores around it), a Hacker News list, an arXiv listing, a single article, or any page that lists articles (news sections, blog indexes). Automation can use a link as its source when the ideabank is empty.
+
 Credits name the source and link back. Non-Wikipedia text is copyrighted by its authors: the narration is a short summary in new words, so review it before publishing.
 
 ```
