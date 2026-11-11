@@ -577,22 +577,71 @@ def roman(s):
     return n if 0 < n < 100 and canon == s else None
 
 
-def speakable(text):
-    """Text the voice model reads correctly: 'World War II' -> 'World War Two', 'Louis XIV' -> 'Louis the Fourteenth'."""
+NUM = r"\d+(?:\.\d+)*"
+SPEAK = re.compile(rf"(?P<num>(?<![\w.]){NUM}(?:\s*[–—]\s*{NUM})?)(?![\w])|(?P<rom>\b(?P<w>[A-Za-z]+) (?P<r>[IVXLC]{{1,7}})\b(?![\w-]))")
+
+
+def say_number(expr):
+    """'5.4–8.5' -> '5 point 4 to 8 point 5'; '5.4.8' -> '5 point 4 point 8'; '3.14' -> '3 point 1 4'."""
+    def one(x):
+        parts = x.split(".")
+        if len(parts) == 2:  # decimal: digits after the point are read one by one
+            return f"{parts[0]} point {' '.join(parts[1])}"
+        return " point ".join(parts)  # plain number, or a version like 5.4.8
+    return " to ".join(one(x) for x in re.split(r"\s*[–—]\s*", expr))
+
+
+def speakable_map(text):
+    """Text the voice reads correctly, plus [(written, spoken)] pairs in order, so captions can show what was written.
+    'World War II' -> 'World War Two', 'Louis XIV' -> 'Louis the Fourteenth', 'PHP 5.4–8.5' -> 'PHP 5 point 4 to 8 point 5'."""
+    pairs = []
+
     def fix(m):
-        word, num = m[1], m[2]
-        n = roman(num)
-        cardinal = word.lower() in CARDINAL_AFTER
-        regnal = word[0].isupper() and not cardinal  # names are capitalised: "Charles III", not "and II"
-        if not n or not (cardinal or regnal) or (not cardinal and num in ("I", "X", "C", "L")):  # "Malcolm X"
-            return m[0]
-        return f"{word} {number_words(n).title()}" if cardinal else f"{word} the {number_words(n, True).title()}"
-    return re.sub(r"\b([A-Za-z]+) ([IVXLC]{1,7})\b(?![\w-])", fix, text)
+        if m["num"]:
+            if "." not in m["num"] and not re.search("[–—]", m["num"]):
+                return m[0]  # plain numbers are read fine
+            spoken = say_number(m["num"])
+        else:
+            word, num = m["w"], m["r"]
+            n = roman(num)
+            cardinal = word.lower() in CARDINAL_AFTER
+            regnal = word[0].isupper() and not cardinal  # names are capitalised: "Charles III", not "and II"
+            if not n or not (cardinal or regnal) or (not cardinal and num in ("I", "X", "C", "L")):  # "Malcolm X"
+                return m[0]
+            spoken = f"{word} {number_words(n).title()}" if cardinal else f"{word} the {number_words(n, True).title()}"
+        pairs.append((m[0], spoken))
+        return spoken
+    return SPEAK.sub(fix, text), pairs
+
+
+def speakable(text):
+    return speakable_map(text)[0]
+
+
+def restore_written(words, pairs):
+    """Swap spoken caption words back to the written form: [5][point][4][to][8][point][5] -> [5.4–8.5], same timing."""
+    norm = lambda w: re.sub(r"\W", "", w.lower())
+    out, i = [], 0
+    for written, spoken in pairs:
+        target = [norm(t) for t in spoken.split()]
+        for j in range(i, len(words) - len(target) + 1):
+            if [norm(w[0]) for w in words[j:j + len(target)]] == target:
+                out += words[i:j]
+                span = words[j:j + len(target)]
+                tail = re.sub(r"^.*?(\W*)$", r"\1", span[-1][0])  # keep trailing punctuation for caption breaks
+                parts = written.split()
+                if len(parts) == len(span):  # 'World War II' over 'World War Two': word for word
+                    out += [[pw + (tail if k == len(span) - 1 else ""), w[1], w[2]] for k, (pw, w) in enumerate(zip(parts, span))]
+                else:  # one written token over several spoken words
+                    out.append([written + tail, span[0][1], span[-1][2]])
+                i = j + len(target)
+                break
+    return out + words[i:]
 
 
 def tts(text, dest):
-    """Kokoro narration -> wav + per-word timings [(word, start, end)]."""
-    text = speakable(text)
+    """Kokoro narration -> wav + per-word timings [(word, start, end)]; captions show the text as written."""
+    text, written = speakable_map(text)
     import numpy as np, soundfile as sf
     from kokoro import KPipeline
     pipe = KPipeline(lang_code=BRAND["voice_lang"], repo_id="hexgrad/Kokoro-82M")
@@ -616,6 +665,7 @@ def tts(text, dest):
             break
         speed = min(1.2, speed * dur / (BRAND["max_seconds"] - 1))
         print(f"  narration {dur:.1f}s too long, re-voicing at speed {speed:.2f}")
+    words = restore_written(words, written)
     audio.append(np.zeros(int(24000 * 0.5), dtype=audio[0].dtype))
     sf.write(dest, np.concatenate(audio), 24000)
     return words, dur
@@ -1245,6 +1295,14 @@ def selftest():
     assert speakable("Henry VIII's wives; Apollo XI") == "Henry the Eighth's wives; Apollo Eleven"
     assert [roman(x) for x in ["II", "IV", "IX", "XIV", "XL", "XC", "LVII", "IIII", "VX", "IC"]] == [2, 4, 9, 14, 40, 90, 57, None, None, None]
     assert speakable("Mix of I and II") == "Mix of I and II"
+    assert speakable("PHP versions 5.4–8.5 that") == "PHP versions 5 point 4 to 8 point 5 that"
+    assert speakable("PHP 5.4.8. Pi is 3.14 in 2026, from 1914–1918.") == "PHP 5 point 4 point 8. Pi is 3 point 1 4 in 2026, from 1914 to 1918."
+    spoken, pairs = speakable_map("in versions 5.4–8.5. World War II ended")
+    w = [[t, k, k + 1] for k, t in enumerate(spoken.replace(".", " .").split())]
+    w = [x for x in w if x[0] != "."]; w[8][0] += "."  # tokens as Kokoro gives them: punctuation on the word
+    got = restore_written(w, pairs)
+    assert [x[0] for x in got] == ["in", "versions", "5.4–8.5.", "World", "War", "II", "ended"], got
+    assert got[2][1:] == [2, 9] and got[5][1:] == [12, 13]
     import sources
     sources.selftest()
     from datetime import datetime, timezone
