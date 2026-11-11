@@ -1,9 +1,12 @@
-"""Shorts Machine: Wikipedia pages -> branded YouTube Shorts.
+"""Shorts Machine: Wikipedia pages, web articles, feeds, Hacker News, arXiv and NASA APOD -> branded YouTube Shorts.
 
   ./rw run [--url URL] [--upload] [--publish-at ISO]   make one video
   ./rw add URL [URL ...]                              queue curated pages
-  ./rw discover [--count N] [--topic KEY --degree 1|2|3|any]   queue N ideas (random, or around a topic)
+  ./rw discover [--count N] [--topic KEY --degree 1|2|3|any]   queue N Wikipedia ideas (random, or around a topic)
+  ./rw discover --source hackernews|apod|arxiv --topic T|rss --feed URL   queue ideas from other sources
   ./rw upload [--ep N] [--publish-at ISO]             upload every rendered video (or just episode N)
+  ./rw auto [--dry-run]                               one scheduled run (make next video, upload)
+  ./rw schedule                                       install/remove the launchd job from brand.json "schedule"
   ./rw unpublish --ep N [--keep-local]                delete an uploaded episode from YouTube (and locally)
   ./rw rerender --ep N                                re-voice/re-render from the saved (edited) script
   ./rw log [N]                                        show the page log
@@ -35,7 +38,7 @@ def fetch(url, params=None, data=None):
         try:
             with urllib.request.urlopen(req, timeout=300) as r:
                 return r.read()
-        except urllib.error.URLError as e:
+        except (urllib.error.URLError, TimeoutError, ConnectionError) as e:  # timeouts too: a slow LLM call is retried
             if attempt == 3 or getattr(e, "code", 0) in (400, 403, 404):
                 raise
             time.sleep(5 * (attempt + 1))  # Wikimedia rate-limits bursts (429)
@@ -56,7 +59,7 @@ def db():
         pageid integer primary key, title text, url text, source text, status text,
         score integer, reason text, ep integer, video_path text, video_id text,
         created text default current_timestamp, updated text default current_timestamp)""")
-    for col in ("potential integer", "rank integer", "via text"):  # added after v1; ignore if present
+    for col in ("potential integer", "rank integer", "via text", "origin text", "ref text", "upload_rank integer"):  # added after v1; ignore if present
         try:
             con.execute(f"alter table pages add column {col}")
         except sqlite3.OperationalError:
@@ -65,6 +68,7 @@ def db():
 
 
 QUEUE_ORDER = "order by rank is null, rank, source='curated' desc, created"  # manual drag order first
+UPLOAD_ORDER = "order by upload_rank is null, upload_rank, potential is null, potential desc, ep"  # your order, then best score
 
 
 def upsert(con, pageid, **f):
@@ -85,7 +89,7 @@ def llm(prompt, temperature=0.7):
     return json.loads(r["message"]["content"])
 
 
-SCORE_PROMPT = """You choose topics for a YouTube Shorts channel that turns random Wikipedia articles into 50-second stories.
+SCORE_PROMPT = """You choose topics for a YouTube Shorts channel that turns articles (Wikipedia, news, papers, blogs) into 50-second stories.
 Rate how likely this article is to make a viewer think "wait, what?".
 Most random articles (minor species, small villages, obscure athletes, routine politicians, ordinary companies, albums) score 1-4.
 Score 7+ only if the text contains a genuinely surprising fact, strange event, record, mystery, scandal or conflict.
@@ -95,12 +99,12 @@ Text: {text}
 
 Reply as JSON: {{"score": <1-10>, "hook": "<the single most surprising fact, one sentence>", "reason": "<short>"}}"""
 
-SCRIPT_PROMPT = """Write the narration for a YouTube Short about the Wikipedia article below.
+SCRIPT_PROMPT = """Write the narration for a YouTube Short about the article below.
 Rules:
 - 100 to 120 words (about 7 sentences of 15 words). Plain spoken English, short sentences, no lists, no emojis, no hashtags.
 - The first sentence is a hook of under 14 words built on the most surprising fact.
 - Tell it as a story with a payoff at the end. Use ONLY facts stated in the article. Do not invent anything.
-- Do not say "Wikipedia", "did you know", "in this video", or ask viewers to like or subscribe.
+- Do not say "Wikipedia", "this article", "did you know", "in this video", or ask viewers to like or subscribe.
 
 Article title: {title}
 Article text:
@@ -191,6 +195,37 @@ def discover(con, want=1):
     if not found:
         raise SystemExit("No interesting page found; run again.")
     print(f"found {len(found)} of {want}; run again for more")
+    return found
+
+
+def discover_source(con, origin, want=5, arg=None):
+    """Queue up to `want` interesting items from another source (hackernews, rss, arxiv, apod)."""
+    import sources
+    cands = sources.discover(origin, want * 4, arg)
+    print(f"{len(cands)} candidates from {origin}" + (f" ({arg})" if arg else ""))
+    found = []
+    for c in cands:
+        if len(found) >= want:
+            break
+        origin_c = c["origin"]
+        try:
+            a = sources.fetch_article(origin_c, c["ref"])
+        except (SystemExit, Exception) as e:
+            print(f"   –  {c['title'][:60]}  ({e})")
+            continue
+        pid = sources.synthetic_id(a["key"])
+        if con.execute("select 1 from pages where pageid=?", (pid,)).fetchone():
+            continue
+        base = dict(title=a["title"], url=a["url"], source=origin if origin == "rss" else "random", origin=a["origin"], ref=c["ref"])
+        s = llm(SCORE_PROMPT.format(title=a["title"], text=a["text"][:3000], context=""), 0.2)
+        score = int(s.get("score", 0) or 0)
+        ok = score >= BRAND["min_score"]
+        upsert(con, pid, status="queued" if ok else "rejected", score=score,
+               reason=f"llm: {s.get('hook') if ok else s.get('reason')}", **base)
+        print(f"  {score:>2}/10  {a['title'][:70]}" + ("  -> queued" if ok else ""))
+        if ok:
+            found.append(pid)
+    print(f"found {len(found)} of {want}")
     return found
 
 
@@ -301,15 +336,23 @@ def resolve(url_or_title):
 
 
 def add_curated(con, url, force=False, make_now=False):
-    pageid, title = resolve(url)
+    import sources
+    origin, ref = sources.detect(url)
+    if origin == "wikipedia":
+        pageid, title = resolve(url)
+        extra = dict(url=page_url(title), origin="wikipedia")
+    else:
+        a = sources.fetch_article(origin, ref)  # also validates the link has usable text
+        pageid, title = sources.synthetic_id(a["key"]), a["title"]
+        extra = dict(url=a["url"], origin=a["origin"], ref=ref)
     row = con.execute("select status from pages where pageid=?", (pageid,)).fetchone()
     if make_now and row and row["status"] == "queued":
         return pageid  # already waiting in the queue: just make it, keep its source/reason
     if row and row["status"] in ("rendered", "uploaded", "queued") and not force:
         print(f"skip: {title} is already {row['status']} (use --force)")
         return None
-    upsert(con, pageid, title=title, url=page_url(title), source="curated", status="queued", reason="curated")
-    print(f"queued: {title}")
+    upsert(con, pageid, title=title, source="curated", status="queued", reason="curated", **extra)
+    print(f"queued: {title}" + ("" if extra["origin"] == "wikipedia" else f"  [{extra['origin']}]"))
     return pageid
 
 
@@ -452,9 +495,10 @@ def download_image(img, dest):
     return {k: v for k, v in img.items() if k not in ("thumb", "tags")} | {"path": str(path)}
 
 
-def fetch_images(title, pageimage, dest, want=4, limit=6):
-    """Automatic pick: the article's own images, topped up from a Commons search, then on-topic Openverse."""
-    got = src_article(title, limit, pageimage)
+def fetch_images(title, pageimage, dest, want=4, limit=6, own=None):
+    """Automatic pick: the article's own images (Wikipedia, or `own` from another source),
+    topped up from a Commons search, then on-topic Openverse."""
+    got = list(own) if own is not None else src_article(title, limit, pageimage)
     for extra in (lambda: src_commons(title, 10), lambda: src_openverse(title, 10)):
         if len(got) >= want:
             break
@@ -685,7 +729,7 @@ def render(meta, words, audio_path, duration, out_path, frame_at=None):
     for line in dl:
         d.text((60, y), line, font=df, fill=C["muted"])
         y += df.size * 1.3
-    d.text((W // 2, 1878), "Source: Wikipedia · CC BY-SA 4.0", font=font("body", 28, "Medium"), fill=C["muted"], anchor="mm")
+    d.text((W // 2, 1878), meta.get("source_label") or "Source: Wikipedia · CC BY-SA 4.0", font=font("body", 28, "Medium"), fill=C["muted"], anchor="mm")
 
     mask = Image.new("L", (PW, PH), 0)
     ImageDraw.Draw(mask).rounded_rectangle((0, 0, PW, PH), 36, fill=255)
@@ -804,9 +848,9 @@ def render(meta, words, audio_path, duration, out_path, frame_at=None):
 # ---------- orchestration ----------
 def description(m):
     lines = [m["script"].split(". ")[0].rstrip(".") + ".", "",
-             f"Read the full article: {m['url']}", "",
+             f"Source: {m['url']}", "",
              f"Episode {m['ep']} of {BRAND['channel']}. {BRAND['tagline']}", "", "CREDITS",
-             f"Text adapted from the Wikipedia article \"{m['article_title']}\", CC BY-SA 4.0: {m['url']}"]
+             m.get("credit") or f"Text adapted from the Wikipedia article \"{m['article_title']}\", CC BY-SA 4.0: {m['url']}"]
     lines += [f"Image: \"{i['name']}\", {credit(i).replace(' · ', ', ')}: {i['page']}" for i in m["images"] if credit(i)]
     lines += ["Narration: AI voice (Kokoro TTS). Fonts: Anton, Inter (SIL OFL).", "",
               " ".join("#" + re.sub(r"\W", "", t) for t in BRAND["hashtags"] + m["tags"][:3])]
@@ -847,9 +891,15 @@ def score_video(con, pageid):
     row = con.execute("select * from pages where pageid=?", (pageid,)).fetchone()
     mpath = WORK / str(pageid) / "meta.json"
     m = json.loads(mpath.read_text())
-    p = wiki(pageids=pageid, prop="pageviews|langlinks", pvipdays=60, lllimit="max")["query"]["pages"][0]
-    views = sum(v or 0 for v in (p.get("pageviews") or {}).values())
-    langs = len(p.get("langlinks") or [])
+    if m.get("origin", "wikipedia") == "wikipedia":
+        p = wiki(pageids=pageid, prop="pageviews|langlinks", pvipdays=60, lllimit="max")["query"]["pages"][0]
+        views = sum(v or 0 for v in (p.get("pageviews") or {}).values())
+        langs = len(p.get("langlinks") or [])
+    else:
+        # ponytail: no pageviews/language editions outside Wikipedia; use the source's popularity
+        # (e.g. HN points) for demand, else a neutral midpoint, and a neutral reach
+        views = int(10 ** (5 * (m.get("popularity") if m.get("popularity") is not None else 0.5))) - 1
+        langs = 30
     hook_line = m["script"].split(". ")[0]
     a = llm(APPEAL_PROMPT.format(title=m["title"], hook=hook_line, topic=m["article_title"], desc=m.get("description", "")), 0.2)
     clamp = lambda v: max(1, min(10, int(v or 5)))
@@ -872,14 +922,23 @@ def make(con, pageid):
     ep = row["ep"] or (con.execute("select coalesce(max(ep), 0) + 1 from pages").fetchone()[0])
     upsert(con, pageid, ep=ep)
     try:
-        title, desc, text, pageimage = fetch_article(pageid)
-        print(f"[{ep:03d}] {title}\n  writing script…")
+        origin = row["origin"] or "wikipedia"
+        if origin == "wikipedia":
+            title, desc, text, pageimage = fetch_article(pageid)
+            src = dict(url=page_url(title), own=None)
+        else:
+            import sources
+            a = sources.fetch_article(origin, row["ref"])
+            title, desc, text, pageimage = a["title"], a["description"], a["text"], None
+            src = dict(url=a["url"], own=a["images"], credit=a["credit"], source_label=a["source_label"],
+                       popularity=a.get("popularity"))
+        print(f"[{ep:03d}] {title}" + ("" if origin == "wikipedia" else f"  [{origin}]") + "\n  writing script…")
         s = write_script(title, text)
         print(f"  \"{s['title']}\"\n  fetching images…")
-        images = fetch_images(title, pageimage, work)
+        images = fetch_images(title, pageimage, work, own=src.pop("own"))
         print(f"  {len(images)} images")
-        m = dict(ep=ep, pageid=pageid, article_title=title, description=desc, url=page_url(title),
-                 title=s["title"], script=s["script"], tags=s["tags"], images=images)
+        m = dict(ep=ep, pageid=pageid, origin=origin, article_title=title, description=desc,
+                 title=s["title"], script=s["script"], tags=s["tags"], images=images, **src)
         out = OUT / f"{ep:03d}-{re.sub(r'[^a-z0-9]+', '-', title.lower()).strip('-')[:50]}.mp4"
         produce(con, m, out)
     except BaseException as e:
@@ -903,6 +962,107 @@ def produce(con, m, out):
     render(m, words, work / "voice.wav", dur, out)
     upsert(con, m["pageid"], status="rendered", video_path=str(out))
     print(f"  done: {out}")
+
+
+# ---------- automation (macOS launchd) ----------
+SCHEDULE_DEFAULTS = {"enabled": False, "times": ["09:00"], "days": [0, 1, 2, 3, 4, 5, 6], "upload": True,
+                     "publish": "private", "publish_time": "15:00", "fallback": "wikipedia", "fallback_arg": "",
+                     "pick": "order"}  # pick: "order" = top of the Queue (ready videos), "newest" = the video this run made
+LAUNCH_LABEL = "com.shortsmachine.auto"
+LAUNCH_PLIST = Path.home() / "Library" / "LaunchAgents" / f"{LAUNCH_LABEL}.plist"
+AUTO_LOG = DB.parent / "auto.log"
+
+
+def schedule_settings():
+    return SCHEDULE_DEFAULTS | BRAND.get("schedule", {})
+
+
+def notify(msg):
+    import subprocess
+    safe = msg.replace("\\", "").replace('"', "'")[:200]
+    subprocess.run(["osascript", "-e", f'display notification "{safe}" with title "Shorts Machine"'], capture_output=True)
+
+
+def schedule_apply():
+    """Install (or remove) the launchd job that runs `rw auto` at the scheduled times."""
+    import os, plistlib, subprocess
+    sch, domain = schedule_settings(), f"gui/{os.getuid()}"
+    subprocess.run(["launchctl", "bootout", domain, str(LAUNCH_PLIST)], capture_output=True)  # drop any old job
+    if not sch["enabled"]:
+        LAUNCH_PLIST.unlink(missing_ok=True)
+        print("automation is off (launchd job removed)")
+        return
+    days = sorted(set(sch["days"]))
+    slots = [dict(Hour=int(t[:2]), Minute=int(t[3:])) for t in sch["times"]]
+    # launchd: Weekday 0 = Sunday; leave it out when every day is selected
+    intervals = slots if len(days) == 7 else [s | {"Weekday": d} for s in slots for d in days]
+    LAUNCH_PLIST.parent.mkdir(parents=True, exist_ok=True)
+    with open(LAUNCH_PLIST, "wb") as f:
+        plistlib.dump({"Label": LAUNCH_LABEL, "ProgramArguments": ["/bin/bash", str(ROOT / "rw"), "auto"],
+                       "WorkingDirectory": str(ROOT), "StartCalendarInterval": intervals,
+                       "StandardOutPath": str(AUTO_LOG), "StandardErrorPath": str(AUTO_LOG),
+                       "EnvironmentVariables": {"PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"}}, f)
+    r = subprocess.run(["launchctl", "bootstrap", domain, str(LAUNCH_PLIST)], capture_output=True, text=True)
+    if r.returncode:
+        raise SystemExit(f"launchctl refused the job: {r.stderr.strip()}")
+    print(f"automation on: {', '.join(sch['times'])} on {'every day' if len(days) == 7 else ', '.join('Sun Mon Tue Wed Thu Fri Sat'.split()[d] for d in days)}"
+          f"; job {LAUNCH_LABEL}, log data/auto.log")
+
+
+def schedule_loaded():
+    import os, subprocess
+    return subprocess.run(["launchctl", "print", f"gui/{os.getuid()}/{LAUNCH_LABEL}"], capture_output=True).returncode == 0
+
+
+def publish_time_utc(hhmm, min_gap_hours=2):
+    """Next local HH:MM at least `min_gap_hours` from now (time to review), as YouTube's UTC timestamp."""
+    from datetime import datetime, timedelta, timezone
+    now = datetime.now().astimezone()
+    t = now.replace(hour=int(hhmm[:2]), minute=int(hhmm[3:]), second=0, microsecond=0)
+    while t < now + timedelta(hours=min_gap_hours):
+        t += timedelta(days=1)
+    return t.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def auto(con, dry_run=False):
+    """One scheduled run: make the next queued video (discovering one if the queue is empty), then upload."""
+    import fcntl
+    sys.stdout.reconfigure(line_buffering=True)  # launchd writes to data/auto.log; show progress as it happens
+    lock = open(DB.parent / "auto.lock", "w")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        raise SystemExit("another automated run is still going; skipping this one")
+    sch = schedule_settings()
+    print(f"=== automated run {time.strftime('%Y-%m-%d %H:%M')}" + (" (dry run)" if dry_run else ""))
+    try:
+        row = con.execute(f"select pageid, title from pages where status='queued' {QUEUE_ORDER} limit 1").fetchone()
+        when = publish_time_utc(sch["publish_time"]) if sch["publish"] == "at" else None
+        plan = (f"make: {row['title']}" if row else f"queue empty: discover 1 idea from {sch['fallback']}"
+                + (f" ({sch['fallback_arg']})" if sch["fallback_arg"] else ""))
+        ready = con.execute(f"select ep, title from pages where status='rendered' {UPLOAD_ORDER} limit 1").fetchone()
+        which = ("the video it makes" if sch["pick"] == "newest" or not ready
+                 else f"EP {ready['ep']:03d} {ready['title']} (top of the Queue)")
+        plan += f"; then {'upload ' + which + (', public at ' + when + ' UTC' if when else ', private') if sch['upload'] else 'no upload'}"
+        print(plan)
+        if dry_run:
+            return
+        if row:
+            pid = row["pageid"]
+        elif sch["fallback"] == "wikipedia":
+            pid = (explore(con, sch["fallback_arg"], "any", 1) if sch["fallback_arg"] else discover(con, 1))[0]
+        else:
+            pid = discover_source(con, sch["fallback"], 1, sch["fallback_arg"] or None)[0]
+        make(con, pid)
+        if sch["upload"]:
+            pick = (f"select ep from pages where status='rendered' {UPLOAD_ORDER} limit 1" if sch["pick"] == "order"
+                    else f"select ep from pages where pageid={int(pid)}")
+            upload_pending(con, when, con.execute(pick).fetchone()["ep"])
+        print("=== done")
+    except BaseException as e:
+        notify(f"Automated run failed: {e}")
+        print(f"=== failed: {type(e).__name__}: {e}")
+        raise
 
 
 def preview(con):
@@ -1022,9 +1182,9 @@ def upload(con, pageid, publish_at=None):
 
 
 def upload_pending(con, publish_at=None, ep=None):
-    """Upload every rendered-but-not-uploaded video (or just episode `ep`), best potential first."""
+    """Upload every rendered-but-not-uploaded video (or just episode `ep`) in the Publish order."""
     rows = con.execute("select pageid, ep, title from pages where status='rendered' and (? is null or ep=?) "
-                       "order by potential is null, potential desc, ep",
+                       + UPLOAD_ORDER,
                        (ep, ep)).fetchall()
     if not rows:
         print(f"episode {ep} is not ready to upload" if ep else "nothing to upload")
@@ -1062,6 +1222,12 @@ def selftest():
     assert speakable("Henry VIII's wives; Apollo XI") == "Henry the Eighth's wives; Apollo Eleven"
     assert [roman(x) for x in ["II", "IV", "IX", "XIV", "XL", "XC", "LVII", "IIII", "VX", "IC"]] == [2, 4, 9, 14, 40, 90, 57, None, None, None]
     assert speakable("Mix of I and II") == "Mix of I and II"
+    import sources
+    sources.selftest()
+    from datetime import datetime, timezone
+    when = datetime.strptime(publish_time_utc("15:00"), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    assert 2 * 3600 <= (when - datetime.now(timezone.utc)).total_seconds() <= 26 * 3600 + 60
+    assert when.astimezone().strftime("%H:%M") == "15:00"
     print("selftest ok")
 
 
@@ -1075,12 +1241,16 @@ def main():
     lg = sub.add_parser("log"); lg.add_argument("n", nargs="?", type=int, default=30)
     sub.add_parser("selftest")
     sub.add_parser("preview")
+    au = sub.add_parser("auto"); au.add_argument("--dry-run", action="store_true")
+    sub.add_parser("schedule")
     vt = sub.add_parser("voicetest"); vt.add_argument("--text")
     up = sub.add_parser("unpublish"); up.add_argument("--ep", type=int, required=True)
     up.add_argument("--keep-local", action="store_true")
     rr = sub.add_parser("rerender"); rr.add_argument("--ep", type=int, required=True)
     dc = sub.add_parser("discover"); dc.add_argument("--count", type=int, default=5)
     dc.add_argument("--topic"); dc.add_argument("--degree", choices=["1", "2", "3", "any"], default="any")
+    dc.add_argument("--source", choices=["wikipedia", "hackernews", "rss", "arxiv", "apod"], default="wikipedia")
+    dc.add_argument("--feed", help="RSS/Atom feed URL (for --source rss)")
     sc = sub.add_parser("score"); sc.add_argument("--all", action="store_true")
     wb = sub.add_parser("web"); wb.add_argument("--port", type=int, default=8765); wb.add_argument("--no-open", action="store_true")
     args = ap.parse_args()
@@ -1100,6 +1270,10 @@ def main():
             print(f"{row['status']:<9} {row['score'] or '':>2} {row['source']:<8} {row['pageid']:>9}  "
                   f"{row['title'][:45]:<45}  {(row['reason'] or '')[:60]}")
         print(dict(con.execute("select status, count(*) from pages group by status").fetchall()))
+    elif args.cmd == "auto":
+        auto(con, args.dry_run)
+    elif args.cmd == "schedule":
+        schedule_apply()
     elif args.cmd == "preview":
         preview(con)
     elif args.cmd == "voicetest":
@@ -1108,6 +1282,8 @@ def main():
         unpublish(con, args.ep, args.keep_local)
     elif args.cmd == "rerender":
         rerender(con, args.ep)
+    elif args.cmd == "discover" and args.source != "wikipedia":
+        discover_source(con, args.source, args.count, args.feed if args.source == "rss" else args.topic)
     elif args.cmd == "discover":
         if args.topic:
             explore(con, args.topic, args.degree, args.count)

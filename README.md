@@ -1,6 +1,6 @@
 # Shorts Machine
 
-Wikipedia pages go in, and branded YouTube Shorts come out. Everything runs locally and costs nothing.
+Articles go in, and branded YouTube Shorts come out. Wikipedia is the main source; any web article, RSS/Atom feeds, Hacker News, arXiv and NASA's Astronomy Picture of the Day also work. Everything runs locally and costs nothing.
 
 1. **Pick:** random articles, or ideas found around a topic through its Wikipedia link network (1–3 hops). Stubs, lists and disambiguation pages are dropped, and a local LLM scores the rest out of 10.
 2. **Log:** every page that comes up is stored in SQLite with a status and the reason, so nothing is ever processed twice.
@@ -10,6 +10,26 @@ Wikipedia pages go in, and branded YouTube Shorts come out. Everything runs loca
 6. **Render:** a branded 1080×1920 layout drawn with Pillow and encoded with ffmpeg.
 7. **Score:** each video gets a 0–100 potential score from topic demand, hook, appeal, reach, visuals and length.
 8. **Publish:** YouTube Data API upload, private or scheduled, best potential first. Credits go into the description automatically.
+
+## Sources
+| Source | Find ideas | What the script is written from | Images |
+|---|---|---|---|
+| Wikipedia | random, or a topic's link network (1–3 hops) | the article | the article's own, then Commons |
+| Any web page | paste a link | the page's main text (extracted with trafilatura; robots.txt respected) | Commons/Openverse search, never the page's own images |
+| RSS / Atom | the latest items of a feed URL | each item's linked page | as web |
+| Hacker News | today's top stories | the linked article, or the post text | as web |
+| arXiv | papers matching a topic | the abstract (arXiv metadata is CC0) | Commons search, else a title card |
+| NASA APOD | the latest pictures (via NASA's RSS feed) | the explanation | search; APOD photos are often copyrighted, so they're not reused automatically |
+
+Credits name the source and link back. Non-Wikipedia text is copyrighted by its authors: the narration is a short summary in new words, so review it before publishing.
+
+```
+./rw run --url https://news.ycombinator.com/item?id=8863     # any supported link works
+./rw discover --source hackernews --count 5
+./rw discover --source rss --feed https://www.nasa.gov/feed/
+./rw discover --source arxiv --topic "dark matter"
+./rw discover --source apod
+```
 
 ## Requirements
 - macOS or Linux, about 2 GB of disk, `curl` and `bash`
@@ -32,7 +52,8 @@ The voice model (about 300 MB) downloads on the first render.
 ## Studio (`./rw web`)
 A local web UI. It's bound to 127.0.0.1 and runs the same commands as the CLI, streaming their output into a terminal panel.
 - **Episodes:** previews you can search, filter and sort by potential. Open one to watch it, edit its title, narration and visuals, then **Save & re-render**. You can also upload it, skip it, delete it, or delete it from YouTube.
-- **Queue:** what gets made next. Drag to reorder, paste links in bulk, or **Find ideas** randomly or around a topic, with a degree-of-relation control.
+- **Queue:** videos ready to upload, in the order they'll go out. Drag to reorder; videos you haven't placed are sorted by potential score. **Upload pending** and scheduled runs take from the top.
+- **Ideabank:** what gets made next. Drag to reorder, paste links in bulk, or **Find ideas** randomly or around a topic, with a degree-of-relation control.
 - **Page log:** every page seen, with reasons. Sortable and searchable, with multi-select delete. Uploaded pages are always kept.
 - **Settings:** channel, colours, Google Fonts, voice, music, LLM and thresholds, with a real-frame preview.
 
@@ -50,6 +71,8 @@ A local web UI. It's bound to 127.0.0.1 and runs the same commands as the CLI, s
 ./rw preview                  # render one frame with the saved brand settings -> data/preview.png
 ./rw voicetest [--text ...]   # speak a sample with the saved voice -> data/voice_preview.wav
 ./rw log [N]                  # rejected / queued / rendered / uploaded / failed, with reasons
+./rw auto [--dry-run]         # one scheduled run: make the next video (discover one if the queue is empty), upload
+./rw schedule                 # install/remove the launchd job from brand.json's schedule
 ./rw web [--port 8765]        # the studio
 ./rw selftest
 ```
@@ -74,17 +97,17 @@ New settings apply to new renders. Use **Save & re-render** on a video to update
 
 Videos upload **private**, or scheduled with `--publish-at`. Until the project passes YouTube's API audit, YouTube keeps API uploads private. Quota allows about 6 uploads a day (deleting costs 50 units). The first `unpublish` asks Google once for the extra "manage videos" permission.
 
-## Daily automation
-Keep Ollama running and add this with `crontab -e`:
-```
-0 9 * * * /path/to/shorts-machine/rw run --upload >> /path/to/shorts-machine/data/cron.log 2>&1
-```
-cron skips a run while the Mac is asleep. A launchd job catches up on wake instead.
+## Automation
+In the studio go to **Settings → Automation**: turn it on, pick up to 4 times a day and the weekdays, choose where ideas come from when the ideabank is empty, and choose whether to upload. Each run publishes either the top of your **Queue** or the video it just made, kept private or public at a set time at least 2 hours later, so you can review it. **Save** installs a macOS launchd job (`~/Library/LaunchAgents/com.shortsmachine.auto.plist`); turning it off removes the job.
+- It runs `./rw auto` even when the studio is closed. If the Mac is asleep at that time, it runs when it wakes. Keep Ollama running.
+- Output goes to `data/auto.log`, and the last runs are shown in Settings. A failed run shows a macOS notification. Overlapping runs are skipped.
+- `./rw auto --dry-run` shows what the next run would do. `./rw schedule` applies the `brand.json` schedule from the command line.
 
 ## Files
 | Path | What |
 |---|---|
 | `rw.py` | the pipeline and CLI |
+| `sources.py` | non-Wikipedia sources: web, RSS, Hacker News, arXiv, APOD |
 | `web.py`, `web.html` | the studio (Python standard library server and a single page) |
 | `rw` | wrapper that runs `rw.py` with the project's own Python |
 | `brand.json` | channel identity and settings |

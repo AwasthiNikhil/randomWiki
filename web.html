@@ -157,6 +157,10 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
 .grip { cursor: grab; background: none; border: 0; color: var(--muted); font-size: 18px; padding: 4px; line-height: 1; border-radius: 6px; }
 .grip:focus-visible { outline: 2px solid var(--accent); }
 .qitem.dragging { opacity: .4; }
+.qitem.pitem { grid-template-columns: 22px 34px 54px 1fr auto; }
+.pthumb { width: 54px; aspect-ratio: 9 / 16; border-radius: 6px; overflow: hidden; background: var(--panel2); }
+.pthumb video { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; }
+@media (max-width: 640px) { .qitem, .qitem.pitem { grid-template-columns: 22px 1fr; } .qitem .qpos, .pthumb { display: none; } .qbtns { grid-column: 1 / -1; } }
 .qitem { display: grid; grid-template-columns: 22px 34px 1fr auto; gap: 14px; align-items: center; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
 .qitem.next { border-color: var(--accent); }
 .qpos { font: 20px Anton; color: var(--muted); text-align: center; }
@@ -179,7 +183,7 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
 .scard legend { padding: 0 6px; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); font-weight: 600; }
 .sform label { display: grid; gap: 5px; font-size: 13px; color: var(--muted); }
 .sform label small { opacity: .75; }
-.sform input:not([type=range]):not([type=color]):not([type=file]), .sform select, .sform textarea {
+.sform input:not([type=range]):not([type=color]):not([type=file]):not([type=radio]):not([type=checkbox]), .sform select, .sform textarea {
   background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; color: var(--text); font: inherit; width: 100%; }
 .sform input:focus, .sform select:focus, .sform textarea:focus { outline: none; border-color: var(--accent); }
 .sform input[type=range] { accent-color: var(--accent); }
@@ -187,14 +191,26 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
 .colors { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; }
 .crow { display: flex; gap: 8px; align-items: center; }
 .crow input[type=color] { width: 40px; height: 36px; border: 1px solid var(--line); border-radius: 8px; background: none; padding: 2px; cursor: pointer; flex: none; }
-.frole { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; }
+#fontRoles { grid-template-columns: minmax(0, 1fr); }
+.sform select, .sform input, .sform textarea { max-width: 100%; min-width: 0; }
+.frole { min-width: 0; display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; }
 .frole .sample { font-size: 26px; color: var(--text); flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .frole .who { font-size: 12px; color: var(--muted); width: 120px; flex: none; }
+@media (max-width: 640px) { .frole { flex-wrap: wrap; } .frole .who { width: 100%; } .frole .sample { font-size: 20px; } }
 .flist { display: grid; gap: 4px; max-height: 340px; overflow: auto; margin-top: 8px; }
 .fitem { display: flex; justify-content: space-between; align-items: center; gap: 10px; background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; cursor: pointer; text-align: left; color: var(--text); }
 .fitem:hover { border-color: var(--accent); }
 .fitem span { font-size: 22px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .fitem small { color: var(--muted); font: 11px Inter, sans-serif; flex: none; }
+.check { display: flex !important; align-items: center; gap: 8px; color: var(--text) !important; font-size: 14px !important; cursor: pointer; }
+.check input { width: 16px !important; height: 16px; accent-color: var(--accent); }
+.tchip { display: inline-flex; gap: 2px; align-items: center; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 2px 4px 2px 2px; }
+.tchip input { border: 0 !important; padding: 5px 6px !important; width: auto !important; background: transparent !important; color-scheme: dark; }
+.tchip button { background: none; border: 0; color: var(--muted); cursor: pointer; padding: 2px 6px; }
+.schlog { font: 12px/1.5 var(--mono); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; max-height: 170px; overflow: auto; margin: 0; white-space: pre-wrap; color: var(--muted); }
+.sform label.radio { display: flex; gap: 8px; align-items: center; color: var(--text); font-size: 14px; flex-wrap: wrap; }
+.radio input[type=radio] { accent-color: var(--accent); }
+.radio input[type=time] { color-scheme: dark; width: auto !important; }
 .dirty { color: var(--accent); }
 @media (max-width: 1200px) { .settings { grid-template-columns: 1fr; } .spreview { position: static; max-width: 300px; } }
 @media (max-width: 900px) {
@@ -220,7 +236,8 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
   <main>
     <div class="tabs" role="tablist">
       <button class="tab on" data-tab="episodes" role="tab">Episodes</button>
-      <button class="tab" data-tab="queue" role="tab" id="queueTab">Queue</button>
+      <button class="tab" data-tab="queue" role="tab" id="queueTab">Ideabank</button>
+      <button class="tab" data-tab="publish" role="tab" id="publishTab">Queue</button>
       <button class="tab" data-tab="log" role="tab">Page log</button>
       <button class="tab" data-tab="settings" role="tab">Settings</button>
     </div>
@@ -235,18 +252,27 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
       </div>
       <div id="epGrid"></div>
     </section>
+    <section id="publish" hidden>
+      <p class="hint" style="margin:0 0 14px">Videos ready to upload, in the order they'll be published. <b>Upload pending</b> and scheduled runs take from the top. Drag to reorder. Videos you haven't placed are sorted by potential score.</p>
+      <div id="pList"></div>
+    </section>
     <section id="queue" hidden>
       <div class="qadd">
-        <textarea id="qText" placeholder="Paste Wikipedia links or titles, one per line, to queue them" aria-label="Links to queue"></textarea>
-        <button class="btn primary" id="qAdd">Add to queue</button>
+        <textarea id="qText" placeholder="Paste links (Wikipedia, any article, Hacker News, arXiv, APOD) or Wikipedia titles, one per line" aria-label="Links to add to the ideabank"></textarea>
+        <button class="btn primary" id="qAdd">Add to ideabank</button>
       </div>
       <div class="explore">
         <h4 style="margin:0;font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--muted)">Find ideas</h4>
         <div class="row">
-          <input id="qTopic" placeholder="Topic to explore, e.g. Nepal, jazz, black holes (empty = fully random)" aria-label="Topic">
+          <select class="sort" id="qSource" aria-label="Source" style="margin-left:0">
+            <option value="wikipedia">Wikipedia</option><option value="hackernews">Hacker News (top stories)</option>
+            <option value="apod">NASA Astronomy Picture of the Day</option><option value="arxiv">arXiv papers</option>
+            <option value="rss">RSS / Atom feed</option>
+          </select>
+          <input id="qTopic" placeholder="Topic to explore, e.g. Nepal, jazz, black holes (empty = fully random)" aria-label="Topic or feed URL">
         </div>
         <div class="row" style="align-items:center">
-          <span class="count">Degree of relation</span>
+          <span class="count" id="qDegLabel">Degree of relation</span>
           <div class="seg" id="qDegree" role="radiogroup" aria-label="Degree of relation">
             <button data-deg="1" class="on" title="Pages the topic links to, that link to it, or mention it">1 · direct</button>
             <button data-deg="2" title="One hop further: linked from those pages">2</button>
@@ -282,7 +308,7 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
               <select name="display_weight"><option>Regular</option><option>Medium</option><option>SemiBold</option><option>Bold</option><option>ExtraBold</option><option>Black</option></select></label>
             <div id="fontPick" hidden>
               <div class="inline"><b id="fpRole" style="font-size:13px"></b>
-                <input id="fq" placeholder="Search Google Fonts…" style="flex:1;min-width:160px" aria-label="Search fonts">
+                <input id="fq" placeholder="Search Google Fonts…" style="flex:1;min-width:min(160px,100%)" aria-label="Search fonts">
                 <select id="fcat" style="width:auto" aria-label="Font category"><option value="">All styles</option><option>Sans Serif</option><option>Serif</option><option>Display</option><option>Handwriting</option><option>Monospace</option></select>
                 <button class="btn sm" type="button" id="fclose">Close</button></div>
               <div class="flist" id="flist"></div>
@@ -290,8 +316,8 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
           </fieldset>
           <fieldset class="scard"><legend>Voice</legend>
             <div class="inline">
-              <label style="flex:1;min-width:200px">Voice<select name="voice" id="voiceSel"></select></label>
-              <label style="flex:1;min-width:200px">Speed <output id="speedOut"></output><input type="range" name="voice_speed" min="0.7" max="1.3" step="0.05"></label>
+              <label style="flex:1;min-width:min(200px,100%)">Voice<select name="voice" id="voiceSel"></select></label>
+              <label style="flex:1;min-width:min(200px,100%)">Speed <output id="speedOut"></output><input type="range" name="voice_speed" min="0.7" max="1.3" step="0.05"></label>
             </div>
             <div class="inline"><button class="btn" type="button" id="hear">Save &amp; hear it</button><audio id="voiceAudio" controls hidden></audio></div>
           </fieldset>
@@ -306,6 +332,36 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
             <label style="max-width:320px">Local LLM <small>from Ollama</small><select name="llm" id="llmSel"></select></label>
             <label style="max-width:320px">Minimum interest score <output id="scoreOut"></output><input type="range" name="min_score" min="1" max="10" step="1"></label>
             <label style="max-width:320px">Maximum video length <small>seconds</small><input type="number" name="max_seconds" min="20" max="175"></label>
+          </fieldset>
+          <fieldset class="scard"><legend>Automation</legend>
+            <label class="check"><input type="checkbox" id="schOn"> Make videos automatically on a schedule</label>
+            <div id="schBody" style="display:grid;gap:12px">
+              <div><div class="hint" style="margin-bottom:6px">Times · up to 4 a day</div>
+                <div class="inline" id="schTimes"></div></div>
+              <div><div class="hint" style="margin-bottom:6px">Days</div>
+                <div class="seg" id="schDays" role="group" aria-label="Days of the week"></div></div>
+              <div class="inline">
+                <label style="flex:1;min-width:min(220px,100%)">If the ideabank is empty, find an idea from
+                  <select id="schFb"><option value="wikipedia">Wikipedia (random, or a topic)</option><option value="hackernews">Hacker News</option>
+                  <option value="apod">NASA APOD</option><option value="arxiv">arXiv (topic)</option><option value="rss">RSS feed (URL)</option></select></label>
+                <label style="flex:1;min-width:min(220px,100%)"><span id="schArgLabel">Topic (optional)</span><input id="schArg"></label>
+              </div>
+              <label class="check"><input type="checkbox" id="schUp"> Upload to YouTube after making</label>
+              <div id="schPick" style="display:grid;gap:6px;padding-left:24px">
+                <span class="hint">Each run publishes</span>
+                <label class="radio"><input type="radio" name="schPick" value="order"> the next video in your <b>Queue</b> (top first)</label>
+                <label class="radio"><input type="radio" name="schPick" value="newest"> the video that run just made</label>
+              </div>
+              <div id="schPub" style="display:grid;gap:6px;padding-left:24px">
+                <label class="radio"><input type="radio" name="schPub" value="private"> Keep private (you publish it yourself)</label>
+                <label class="radio"><input type="radio" name="schPub" value="at"> Go public at <input type="time" id="schPubTime" aria-label="Publish time">
+                  <span class="hint">next time at least 2 h after it's made, so you can review it</span></label>
+              </div>
+            </div>
+            <div class="hint" id="schStatus"></div>
+            <div class="inline"><button class="btn sm" type="button" id="schDry">Dry run: what would happen now?</button></div>
+            <pre class="schlog" id="schLog" hidden></pre>
+            <div class="hint">Runs as a macOS launchd job, even when the studio is closed. If the Mac is asleep at that time, it runs when it wakes. Keep Ollama running. You get a notification if a run fails. Saving installs or removes <code>~/Library/LaunchAgents/com.shortsmachine.auto.plist</code>.</div>
           </fieldset>
         </form>
         <div class="spreview">
@@ -332,15 +388,15 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
       <div>
         <h4>Generate</h4>
         <div class="row">
-          <button class="btn primary" data-cmd="run" title="Next queued page, otherwise a random interesting one">Make next video</button>
+          <button class="btn primary" data-cmd="run" title="Next idea in the ideabank, otherwise a random interesting page">Make next video</button>
         </div>
       </div>
       <div>
-        <h4>From a Wikipedia link</h4>
+        <h4>From a link</h4>
         <div class="row wrap">
-          <input id="url" placeholder="https://en.wikipedia.org/wiki/…" aria-label="Wikipedia URL">
+          <input id="url" placeholder="Wikipedia, article, Hacker News, arXiv or APOD link" aria-label="Link to make a video from">
           <button class="btn" id="makeUrl">Make now</button>
-          <button class="btn" id="queueUrl">Queue</button>
+          <button class="btn" id="queueUrl" title="Save it to the ideabank for later">Save idea</button>
         </div>
       </div>
       <div>
@@ -349,7 +405,7 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
           <input id="publishAt" type="datetime-local" aria-label="Go public at (optional)">
           <button class="btn primary" id="upload">Upload pending</button>
         </div>
-        <div class="hint" id="pendingHint">Uploads every rendered video, best potential first. To upload one, open it and click Upload. Leave the time empty to upload as private.</div>
+        <div class="hint" id="pendingHint">Uploads every video in your Queue, top first. To upload one, open it and click Upload. Leave the time empty to upload as private.</div>
       </div>
     </div>
     <div class="term">
@@ -399,16 +455,16 @@ async function loadPages() {
   $(".logo").innerHTML = j.brand.logo ? `<img src="/brand/logo.png?t=${Date.now()}" alt="" style="width:26px;height:26px;object-fit:contain">` : esc(j.brand.logo_text || "?");
   document.documentElement.style.setProperty("--accent", j.brand.colors.accent);
   const n = s => pages.filter(p => p.status === s).length;
-  $("#stats").innerHTML = `<span><b>${n("uploaded")}</b> uploaded</span><span><b>${n("rendered")}</b> ready</span><span><b>${n("queued")}</b> queued</span><span><b>${pages.length}</b> pages seen</span>`;
-  $("#pendingHint").textContent = n("rendered") ? `${n("rendered")} video${n("rendered") > 1 ? "s" : ""} ready to upload. Leave the time empty to upload as private.` : "Nothing waiting. Rendered videos appear here.";
-  renderEpisodes(); renderQueue(); renderLog();
+  $("#stats").innerHTML = `<span><b>${n("uploaded")}</b> uploaded</span><span><b>${n("rendered")}</b> in queue</span><span><b>${n("queued")}</b> ideas</span><span><b>${pages.length}</b> pages seen</span>`;
+  $("#pendingHint").textContent = n("rendered") ? `${n("rendered")} video${n("rendered") > 1 ? "s" : ""} in the queue. Leave the time empty to upload as private.` : "Nothing waiting. Rendered videos appear here.";
+  renderEpisodes(); renderQueue(); renderPublish(); renderLog();
 }
 
 function renderEpisodes() {
   const eps = pages.filter(p => p.ep || p.status === "failed");
   const statuses = ["all", ...new Set(eps.map(p => p.status))];
   if (!statuses.includes(epFilter)) epFilter = "all";
-  $("#epFilters").innerHTML = statuses.map(s => `<button class="filter ${s === epFilter ? "on" : ""}" data-ef="${s}">${s} ${s === "all" ? eps.length : eps.filter(p => p.status === s).length}</button>`).join("");
+  $("#epFilters").innerHTML = statuses.map(s => `<button class="filter ${s === epFilter ? "on" : ""}" data-ef="${s}">${statusLabel(s)} ${s === "all" ? eps.length : eps.filter(p => p.status === s).length}</button>`).join("");
   const ql = epQ.toLowerCase().trim(), num = ql.match(/^(?:ep\s*)?0*(\d+)$/);
   const key = {potential: p => -(p.potential ?? -1) + (p.status === "uploaded" ? 1000 : 0), new: p => -(p.ep ?? 1e9), old: p => p.ep ?? 1e9, score: p => -(p.score ?? 0)}[epSort];
   const shown = eps
@@ -421,7 +477,7 @@ function renderEpisodes() {
     <button class="card" data-id="${p.pageid}">
       <div class="thumb">${p.video ? `<video data-src="/video/${encodeURIComponent(p.video)}#t=1.5" preload="metadata" muted></video>` : "?"}</div>
       <div class="body"><div class="top"><span class="ep">${p.ep ? "EP " + String(p.ep).padStart(3, "0") : "—"}</span>${potBadge(p)}</div>
-      <h3>${esc(p.yt_title || p.title)}</h3><span class="chip s-${p.status}">${p.status}</span></div>
+      <h3>${esc(p.yt_title || p.title)}</h3><span class="chip s-${p.status}">${statusLabel(p.status)}</span></div>
     </button>`).join("")}</div>`;
   document.querySelectorAll("#epGrid video[data-src]").forEach(v => lazy.observe(v));
 }
@@ -438,15 +494,48 @@ function potDetail(p) {
     <div class="hint">${esc(i.why)} · ${i.views60.toLocaleString()} article views in 60 days · ${i.languages} languages · ${i.seconds}s</div>`;
 }
 
+const ORIGIN_NAMES = {wikipedia: "Wikipedia", web: "Article", hackernews: "Hacker News", arxiv: "arXiv", apod: "NASA APOD"};
+const STATUS_LABEL = {queued: "idea", rendered: "in queue"};
+const statusLabel = st => STATUS_LABEL[st] || st;
+const originName = p => ORIGIN_NAMES[p.origin || "wikipedia"] || p.origin;
+
+const uploadOrder = (a, b) => (a.upload_rank == null) - (b.upload_rank == null) || (a.upload_rank ?? 0) - (b.upload_rank ?? 0)
+  || (a.potential == null) - (b.potential == null) || (b.potential ?? 0) - (a.potential ?? 0) || a.ep - b.ep;
+function renderPublish() {
+  const ready = pages.filter(p => p.status === "rendered").sort(uploadOrder);
+  $("#publishTab").textContent = ready.length ? `Queue (${ready.length})` : "Queue";
+  $("#pList").innerHTML = !ready.length ? `<div class="empty">Nothing waiting to upload. Rendered videos appear here.</div>`
+    : `<div class="qlist">${ready.map((p, i) => `
+      <div class="qitem pitem ${i === 0 ? "next" : ""}" draggable="true" data-sid="${p.pageid}">
+        <button class="grip" aria-label="Reorder ${esc(p.yt_title || p.title)} (drag, or use arrow keys)" title="Drag to reorder (or focus and press ↑/↓)">⠿</button>
+        <div class="qpos">${i + 1}</div>
+        <div class="pthumb">${p.video ? `<video data-src="/video/${encodeURIComponent(p.video)}#t=1.5" preload="metadata" muted></video>` : ""}</div>
+        <div>
+          <h3>${esc(p.yt_title || p.title)}</h3>
+          <div class="qmeta">
+            ${i === 0 ? `<span class="chip s-rendered">next to publish</span>` : ""}
+            <span class="ep">EP ${String(p.ep).padStart(3, "0")}</span>${potBadge(p)}
+            <span>${esc(p.title)}</span><span class="tag ${p.origin && p.origin !== "wikipedia" ? "seed" : "random"}">${esc(originName(p))}</span>
+            ${p.upload_rank == null ? `<span title="Not placed by you yet; sorted by potential score">auto-sorted</span>` : ""}
+          </div>
+        </div>
+        <div class="qbtns">
+          <button class="btn" data-id="${p.pageid}">Open</button>
+          <button class="btn primary" data-upload="${p.ep}">Upload now</button>
+        </div>
+      </div>`).join("")}</div>`;
+  document.querySelectorAll("#pList video[data-src]").forEach(v => lazy.observe(v));
+}
+
 function renderQueue() {
   // same order rw run uses: curated first, then oldest
   const qs = pages.filter(p => p.status === "queued").sort((a, b) =>
     (a.rank == null) - (b.rank == null) || (a.rank ?? 0) - (b.rank ?? 0) ||
     (b.source === "curated") - (a.source === "curated") || (a.created || "").localeCompare(b.created || ""));
-  $("#queueTab").textContent = qs.length ? `Queue (${qs.length})` : "Queue";
-  $("#qList").innerHTML = !qs.length ? `<div class="empty">Queue is empty. <b>Make next video</b> will discover a random page.<br>Add links above, or click <b>Find ideas</b> to queue a few random candidates to review.</div>`
+  $("#queueTab").textContent = qs.length ? `Ideabank (${qs.length})` : "Ideabank";
+  $("#qList").innerHTML = !qs.length ? `<div class="empty">Ideabank is empty. <b>Make next video</b> will discover a random page.<br>Add links above, or click <b>Find ideas</b> to add a few random candidates to review.</div>`
     : `<div class="qlist">${qs.map((p, i) => `
-      <div class="qitem ${i === 0 ? "next" : ""}" draggable="true" data-qid="${p.pageid}">
+      <div class="qitem ${i === 0 ? "next" : ""}" draggable="true" data-sid="${p.pageid}">
         <button class="grip" aria-label="Reorder ${esc(p.title)} (drag, or use arrow keys)" title="Drag to reorder (or focus and press ↑/↓)">⠿</button>
         <div class="qpos">${i + 1}</div>
         <div>
@@ -456,7 +545,7 @@ function renderQueue() {
             <span class="tag ${p.source}">${p.source}</span>
             ${p.score ? `<span>interest ${p.score}/10</span>` : ""}
             <span>added ${esc(localTime(p.created))}</span>
-            <a href="${esc(p.url)}" target="_blank" rel="noopener">Wikipedia ↗</a>
+            <a href="${esc(p.url)}" target="_blank" rel="noopener">${originName(p)} ↗</a>
           </div>
           ${p.reason && p.reason !== "curated" ? `<div class="qwhy">${esc(p.reason.replace(/^llm: /, ""))}</div>` : ""}
           ${p.via ? `<div class="via">${p.via.split(" → ").length - 1}° · ${p.via.split(" → ").map((x, j, a) => j === 0 ? `<b>${esc(x)}</b>` : esc(x)).join(" → ")}</div>` : ""}
@@ -538,12 +627,12 @@ function renderSelbar() {
 
 function renderLog() {
   const statuses = ["all", ...new Set(pages.map(p => p.status))];
-  $("#filters").innerHTML = statuses.map(s => `<button class="filter ${s === statusFilter ? "on" : ""}" data-f="${s}">${s} ${s === "all" ? pages.length : pages.filter(p => p.status === s).length}</button>`).join("");
+  $("#filters").innerHTML = statuses.map(s => `<button class="filter ${s === statusFilter ? "on" : ""}" data-f="${s}">${statusLabel(s)} ${s === "all" ? pages.length : pages.filter(p => p.status === s).length}</button>`).join("");
   const ql = q.toLowerCase().trim();
   const val = p => p[logSort.key] ?? null;
   const rows = pages
     .filter(p => statusFilter === "all" || p.status === statusFilter)
-    .filter(p => !ql || [p.title, p.reason, p.source, p.via, p.yt_title].some(x => (x || "").toLowerCase().includes(ql)))
+    .filter(p => !ql || [p.title, p.reason, p.source, p.via, p.yt_title, originName(p)].some(x => (x || "").toLowerCase().includes(ql)))
     .sort((a, b) => {
       const x = val(a), y = val(b);
       if (x === y) return 0;
@@ -560,8 +649,8 @@ function renderLog() {
   $("#selAll").onchange = e => { shown.forEach(p => e.target.checked ? selected.add(p.pageid) : selected.delete(p.pageid)); confirming = false; renderLog(); };
   $("#logrows").innerHTML = shown.map(p => `<tr class="${selected.has(p.pageid) ? "sel" : ""}">
     <td class="ck"><input type="checkbox" data-sel="${p.pageid}" ${selected.has(p.pageid) ? "checked" : ""} aria-label="Select ${esc(p.title)}"></td>
-    <td><span class="chip s-${p.status}">${p.status}</span></td><td class="num">${p.score ?? ""}</td>
-    <td><a href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.title)}</a></td><td>${esc(p.source)}</td>
+    <td><span class="chip s-${p.status}">${statusLabel(p.status)}</span></td><td class="num">${p.score ?? ""}</td>
+    <td><a href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.title)}</a></td><td>${esc(p.source)}${p.origin && p.origin !== "wikipedia" ? `<br><span class="tag seed">${esc(originName(p))}</span>` : ""}</td>
     <td class="reason">${esc(p.reason)}</td><td class="num">${esc((p.updated || "").slice(5, 16))}</td></tr>`).join("");
   renderSelbar();
 }
@@ -572,9 +661,9 @@ function openDetail(id) {
   $("#dlgBody").innerHTML = `<div class="detail">
     ${p.video ? `<video src="/video/${encodeURIComponent(p.video)}" controls autoplay playsinline></video>` : `<div class="thumb">?</div>`}
     <div class="info">
-      <div class="ep">${p.ep ? "EP " + String(p.ep).padStart(3, "0") : ""} &nbsp;<span class="chip s-${p.status}">${p.status}</span></div>
+      <div class="ep">${p.ep ? "EP " + String(p.ep).padStart(3, "0") : ""} &nbsp;<span class="chip s-${p.status}">${statusLabel(p.status)}</span></div>
       <h2>${esc(p.yt_title || p.title)}</h2>
-      <div class="sub">${esc(p.title)} · <a href="${esc(p.url)}" target="_blank" rel="noopener">Wikipedia ↗</a>${yt ? ` · <a href="${yt}" target="_blank" rel="noopener">YouTube ↗</a>` : ""}</div>
+      <div class="sub">${esc(p.title)} · <a href="${esc(p.url)}" target="_blank" rel="noopener">${originName(p)} ↗</a>${yt ? ` · <a href="${yt}" target="_blank" rel="noopener">YouTube ↗</a>` : ""}</div>
       <div class="btns">
         ${p.status === "rendered" ? `<button class="btn primary" data-upload="${p.ep}">Upload this video</button>` : ""}
         ${p.status !== "uploaded" ? `<button class="btn" data-remake="${esc(p.url)}">Remake</button>` : ""}
@@ -632,7 +721,7 @@ document.addEventListener("click", async e => {
   const t = e.target.closest("button"); if (!t) return;
   if (t.dataset.tab) {
     document.querySelectorAll(".tab").forEach(b => b.classList.toggle("on", b === t));
-    ["episodes", "queue", "log", "settings"].forEach(id => $("#" + id).hidden = t.dataset.tab !== id);
+    ["episodes", "queue", "publish", "log", "settings"].forEach(id => $("#" + id).hidden = t.dataset.tab !== id);
     if (t.dataset.tab === "settings" && !S) loadSettings();
   } else if (t.dataset.f) { statusFilter = t.dataset.f; renderLog(); }
   else if (t.id === "delSel") { confirming = true; renderSelbar(); }
@@ -683,9 +772,23 @@ document.addEventListener("click", async e => {
 $("#makeUrl").onclick = () => { const u = $("#url").value.trim(); if (u) exec(`run --url ${quote(u)}`).then(ok => ok && ($("#url").value = "")); };
 $("#queueUrl").onclick = () => { const u = $("#url").value.trim(); if (u) exec(`add ${quote(u)}`).then(ok => ok && ($("#url").value = "")); };
 const publishArg = () => { const v = $("#publishAt").value; return v ? " --publish-at " + new Date(v).toISOString().replace(/\.\d+Z$/, "Z") : ""; };
+const SOURCE_HINT = {
+  wikipedia: "Topic to explore, e.g. Nepal, jazz, black holes (empty = fully random)",
+  hackernews: "No input needed: today's top stories", apod: "No input needed: latest Astronomy Pictures of the Day",
+  arxiv: "Topic to search papers for, e.g. black holes", rss: "Feed URL, e.g. https://www.nasa.gov/feed/",
+};
+const syncSource = () => {
+  const src = $("#qSource").value;
+  $("#qTopic").placeholder = SOURCE_HINT[src];
+  $("#qTopic").disabled = ["hackernews", "apod"].includes(src);
+  $("#qDegree").hidden = $("#qDegLabel").hidden = src !== "wikipedia";
+};
+$("#qSource").onchange = syncSource;
 $("#qFind").onclick = () => {
-  const topic = $("#qTopic").value.trim();
-  exec(`discover --count ${$("#qCount").value}` + (topic ? ` --topic ${quote(topic)} --degree ${qDegree}` : ""));
+  const src = $("#qSource").value, v = $("#qTopic").value.trim(), n = $("#qCount").value;
+  if (src === "wikipedia") return exec(`discover --count ${n}` + (v ? ` --topic ${quote(v)} --degree ${qDegree}` : ""));
+  if (["arxiv", "rss"].includes(src) && !v) return termLine(`! ${src === "rss" ? "enter a feed URL" : "enter a topic"} first`, "err");
+  exec(`discover --source ${src} --count ${n}` + (src === "rss" ? ` --feed ${quote(v)}` : src === "arxiv" ? ` --topic ${quote(v)}` : ""));
 };
 $("#qDegree").onclick = e => {
   const b = e.target.closest("[data-deg]"); if (!b) return;
@@ -693,26 +796,30 @@ $("#qDegree").onclick = e => {
   $("#qDegree").querySelectorAll("button").forEach(x => { x.classList.toggle("on", x === b); x.setAttribute("aria-checked", x === b); });
 };
 
-// drag (mouse) or arrow keys on the grip (keyboard) to reorder; saved immediately
-const saveOrder = () => post("/api/reorder", {order: [...document.querySelectorAll("#qList .qitem")].map(el => +el.dataset.qid)}).then(loadPages);
-let dragEl = null;
-$("#qList").addEventListener("dragstart", e => { dragEl = e.target.closest(".qitem"); dragEl?.classList.add("dragging"); });
-$("#qList").addEventListener("dragover", e => {
-  e.preventDefault();
-  const over = e.target.closest(".qitem"); if (!dragEl || !over || over === dragEl) return;
-  const r = over.getBoundingClientRect();
-  over.parentNode.insertBefore(dragEl, e.clientY > r.top + r.height / 2 ? over.nextSibling : over);
-});
-$("#qList").addEventListener("dragend", () => { if (dragEl) { dragEl.classList.remove("dragging"); dragEl = null; saveOrder(); } });
-$("#qList").addEventListener("keydown", e => {
-  if (!e.target.classList.contains("grip") || !["ArrowUp", "ArrowDown"].includes(e.key)) return;
-  e.preventDefault();
-  const item = e.target.closest(".qitem"), sib = e.key === "ArrowUp" ? item.previousElementSibling : item.nextElementSibling;
-  if (!sib) return;
-  item.parentNode.insertBefore(item, e.key === "ArrowUp" ? sib : sib.nextSibling);
-  const id = item.dataset.qid;
-  saveOrder().then(() => document.querySelector(`.qitem[data-qid="${id}"] .grip`)?.focus());
-});
+// drag (mouse) or arrow keys on the grip (keyboard) to reorder a list; the new order is saved immediately
+function sortable(list, endpoint) {
+  let dragEl = null;
+  const save = () => post(endpoint, {order: [...list.querySelectorAll("[data-sid]")].map(el => +el.dataset.sid)}).then(loadPages);
+  list.addEventListener("dragstart", e => { dragEl = e.target.closest("[data-sid]"); dragEl?.classList.add("dragging"); });
+  list.addEventListener("dragover", e => {
+    e.preventDefault();
+    const over = e.target.closest("[data-sid]"); if (!dragEl || !over || over === dragEl) return;
+    const r = over.getBoundingClientRect();
+    over.parentNode.insertBefore(dragEl, e.clientY > r.top + r.height / 2 ? over.nextSibling : over);
+  });
+  list.addEventListener("dragend", () => { if (dragEl) { dragEl.classList.remove("dragging"); dragEl = null; save(); } });
+  list.addEventListener("keydown", e => {
+    if (!e.target.classList.contains("grip") || !["ArrowUp", "ArrowDown"].includes(e.key)) return;
+    e.preventDefault();
+    const item = e.target.closest("[data-sid]"), sib = e.key === "ArrowUp" ? item.previousElementSibling : item.nextElementSibling;
+    if (!sib) return;
+    item.parentNode.insertBefore(item, e.key === "ArrowUp" ? sib : sib.nextSibling);
+    const id = item.dataset.sid;
+    save().then(() => list.querySelector(`[data-sid="${id}"] .grip`)?.focus());
+  });
+}
+sortable($("#qList"), "/api/reorder");
+sortable($("#pList"), "/api/reorder_uploads");
 $("#qAdd").onclick = () => {
   const items = $("#qText").value.split("\n").map(x => x.trim()).filter(Boolean);
   if (items.length) exec("add " + items.map(quote).join(" ")).then(ok => ok && ($("#qText").value = ""));
@@ -762,7 +869,9 @@ async function loadSettings() {
   $("#logoState").textContent = j.logo ? "Using uploaded logo image" : "";
   $("#logoRm").hidden = !j.logo;
   $("#musicRm").hidden = !j.music;
-  renderFontRoles(); outputs(); setDirty(false);
+  S.schedule = j.schedule; schLoaded = j.schedule_loaded; savedSchedule = JSON.stringify(j.schedule);
+  $("#schLog").hidden = !j.auto_log.length; $("#schLog").textContent = "Recent automated runs\n" + j.auto_log.join("\n");
+  renderFontRoles(); renderSchedule(); outputs(); setDirty(false);
   $("#previewImg").src = "/data/preview.png?t=" + Date.now();
 }
 function outputs() {
@@ -798,13 +907,17 @@ function collect() {
     hashtags: F("hashtags").value.split(",").map(x => x.trim()).filter(Boolean), voice: F("voice").value, voice_speed: +F("voice_speed").value,
     music_volume: +F("music_volume").value, min_score: +F("min_score").value, max_seconds: +F("max_seconds").value, llm: F("llm").value,
     fonts: {...S.fonts, display_weight: F("display_weight").value}};
+  readSchedule();
   return S;
 }
 async function saveSettings() {
   const r = await fetch("/api/settings", {method: "POST", headers: {"Content-Type": "application/json", "X-RW": "1"}, body: JSON.stringify({brand: collect()})});
   const j = await r.json();
   if (!r.ok) { $("#sState").innerHTML = `<span style="color:var(--bad)">${esc(j.error)}</span>`; return false; }
-  S = j.brand; setDirty(false); loadPages(); return true;
+  S = {...j.brand, schedule: {...j.brand.schedule}}; setDirty(false); loadPages();
+  if (JSON.stringify(S.schedule) !== savedSchedule && await exec("schedule")) { await waitJob(); }
+  await refreshScheduleStatus();
+  return true;
 }
 const waitJob = async () => { do { await new Promise(r => setTimeout(r, 700)); } while ((await (await fetch("/api/job")).json()).running); };
 async function uploadBrand(kind, file) {
@@ -837,6 +950,66 @@ let fqTimer; $("#fq").oninput = () => { clearTimeout(fqTimer); fqTimer = setTime
 $("#fcat").onchange = searchFonts;
 $("#musicFile").onchange = e => e.target.files[0] && uploadBrand("music", e.target.files[0]);
 $("#logoFile").onchange = e => e.target.files[0] && uploadBrand("logo", e.target.files[0]);
+
+// ---- automation ----
+const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+let schLoaded = false, savedSchedule = "";
+function nextRun(sch) {
+  if (!sch.enabled || !sch.times.length || !sch.days.length) return null;
+  const now = new Date();
+  for (let add = 0; add < 8; add++) {
+    const d = new Date(now); d.setDate(now.getDate() + add);
+    if (!sch.days.includes(d.getDay())) continue;
+    for (const t of [...sch.times].sort()) { const x = new Date(d); x.setHours(+t.slice(0, 2), +t.slice(3), 0, 0); if (x > now) return x; }
+  }
+  return null;
+}
+function renderSchedule() {
+  const sch = S.schedule;
+  $("#schOn").checked = sch.enabled; $("#schBody").hidden = !sch.enabled;
+  $("#schTimes").innerHTML = sch.times.map((t, i) => `<span class="tchip"><input type="time" value="${t}" data-ti="${i}" aria-label="Run time ${i + 1}">
+      ${sch.times.length > 1 ? `<button type="button" data-trm="${i}" aria-label="Remove time ${i + 1}">✕</button>` : ""}</span>`).join("")
+    + (sch.times.length < 4 ? `<button class="btn sm" type="button" id="tAdd">+ Add time</button>` : "");
+  $("#schDays").innerHTML = DAY_NAMES.map((n, d) => `<button type="button" data-day="${d}" class="${sch.days.includes(d) ? "on" : ""}" aria-pressed="${sch.days.includes(d)}">${n}</button>`).join("");
+  $("#schFb").value = sch.fallback; $("#schArg").value = sch.fallback_arg;
+  $("#schArgLabel").textContent = {wikipedia: "Topic (optional)", arxiv: "Topic", rss: "Feed URL"}[sch.fallback] || "No input needed";
+  $("#schArg").disabled = ["hackernews", "apod"].includes(sch.fallback);
+  $("#schUp").checked = sch.upload; $("#schPub").hidden = $("#schPick").hidden = !sch.upload;
+  document.querySelectorAll("[name=schPick]").forEach(r => r.checked = r.value === (sch.pick || "order"));
+  document.querySelectorAll("[name=schPub]").forEach(r => r.checked = r.value === sch.publish);
+  $("#schPubTime").value = sch.publish_time;
+  const nr = nextRun(sch), changed = JSON.stringify(sch) !== savedSchedule;
+  $("#schStatus").innerHTML = !sch.enabled ? (schLoaded && !changed ? "Off" : "Off") :
+    changed ? `<span class="dirty">Not active yet: click Save to install the schedule</span>` :
+    schLoaded ? `<b style="color:var(--ok)">Active</b> · next run ${nr ? nr.toLocaleString([], {weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit"}) : "—"}`
+    : `<span style="color:var(--bad)">Saved but the launchd job isn't loaded: click Save again</span>`;
+}
+function readSchedule() {
+  const sch = S.schedule;
+  sch.enabled = $("#schOn").checked;
+  sch.times = [...document.querySelectorAll("[data-ti]")].map(i => i.value).filter(Boolean);
+  sch.fallback = $("#schFb").value; sch.fallback_arg = $("#schArg").value.trim();
+  sch.upload = $("#schUp").checked;
+  sch.publish = document.querySelector("[name=schPub]:checked")?.value || "private";
+  sch.pick = document.querySelector("[name=schPick]:checked")?.value || "order";
+  sch.publish_time = $("#schPubTime").value || "15:00";
+}
+$("#sform").addEventListener("change", e => { if (e.target.closest(".scard")?.querySelector("#schOn")) { readSchedule(); renderSchedule(); setDirty(true); } });
+$("#sform").addEventListener("click", e => {
+  const t = e.target.closest("button"); if (!t) return;
+  if (t.dataset.day) { const d = +t.dataset.day, ds = S.schedule.days; S.schedule.days = ds.includes(d) ? ds.filter(x => x !== d) : [...ds, d].sort(); }
+  else if (t.dataset.trm) { readSchedule(); S.schedule.times.splice(+t.dataset.trm, 1); }
+  else if (t.id === "tAdd") { readSchedule(); S.schedule.times.push("18:00"); }
+  else return;
+  renderSchedule(); setDirty(true);
+});
+$("#schDry").onclick = async () => { if (await saveSettings() && await exec("auto --dry-run")) { await waitJob(); } };
+async function refreshScheduleStatus() {
+  const j = await (await fetch("/api/settings")).json();
+  schLoaded = j.schedule_loaded; savedSchedule = JSON.stringify(j.schedule);
+  $("#schLog").hidden = !j.auto_log.length; $("#schLog").textContent = "Recent automated runs\n" + j.auto_log.join("\n");
+  renderSchedule();
+}
 $("#sSave").onclick = saveSettings;
 $("#sPreview").onclick = async () => { if (await saveSettings() && await exec("preview")) { await waitJob(); $("#previewImg").src = "/data/preview.png?t=" + Date.now(); } };
 

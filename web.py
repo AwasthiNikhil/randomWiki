@@ -9,7 +9,9 @@ from pathlib import Path
 
 import rw
 
-ALLOWED = {"run", "add", "discover", "upload", "unpublish", "rerender", "log", "score", "selftest", "preview", "voicetest"}
+ALLOWED = {"run", "add", "discover", "upload", "unpublish", "rerender", "log", "score", "selftest", "preview", "voicetest",
+           "auto", "schedule"}
+HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 BRAND_FILE = rw.ROOT / "brand.json"
 HEX = re.compile(r"^#[0-9a-fA-F]{6}$")
 
@@ -53,6 +55,21 @@ def save_brand(new):
     b["voice"], b["voice_lang"], b["voice_speed"] = new["voice"], new["voice"][0], num("voice_speed", 0.7, 1.3)
     b["music_volume"], b["min_score"], b["max_seconds"] = num("music_volume", 0, 0.5), num("min_score", 1, 10, int), num("max_seconds", 20, 175, int)
     b["llm"] = text("llm", 1, 80)
+    sch = new.get("schedule") or {}
+    times = sorted({str(t) for t in sch.get("times", [])})
+    days = sorted({int(d) for d in sch.get("days", []) if 0 <= int(d) <= 6})
+    if sch.get("enabled") and not (times and days):
+        raise ValueError("automation needs at least one time and one day")
+    if not all(HHMM.match(t) for t in times) or len(times) > 4 or not HHMM.match(str(sch.get("publish_time", ""))):
+        raise ValueError("times must be HH:MM (up to 4 a day)")
+    if (sch.get("fallback") not in ("wikipedia", "hackernews", "apod", "arxiv", "rss") or sch.get("publish") not in ("private", "at")
+            or sch.get("pick", "order") not in ("order", "newest")):
+        raise ValueError("unknown automation option")
+    if sch["fallback"] in ("arxiv", "rss") and not str(sch.get("fallback_arg", "")).strip():
+        raise ValueError(f"{sch['fallback']} needs a {'feed URL' if sch['fallback'] == 'rss' else 'topic'}")
+    b["schedule"] = {"enabled": bool(sch.get("enabled")), "times": times, "days": days, "upload": bool(sch.get("upload")),
+                     "publish": sch["publish"], "publish_time": sch["publish_time"], "fallback": sch["fallback"],
+                     "fallback_arg": str(sch.get("fallback_arg", "")).strip()[:300], "pick": sch.get("pick", "order")}
     BRAND_FILE.write_text(json.dumps(b, indent=2) + "\n")
     return b
 NOISE = re.compile(r"Redirects are currently not supported|warn\(|HF_TOKEN|torch/|WeightNorm|dropout option")
@@ -188,7 +205,10 @@ class H(BaseHTTPRequestHandler):
             except Exception:
                 models = []
             b = brand()
+            log = rw.AUTO_LOG.read_text(errors="ignore").splitlines()[-40:] if rw.AUTO_LOG.exists() else []
             return self.send(200, {"brand": b, "voices": sorted(rw.KOKORO_VOICES), "models": models,
+                                   "schedule": rw.SCHEDULE_DEFAULTS | b.get("schedule", {}), "schedule_loaded": rw.schedule_loaded(),
+                                   "auto_log": [l for l in log if l.startswith(("===", "make:", "queue empty", "  done", "  uploaded", "  upload failed"))][-12:],
                                    "music": (rw.ROOT / b["music"]).is_file(),
                                    "logo": bool(b.get("logo")) and (rw.ROOT / b["logo"]).is_file()})
         if path == "/api/fonts":
@@ -321,6 +341,11 @@ class H(BaseHTTPRequestHandler):
                     deleted += 1
                 con.commit()
                 return self.send(200, {"ok": True, "deleted": deleted, "kept_uploaded": kept})
+            elif self.path == "/api/reorder_uploads":  # body: {"order": [pageid, ...]} = Publish list, top first
+                con = rw.db()
+                con.executemany("update pages set upload_rank=? where pageid=? and status='rendered'",
+                                [(i, int(pid)) for i, pid in enumerate(body.get("order", []))])
+                con.commit()
             elif self.path == "/api/skip":
                 con = rw.db()
                 con.execute("update pages set status='skipped' where pageid=? and status in ('rendered','queued','failed')",
