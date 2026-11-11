@@ -38,7 +38,7 @@ def fetch(url, params=None, data=None):
         try:
             with urllib.request.urlopen(req, timeout=300) as r:
                 return r.read()
-        except urllib.error.URLError as e:
+        except (urllib.error.URLError, TimeoutError, ConnectionError) as e:  # timeouts too: a slow LLM call is retried
             if attempt == 3 or getattr(e, "code", 0) in (400, 403, 404):
                 raise
             time.sleep(5 * (attempt + 1))  # Wikimedia rate-limits bursts (429)
@@ -59,7 +59,7 @@ def db():
         pageid integer primary key, title text, url text, source text, status text,
         score integer, reason text, ep integer, video_path text, video_id text,
         created text default current_timestamp, updated text default current_timestamp)""")
-    for col in ("potential integer", "rank integer", "via text", "origin text", "ref text"):  # added after v1; ignore if present
+    for col in ("potential integer", "rank integer", "via text", "origin text", "ref text", "upload_rank integer"):  # added after v1; ignore if present
         try:
             con.execute(f"alter table pages add column {col}")
         except sqlite3.OperationalError:
@@ -68,6 +68,7 @@ def db():
 
 
 QUEUE_ORDER = "order by rank is null, rank, source='curated' desc, created"  # manual drag order first
+UPLOAD_ORDER = "order by upload_rank is null, upload_rank, potential is null, potential desc, ep"  # your order, then best score
 
 
 def upsert(con, pageid, **f):
@@ -965,7 +966,8 @@ def produce(con, m, out):
 
 # ---------- automation (macOS launchd) ----------
 SCHEDULE_DEFAULTS = {"enabled": False, "times": ["09:00"], "days": [0, 1, 2, 3, 4, 5, 6], "upload": True,
-                     "publish": "private", "publish_time": "15:00", "fallback": "wikipedia", "fallback_arg": ""}
+                     "publish": "private", "publish_time": "15:00", "fallback": "wikipedia", "fallback_arg": "",
+                     "pick": "order"}  # pick: "order" = top of the Publish list, "newest" = the video this run made
 LAUNCH_LABEL = "com.shortsmachine.auto"
 LAUNCH_PLIST = Path.home() / "Library" / "LaunchAgents" / f"{LAUNCH_LABEL}.plist"
 AUTO_LOG = DB.parent / "auto.log"
@@ -1025,6 +1027,7 @@ def publish_time_utc(hhmm, min_gap_hours=2):
 def auto(con, dry_run=False):
     """One scheduled run: make the next queued video (discovering one if the queue is empty), then upload."""
     import fcntl
+    sys.stdout.reconfigure(line_buffering=True)  # launchd writes to data/auto.log; show progress as it happens
     lock = open(DB.parent / "auto.lock", "w")
     try:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -1037,7 +1040,10 @@ def auto(con, dry_run=False):
         when = publish_time_utc(sch["publish_time"]) if sch["publish"] == "at" else None
         plan = (f"make: {row['title']}" if row else f"queue empty: discover 1 idea from {sch['fallback']}"
                 + (f" ({sch['fallback_arg']})" if sch["fallback_arg"] else ""))
-        plan += f"; then {'upload ' + ('public at ' + when + ' UTC' if when else 'as private') if sch['upload'] else 'no upload'}"
+        ready = con.execute(f"select ep, title from pages where status='rendered' {UPLOAD_ORDER} limit 1").fetchone()
+        which = ("the video it makes" if sch["pick"] == "newest" or not ready
+                 else f"EP {ready['ep']:03d} {ready['title']} (top of the Publish list)")
+        plan += f"; then {'upload ' + which + (', public at ' + when + ' UTC' if when else ', private') if sch['upload'] else 'no upload'}"
         print(plan)
         if dry_run:
             return
@@ -1049,8 +1055,9 @@ def auto(con, dry_run=False):
             pid = discover_source(con, sch["fallback"], 1, sch["fallback_arg"] or None)[0]
         make(con, pid)
         if sch["upload"]:
-            ep = con.execute("select ep from pages where pageid=?", (pid,)).fetchone()["ep"]
-            upload_pending(con, when, ep)
+            pick = (f"select ep from pages where status='rendered' {UPLOAD_ORDER} limit 1" if sch["pick"] == "order"
+                    else f"select ep from pages where pageid={int(pid)}")
+            upload_pending(con, when, con.execute(pick).fetchone()["ep"])
         print("=== done")
     except BaseException as e:
         notify(f"Automated run failed: {e}")
@@ -1175,9 +1182,9 @@ def upload(con, pageid, publish_at=None):
 
 
 def upload_pending(con, publish_at=None, ep=None):
-    """Upload every rendered-but-not-uploaded video (or just episode `ep`), best potential first."""
+    """Upload every rendered-but-not-uploaded video (or just episode `ep`) in the Publish order."""
     rows = con.execute("select pageid, ep, title from pages where status='rendered' and (? is null or ep=?) "
-                       "order by potential is null, potential desc, ep",
+                       + UPLOAD_ORDER,
                        (ep, ep)).fetchall()
     if not rows:
         print(f"episode {ep} is not ready to upload" if ep else "nothing to upload")

@@ -32,5 +32,25 @@
     "facts"
   ],
   "user_agent": "ShortsMachine/0.1 (personal non-commercial project)",
-  "logo_text": "?"
+  "logo_text": "?",
+  "schedule": {
+    "enabled": true,
+    "times": [
+      "14:36"
+    ],
+    "days": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+    ],
+    "upload": true,
+    "publish": "private",
+    "publish_time": "15:00",
+    "fallback": "wikipedia",
+    "fallback_arg": ""
+  }
 }

@@ -52,6 +52,7 @@ The voice model (about 300 MB) downloads on the first render.
 ## Studio (`./rw web`)
 A local web UI. It's bound to 127.0.0.1 and runs the same commands as the CLI, streaming their output into a terminal panel.
 - **Episodes:** previews you can search, filter and sort by potential. Open one to watch it, edit its title, narration and visuals, then **Save & re-render**. You can also upload it, skip it, delete it, or delete it from YouTube.
+- **Publish:** videos ready to upload, in the order they'll go out. Drag to reorder; videos you haven't placed are sorted by potential score. **Upload pending** and scheduled runs take from the top.
 - **Queue:** what gets made next. Drag to reorder, paste links in bulk, or **Find ideas** randomly or around a topic, with a degree-of-relation control.
 - **Page log:** every page seen, with reasons. Sortable and searchable, with multi-select delete. Uploaded pages are always kept.
 - **Settings:** channel, colours, Google Fonts, voice, music, LLM and thresholds, with a real-frame preview.
@@ -97,7 +98,7 @@ New settings apply to new renders. Use **Save & re-render** on a video to update
 Videos upload **private**, or scheduled with `--publish-at`. Until the project passes YouTube's API audit, YouTube keeps API uploads private. Quota allows about 6 uploads a day (deleting costs 50 units). The first `unpublish` asks Google once for the extra "manage videos" permission.
 
 ## Automation
-In the studio go to **Settings → Automation**: turn it on, pick up to 4 times a day and the weekdays, choose where ideas come from when the queue is empty, and choose whether to upload (kept private, or public at a set time at least 2 hours after the video is made, so you can review it). **Save** installs a macOS launchd job (`~/Library/LaunchAgents/com.shortsmachine.auto.plist`); turning it off removes the job.
+In the studio go to **Settings → Automation**: turn it on, pick up to 4 times a day and the weekdays, choose where ideas come from when the queue is empty, and choose whether to upload. Each run publishes either the top of your **Publish** list or the video it just made, kept private or public at a set time at least 2 hours later, so you can review it. **Save** installs a macOS launchd job (`~/Library/LaunchAgents/com.shortsmachine.auto.plist`); turning it off removes the job.
 - It runs `./rw auto` even when the studio is closed. If the Mac is asleep at that time, it runs when it wakes. Keep Ollama running.
 - Output goes to `data/auto.log`, and the last runs are shown in Settings. A failed run shows a macOS notification. Overlapping runs are skipped.
 - `./rw auto --dry-run` shows what the next run would do. `./rw schedule` applies the `brand.json` schedule from the command line.

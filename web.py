@@ -62,13 +62,14 @@ def save_brand(new):
         raise ValueError("automation needs at least one time and one day")
     if not all(HHMM.match(t) for t in times) or len(times) > 4 or not HHMM.match(str(sch.get("publish_time", ""))):
         raise ValueError("times must be HH:MM (up to 4 a day)")
-    if sch.get("fallback") not in ("wikipedia", "hackernews", "apod", "arxiv", "rss") or sch.get("publish") not in ("private", "at"):
+    if (sch.get("fallback") not in ("wikipedia", "hackernews", "apod", "arxiv", "rss") or sch.get("publish") not in ("private", "at")
+            or sch.get("pick", "order") not in ("order", "newest")):
         raise ValueError("unknown automation option")
     if sch["fallback"] in ("arxiv", "rss") and not str(sch.get("fallback_arg", "")).strip():
         raise ValueError(f"{sch['fallback']} needs a {'feed URL' if sch['fallback'] == 'rss' else 'topic'}")
     b["schedule"] = {"enabled": bool(sch.get("enabled")), "times": times, "days": days, "upload": bool(sch.get("upload")),
                      "publish": sch["publish"], "publish_time": sch["publish_time"], "fallback": sch["fallback"],
-                     "fallback_arg": str(sch.get("fallback_arg", "")).strip()[:300]}
+                     "fallback_arg": str(sch.get("fallback_arg", "")).strip()[:300], "pick": sch.get("pick", "order")}
     BRAND_FILE.write_text(json.dumps(b, indent=2) + "\n")
     return b
 NOISE = re.compile(r"Redirects are currently not supported|warn\(|HF_TOKEN|torch/|WeightNorm|dropout option")
@@ -340,6 +341,11 @@ class H(BaseHTTPRequestHandler):
                     deleted += 1
                 con.commit()
                 return self.send(200, {"ok": True, "deleted": deleted, "kept_uploaded": kept})
+            elif self.path == "/api/reorder_uploads":  # body: {"order": [pageid, ...]} = Publish list, top first
+                con = rw.db()
+                con.executemany("update pages set upload_rank=? where pageid=? and status='rendered'",
+                                [(i, int(pid)) for i, pid in enumerate(body.get("order", []))])
+                con.commit()
             elif self.path == "/api/skip":
                 con = rw.db()
                 con.execute("update pages set status='skipped' where pageid=? and status in ('rendered','queued','failed')",

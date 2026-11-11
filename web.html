@@ -157,6 +157,10 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
 .grip { cursor: grab; background: none; border: 0; color: var(--muted); font-size: 18px; padding: 4px; line-height: 1; border-radius: 6px; }
 .grip:focus-visible { outline: 2px solid var(--accent); }
 .qitem.dragging { opacity: .4; }
+.qitem.pitem { grid-template-columns: 22px 34px 54px 1fr auto; }
+.pthumb { width: 54px; aspect-ratio: 9 / 16; border-radius: 6px; overflow: hidden; background: var(--panel2); }
+.pthumb video { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; }
+@media (max-width: 640px) { .qitem, .qitem.pitem { grid-template-columns: 22px 1fr; } .qitem .qpos, .pthumb { display: none; } .qbtns { grid-column: 1 / -1; } }
 .qitem { display: grid; grid-template-columns: 22px 34px 1fr auto; gap: 14px; align-items: center; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
 .qitem.next { border-color: var(--accent); }
 .qpos { font: 20px Anton; color: var(--muted); text-align: center; }
@@ -233,6 +237,7 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
     <div class="tabs" role="tablist">
       <button class="tab on" data-tab="episodes" role="tab">Episodes</button>
       <button class="tab" data-tab="queue" role="tab" id="queueTab">Queue</button>
+      <button class="tab" data-tab="publish" role="tab" id="publishTab">Publish</button>
       <button class="tab" data-tab="log" role="tab">Page log</button>
       <button class="tab" data-tab="settings" role="tab">Settings</button>
     </div>
@@ -246,6 +251,10 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
         <input class="search" id="epSearch" placeholder="Search title, narration, ep 12…" aria-label="Search episodes">
       </div>
       <div id="epGrid"></div>
+    </section>
+    <section id="publish" hidden>
+      <p class="hint" style="margin:0 0 14px">Videos ready to upload, in the order they'll be published. <b>Upload pending</b> and scheduled runs take from the top. Drag to reorder. Videos you haven't placed are sorted by potential score.</p>
+      <div id="pList"></div>
     </section>
     <section id="queue" hidden>
       <div class="qadd">
@@ -338,6 +347,11 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
                 <label style="flex:1;min-width:min(220px,100%)"><span id="schArgLabel">Topic (optional)</span><input id="schArg"></label>
               </div>
               <label class="check"><input type="checkbox" id="schUp"> Upload to YouTube after making</label>
+              <div id="schPick" style="display:grid;gap:6px;padding-left:24px">
+                <span class="hint">Each run publishes</span>
+                <label class="radio"><input type="radio" name="schPick" value="order"> the next video in your <b>Publish</b> list (top first)</label>
+                <label class="radio"><input type="radio" name="schPick" value="newest"> the video that run just made</label>
+              </div>
               <div id="schPub" style="display:grid;gap:6px;padding-left:24px">
                 <label class="radio"><input type="radio" name="schPub" value="private"> Keep private (you publish it yourself)</label>
                 <label class="radio"><input type="radio" name="schPub" value="at"> Go public at <input type="time" id="schPubTime" aria-label="Publish time">
@@ -391,7 +405,7 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
           <input id="publishAt" type="datetime-local" aria-label="Go public at (optional)">
           <button class="btn primary" id="upload">Upload pending</button>
         </div>
-        <div class="hint" id="pendingHint">Uploads every rendered video, best potential first. To upload one, open it and click Upload. Leave the time empty to upload as private.</div>
+        <div class="hint" id="pendingHint">Uploads every ready video in your Publish order. To upload one, open it and click Upload. Leave the time empty to upload as private.</div>
       </div>
     </div>
     <div class="term">
@@ -443,7 +457,7 @@ async function loadPages() {
   const n = s => pages.filter(p => p.status === s).length;
   $("#stats").innerHTML = `<span><b>${n("uploaded")}</b> uploaded</span><span><b>${n("rendered")}</b> ready</span><span><b>${n("queued")}</b> queued</span><span><b>${pages.length}</b> pages seen</span>`;
   $("#pendingHint").textContent = n("rendered") ? `${n("rendered")} video${n("rendered") > 1 ? "s" : ""} ready to upload. Leave the time empty to upload as private.` : "Nothing waiting. Rendered videos appear here.";
-  renderEpisodes(); renderQueue(); renderLog();
+  renderEpisodes(); renderQueue(); renderPublish(); renderLog();
 }
 
 function renderEpisodes() {
@@ -483,6 +497,34 @@ function potDetail(p) {
 const ORIGIN_NAMES = {wikipedia: "Wikipedia", web: "Article", hackernews: "Hacker News", arxiv: "arXiv", apod: "NASA APOD"};
 const originName = p => ORIGIN_NAMES[p.origin || "wikipedia"] || p.origin;
 
+const uploadOrder = (a, b) => (a.upload_rank == null) - (b.upload_rank == null) || (a.upload_rank ?? 0) - (b.upload_rank ?? 0)
+  || (a.potential == null) - (b.potential == null) || (b.potential ?? 0) - (a.potential ?? 0) || a.ep - b.ep;
+function renderPublish() {
+  const ready = pages.filter(p => p.status === "rendered").sort(uploadOrder);
+  $("#publishTab").textContent = ready.length ? `Publish (${ready.length})` : "Publish";
+  $("#pList").innerHTML = !ready.length ? `<div class="empty">Nothing waiting to upload. Rendered videos appear here.</div>`
+    : `<div class="qlist">${ready.map((p, i) => `
+      <div class="qitem pitem ${i === 0 ? "next" : ""}" draggable="true" data-sid="${p.pageid}">
+        <button class="grip" aria-label="Reorder ${esc(p.yt_title || p.title)} (drag, or use arrow keys)" title="Drag to reorder (or focus and press ↑/↓)">⠿</button>
+        <div class="qpos">${i + 1}</div>
+        <div class="pthumb">${p.video ? `<video data-src="/video/${encodeURIComponent(p.video)}#t=1.5" preload="metadata" muted></video>` : ""}</div>
+        <div>
+          <h3>${esc(p.yt_title || p.title)}</h3>
+          <div class="qmeta">
+            ${i === 0 ? `<span class="chip s-rendered">next to publish</span>` : ""}
+            <span class="ep">EP ${String(p.ep).padStart(3, "0")}</span>${potBadge(p)}
+            <span>${esc(p.title)}</span><span class="tag ${p.origin && p.origin !== "wikipedia" ? "seed" : "random"}">${esc(originName(p))}</span>
+            ${p.upload_rank == null ? `<span title="Not placed by you yet; sorted by potential score">auto-sorted</span>` : ""}
+          </div>
+        </div>
+        <div class="qbtns">
+          <button class="btn" data-id="${p.pageid}">Open</button>
+          <button class="btn primary" data-upload="${p.ep}">Upload now</button>
+        </div>
+      </div>`).join("")}</div>`;
+  document.querySelectorAll("#pList video[data-src]").forEach(v => lazy.observe(v));
+}
+
 function renderQueue() {
   // same order rw run uses: curated first, then oldest
   const qs = pages.filter(p => p.status === "queued").sort((a, b) =>
@@ -491,7 +533,7 @@ function renderQueue() {
   $("#queueTab").textContent = qs.length ? `Queue (${qs.length})` : "Queue";
   $("#qList").innerHTML = !qs.length ? `<div class="empty">Queue is empty. <b>Make next video</b> will discover a random page.<br>Add links above, or click <b>Find ideas</b> to queue a few random candidates to review.</div>`
     : `<div class="qlist">${qs.map((p, i) => `
-      <div class="qitem ${i === 0 ? "next" : ""}" draggable="true" data-qid="${p.pageid}">
+      <div class="qitem ${i === 0 ? "next" : ""}" draggable="true" data-sid="${p.pageid}">
         <button class="grip" aria-label="Reorder ${esc(p.title)} (drag, or use arrow keys)" title="Drag to reorder (or focus and press ↑/↓)">⠿</button>
         <div class="qpos">${i + 1}</div>
         <div>
@@ -677,7 +719,7 @@ document.addEventListener("click", async e => {
   const t = e.target.closest("button"); if (!t) return;
   if (t.dataset.tab) {
     document.querySelectorAll(".tab").forEach(b => b.classList.toggle("on", b === t));
-    ["episodes", "queue", "log", "settings"].forEach(id => $("#" + id).hidden = t.dataset.tab !== id);
+    ["episodes", "queue", "publish", "log", "settings"].forEach(id => $("#" + id).hidden = t.dataset.tab !== id);
     if (t.dataset.tab === "settings" && !S) loadSettings();
   } else if (t.dataset.f) { statusFilter = t.dataset.f; renderLog(); }
   else if (t.id === "delSel") { confirming = true; renderSelbar(); }
@@ -752,26 +794,30 @@ $("#qDegree").onclick = e => {
   $("#qDegree").querySelectorAll("button").forEach(x => { x.classList.toggle("on", x === b); x.setAttribute("aria-checked", x === b); });
 };
 
-// drag (mouse) or arrow keys on the grip (keyboard) to reorder; saved immediately
-const saveOrder = () => post("/api/reorder", {order: [...document.querySelectorAll("#qList .qitem")].map(el => +el.dataset.qid)}).then(loadPages);
-let dragEl = null;
-$("#qList").addEventListener("dragstart", e => { dragEl = e.target.closest(".qitem"); dragEl?.classList.add("dragging"); });
-$("#qList").addEventListener("dragover", e => {
-  e.preventDefault();
-  const over = e.target.closest(".qitem"); if (!dragEl || !over || over === dragEl) return;
-  const r = over.getBoundingClientRect();
-  over.parentNode.insertBefore(dragEl, e.clientY > r.top + r.height / 2 ? over.nextSibling : over);
-});
-$("#qList").addEventListener("dragend", () => { if (dragEl) { dragEl.classList.remove("dragging"); dragEl = null; saveOrder(); } });
-$("#qList").addEventListener("keydown", e => {
-  if (!e.target.classList.contains("grip") || !["ArrowUp", "ArrowDown"].includes(e.key)) return;
-  e.preventDefault();
-  const item = e.target.closest(".qitem"), sib = e.key === "ArrowUp" ? item.previousElementSibling : item.nextElementSibling;
-  if (!sib) return;
-  item.parentNode.insertBefore(item, e.key === "ArrowUp" ? sib : sib.nextSibling);
-  const id = item.dataset.qid;
-  saveOrder().then(() => document.querySelector(`.qitem[data-qid="${id}"] .grip`)?.focus());
-});
+// drag (mouse) or arrow keys on the grip (keyboard) to reorder a list; the new order is saved immediately
+function sortable(list, endpoint) {
+  let dragEl = null;
+  const save = () => post(endpoint, {order: [...list.querySelectorAll("[data-sid]")].map(el => +el.dataset.sid)}).then(loadPages);
+  list.addEventListener("dragstart", e => { dragEl = e.target.closest("[data-sid]"); dragEl?.classList.add("dragging"); });
+  list.addEventListener("dragover", e => {
+    e.preventDefault();
+    const over = e.target.closest("[data-sid]"); if (!dragEl || !over || over === dragEl) return;
+    const r = over.getBoundingClientRect();
+    over.parentNode.insertBefore(dragEl, e.clientY > r.top + r.height / 2 ? over.nextSibling : over);
+  });
+  list.addEventListener("dragend", () => { if (dragEl) { dragEl.classList.remove("dragging"); dragEl = null; save(); } });
+  list.addEventListener("keydown", e => {
+    if (!e.target.classList.contains("grip") || !["ArrowUp", "ArrowDown"].includes(e.key)) return;
+    e.preventDefault();
+    const item = e.target.closest("[data-sid]"), sib = e.key === "ArrowUp" ? item.previousElementSibling : item.nextElementSibling;
+    if (!sib) return;
+    item.parentNode.insertBefore(item, e.key === "ArrowUp" ? sib : sib.nextSibling);
+    const id = item.dataset.sid;
+    save().then(() => list.querySelector(`[data-sid="${id}"] .grip`)?.focus());
+  });
+}
+sortable($("#qList"), "/api/reorder");
+sortable($("#pList"), "/api/reorder_uploads");
 $("#qAdd").onclick = () => {
   const items = $("#qText").value.split("\n").map(x => x.trim()).filter(Boolean);
   if (items.length) exec("add " + items.map(quote).join(" ")).then(ok => ok && ($("#qText").value = ""));
@@ -926,7 +972,8 @@ function renderSchedule() {
   $("#schFb").value = sch.fallback; $("#schArg").value = sch.fallback_arg;
   $("#schArgLabel").textContent = {wikipedia: "Topic (optional)", arxiv: "Topic", rss: "Feed URL"}[sch.fallback] || "No input needed";
   $("#schArg").disabled = ["hackernews", "apod"].includes(sch.fallback);
-  $("#schUp").checked = sch.upload; $("#schPub").hidden = !sch.upload;
+  $("#schUp").checked = sch.upload; $("#schPub").hidden = $("#schPick").hidden = !sch.upload;
+  document.querySelectorAll("[name=schPick]").forEach(r => r.checked = r.value === (sch.pick || "order"));
   document.querySelectorAll("[name=schPub]").forEach(r => r.checked = r.value === sch.publish);
   $("#schPubTime").value = sch.publish_time;
   const nr = nextRun(sch), changed = JSON.stringify(sch) !== savedSchedule;
@@ -942,6 +989,7 @@ function readSchedule() {
   sch.fallback = $("#schFb").value; sch.fallback_arg = $("#schArg").value.trim();
   sch.upload = $("#schUp").checked;
   sch.publish = document.querySelector("[name=schPub]:checked")?.value || "private";
+  sch.pick = document.querySelector("[name=schPick]:checked")?.value || "order";
   sch.publish_time = $("#schPubTime").value || "15:00";
 }
 $("#sform").addEventListener("change", e => { if (e.target.closest(".scard")?.querySelector("#schOn")) { readSchedule(); renderSchedule(); setDirty(true); } });
