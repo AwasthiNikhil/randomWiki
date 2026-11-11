@@ -9,7 +9,7 @@ from pathlib import Path
 
 import rw
 
-ALLOWED = {"run", "add", "discover", "upload", "unpublish", "rerender", "log", "score", "selftest", "preview", "voicetest",
+ALLOWED = {"run", "add", "ask", "discover", "upload", "unpublish", "rerender", "log", "score", "selftest", "preview", "voicetest",
            "auto", "schedule"}
 HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 BRAND_FILE = rw.BRAND_FILE
@@ -329,7 +329,7 @@ class H(BaseHTTPRequestHandler):
                 out = []
                 for img in body.get("images", [])[:12]:
                     if img.get("file") and (work / Path(img["file"]).name).is_file():  # already in the folder
-                        out.append({k: v for k, v in img.items() if k not in ("file", "credit", "thumb", "tags")}
+                        out.append({k: v for k, v in img.items() if k not in ("file", "credit", "tags") and (k != "thumb" or img.get("kind") == "video")}
                                    | {"path": str(work / Path(img["file"]).name)})
                     elif str(img.get("url", "")).startswith("https://"):
                         out.append(rw.download_image(img, work))

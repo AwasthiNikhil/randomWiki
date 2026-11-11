@@ -2,6 +2,7 @@
 
   ./rw run [--url URL] [--upload] [--publish-at ISO]   make one video
   ./rw add URL [URL ...]                              queue curated pages
+  ./rw ask "QUESTION" [--now]                         research a question and make an explainer
   ./rw discover [--count N] [--topic KEY --degree 1|2|3|any]   queue N Wikipedia ideas (random, or around a topic)
   ./rw discover --source hackernews|apod|arxiv --topic T|rss --feed URL   queue ideas from other sources
   ./rw discover --source link --link URL              ideas from any link (feed, site, subreddit, category, list...)
@@ -386,12 +387,80 @@ def fetch_article(pageid):
     return p["title"], p.get("description", ""), text, p.get("pageimage")
 
 
-def write_script(title, text):
+QUESTION_PROMPT = """Write the narration for a YouTube Short that answers the question below, using the research notes.
+Rules:
+- 100 to 120 words (about 7 sentences of 15 words). Plain spoken English for a curious 14-year-old; explain any jargon in a few words.
+- Open by asking the question in a vivid way (one short sentence).
+- For "how" questions, answer as 3 or 4 steps in the order they actually happen, using "First", "Next", "Then", "Finally".
+  For "why" or "what" questions, give the cause or core idea first, then one concrete example.
+- End with a satisfying one-line takeaway.
+- Use ONLY facts from the research notes. Do not invent numbers, names or dates.
+- Do not say "Wikipedia", "this article", "in this video", or ask viewers to like or subscribe.
+
+Question: {title}
+Research notes:
+{text}
+
+Reply as JSON: {{"title": "<YouTube title, max 60 characters>", "script": "<narration>", "tags": ["<5 to 8 lowercase tags>"]}}"""
+
+RESEARCH_PROMPT = """We are making a 50-second explainer video that answers: "{question}"
+List 3 to 5 English Wikipedia article titles that together contain the answer: the main topic first, then the key
+parts, steps or mechanisms involved. Use real, existing article titles.
+Reply as JSON: {{"articles": ["<title>", ...]}}"""
+
+
+def research(question):
+    """Answer a question from Wikipedia: pick the articles that cover it, read them, and package the notes as an Article."""
+    wanted = [str(t) for t in (llm(RESEARCH_PROMPT.format(question=question), 0.2).get("articles") or [])][:5]
+    titles = []
+    for q in [question] + wanted:  # resolve each suggestion to a real article via search (the question itself too)
+        hits = wiki(list="search", srsearch=q, srlimit=1, srnamespace=0)["query"]["search"]
+        if hits and hits[0]["title"] not in titles and not JUNK_TITLE.search(hits[0]["title"]):
+            titles.append(hits[0]["title"])
+    if not titles:
+        raise SystemExit(f"couldn't find Wikipedia articles about: {question}")
+    titles = titles[:5]
+    print(f"  researching: {', '.join(titles)}")
+    notes = []
+    simple = get_json("https://simple.wikipedia.org/w/api.php", {"action": "query", "format": "json", "formatversion": 2,
+                      "titles": titles[0], "prop": "extracts", "explaintext": 1, "exintro": 1, "redirects": 1})
+    plain = (simple["query"]["pages"][0].get("extract") or "").strip()
+    if plain:  # Simple English Wikipedia: written for plain explanations
+        notes.append(f"## {titles[0]} (in simple words)\n{plain[:1500]}")
+    for t in titles:
+        _, _, text, _ = fetch_article(wiki(titles=t, redirects=1)["query"]["pages"][0]["pageid"])
+        notes.append(f"## {t}\n{text[:2600]}")
+    urls = [page_url(t) for t in titles]
+    return dict(origin="question", title=question, description=f"Explained · from {len(titles)} Wikipedia articles",
+                text="\n\n".join(notes), url=urls[0], images=[], popularity=None,
+                credit="Researched from the Wikipedia articles " + ", ".join(f'"{t}"' for t in titles)
+                       + " (CC BY-SA 4.0): " + " ".join(urls),
+                source_label="Sources: Wikipedia · CC BY-SA 4.0", titles=titles)
+
+
+def add_question(con, question, force=False):
+    """Queue a question as an idea; it is researched when the video is made."""
+    import sources
+    q = re.sub(r"\s+", " ", question).strip().rstrip("?") + "?"
+    q = q[0].upper() + q[1:]
+    pid = sources.synthetic_id("question:" + q.lower())
+    row = con.execute("select status from pages where pageid=?", (pid,)).fetchone()
+    if row and row["status"] in ("rendered", "uploaded") and not force:
+        print(f"skip: already made ({row['status']}); use --force to make it again")
+        return None
+    if not row or row["status"] != "queued":
+        upsert(con, pid, title=q, url="https://en.wikipedia.org/w/index.php?search=" + urllib.parse.quote(q),
+               source="curated", status="queued", reason="question", origin="question", ref=q)
+    print(f"queued question: {q}")
+    return pid
+
+
+def write_script(title, text, prompt=None):
     s = {}
     for _ in range(6):
         n = len(str(s.get("script", "")).split())
         if n < 40:  # nothing usable yet: fresh draft
-            s = llm(SCRIPT_PROMPT.format(title=title, text=text[:12000]))
+            s = llm((prompt or SCRIPT_PROMPT).format(title=title, text=text[:12000]))
         else:  # revise the draft we have; far more reliable than redrafting blind
             action = ("Cut the least important sentences and tighten the rest." if n > 128 else
                       "Add one or two more facts from the article." if n < 85 else "Keep the length.")
@@ -453,7 +522,8 @@ def commons_files(pages, limit, entity=False):
     return got
 
 
-IMAGE_PROPS = dict(prop="imageinfo", iiprop="url|size|mime|extmetadata", iiurlwidth=1400)
+# Wikimedia only serves standard thumbnail widths (20…500, 960, 1280, 1920, 3840); others are refused (HTTP 429)
+IMAGE_PROPS = dict(prop="imageinfo", iiprop="url|size|mime|extmetadata", iiurlwidth=1280)
 
 
 def src_article(title, limit=12, pageimage=None):
@@ -505,13 +575,63 @@ def src_met(q, limit=12):
     return out
 
 
-IMAGE_SOURCES = {"article": src_article, "commons": src_commons, "openverse": src_openverse, "nasa": src_nasa, "met": src_met}
+VIDEO_MIME = ("video/webm", "video/ogg", "application/ogg", "video/mp4")
+
+
+def src_commons_video(q, limit=12):
+    """Free-licensed video clips on Wikimedia Commons (3 s to 10 min, under 150 MB)."""
+    r = get_json(COMMONS_API, {"action": "query", "format": "json", "formatversion": 2, "generator": "search",
+                               "gsrsearch": f"{q} filetype:video", "gsrnamespace": 6, "gsrlimit": 30,
+                               "prop": "videoinfo", "viprop": "url|size|mime|extmetadata|derivatives", "viurlwidth": 500})
+    out = []
+    for f in sorted(r.get("query", {}).get("pages", []), key=lambda f: f.get("index", 0)):
+        ii = (f.get("videoinfo") or [{}])[0]
+        meta = {k: v.get("value") for k, v in ii.get("extmetadata", {}).items()}
+        # Wikimedia asks for its transcoded versions, not original files: prefer the small 480p/360p ones
+        small = {d.get("transcodekey"): d["src"] for d in ii.get("derivatives", []) if d.get("transcodekey")}
+        url = next((small[k] for k in ("480p.vp9.webm", "360p.mpeg4.mov", "360p.vp9.webm", "240p.vp9.webm") if k in small), None)
+        if (not url or ii.get("mime") not in VIDEO_MIME or not 3 <= (ii.get("duration") or 0) <= 600 or (ii.get("size") or 0) > 150e6
+                or meta.get("NonFree") or not OK_LICENSE.match(meta.get("LicenseShortName") or "")):
+            continue
+        out.append(dict(source="commons", kind="video", url=url, thumb=ii.get("thumburl") or "", page=ii.get("descriptionurl"),
+                        name=f["title"][5:], artist=strip_html(meta.get("Artist")) or "unknown", license=meta.get("LicenseShortName")))
+        if len(out) >= limit:
+            break
+    return out
+
+
+def src_nasa_video(q, limit=8):
+    """NASA video clips (public domain), smallest MP4 rendition."""
+    items = get_json("https://images-api.nasa.gov/search", {"q": q, "media_type": "video"})["collection"]["items"]
+    out = []
+    for it in items[:limit * 2]:
+        d = it["data"][0]
+        try:
+            assets = get_json(urllib.parse.quote(it["href"], safe=":/"))
+        except Exception:
+            continue
+        mp4 = next((a for tag in ("~medium.mp4", "~small.mp4", "~mobile.mp4") for a in assets if a.endswith(tag)), None)
+        if not mp4:
+            continue
+        thumb = next((l["href"] for l in it.get("links", []) if l.get("render") == "image"), "")
+        out.append(dict(source="nasa", kind="video", url=urllib.parse.quote(mp4, safe=":/"), thumb=thumb,
+                        page=f"https://images.nasa.gov/details/{urllib.parse.quote(d['nasa_id'])}", name=d.get("title", "NASA video"),
+                        artist=d.get("center") or "NASA", license="Public domain (NASA)"))
+        if len(out) >= limit:
+            break
+    return out
+
+
+IMAGE_SOURCES = {"article": src_article, "commons": src_commons, "openverse": src_openverse, "nasa": src_nasa, "met": src_met,
+                 "commons_video": src_commons_video, "nasa_video": src_nasa_video}
 
 
 def download_image(img, dest):
     """Download one candidate into the episode folder; returns it with 'path' set, or None."""
     from PIL import Image
     import hashlib, io
+    if img.get("kind") == "video":
+        return download_clip(img, dest)
     stem = dest / f"img_{hashlib.sha1(img['url'].encode()).hexdigest()[:10]}"
     path = next((p for p in (stem.with_suffix(".png"), stem.with_suffix(".jpg")) if p.exists()), None)
     if not path:
@@ -562,12 +682,12 @@ def split_sentences(script):
     return [x for x in re.split(r"(?<=[.!?])\s+", script.strip()) if x]
 
 
-def src_entity(q, limit=2):
+def src_entity(q, limit=2, every=False):
     """Lead images of the Wikipedia articles a search for q finds ('White House' -> the White House photo)."""
     r = wiki(generator="search", gsrsearch=q, gsrlimit=3, prop="pageimages", piprop="name")
     # only articles that are actually about the query ('Internet Archive' -> 'Internet Archive', not 'Website')
     names = [p["pageimage"] for p in sorted(r.get("query", {}).get("pages", []), key=lambda p: p.get("index", 0))
-             if p.get("pageimage") and mentions(q, {"name": p["title"]})]
+             if p.get("pageimage") and mentions(q, {"name": p["title"]}, every)]
     if not names:
         return []
     info = wiki(titles="|".join("File:" + n for n in names), **IMAGE_PROPS).get("query", {}).get("pages", [])
@@ -577,13 +697,14 @@ def src_entity(q, limit=2):
 
 def mentions(query, c, every=False):
     """Does a search result mention the query (title or tags)? every=True: all of its words, not just half."""
-    words = {w.lower() for w in re.findall(r"[A-Za-z0-9]{3,}", query)} - {"the", "and", "for", "with"}
+    stem = lambda w: re.sub(r"(es|s)$", "", w) if len(w) > 4 else w  # 'crawlers' matches 'crawler'
+    words = {stem(w.lower()) for w in re.findall(r"[A-Za-z0-9]{3,}", query)} - {"the", "and", "for", "with"}
     hay = (c.get("name", "") + " " + c.get("tags", "")).lower()
     hits = sum(w in hay for w in words)
     return bool(words) and (hits == len(words) if every else hits >= max(1, len(words) // 2))
 
 
-def pick_visuals(title, script, dest, own=None, pageimage=None, limit=6):
+def pick_visuals(title, script, dest, own=None, pageimage=None, limit=6, topics=()):
     """One image per sentence where possible, for the concrete thing that sentence mentions, from Wikipedia entity
     images, then Commons, then Openverse. Each image remembers its sentence so it appears when that is spoken."""
     sents = split_sentences(script)
@@ -598,8 +719,9 @@ def pick_visuals(title, script, dest, own=None, pageimage=None, limit=6):
         if len(chosen) >= limit or not q or q.lower() in seen_q:
             continue  # the same thing again: keep the current image on screen
         seen_q.add(q.lower())
-        try:  # 1. the lead image of a Wikipedia article about exactly this thing: the most reliable match
-            entity = [c for c in src_entity(q) if c["url"] not in seen_img]
+        named = bool(re.search(r"[A-Z]", q))
+        try:  # 1. the lead image of a Wikipedia article about exactly this thing (vague phrases: every word must match)
+            entity = [c for c in src_entity(q, every=not named) if c["url"] not in seen_img]
         except Exception:
             entity = []
         if entity:
@@ -608,12 +730,13 @@ def pick_visuals(title, script, dest, own=None, pageimage=None, limit=6):
             chosen.append(c | {"sentence": k, "query": q})
             print(f"  sentence {k + 1}: {q!r} -> {c['name'][:60]} [{c['source']}]")
             continue
-        if not re.search(r"[A-Z]", q):  # 3. generic phrase: photo search would match words, not meaning
+        if not named:  # 3. generic phrase: photo search would match words, not meaning
             print(f"  sentence {k + 1}: {q!r} -> keeping the previous image")
             continue
         cands = []  # 2. a named thing: photo libraries, all words required, then a meaning check
-        for search in (lambda: [c for c in src_commons(q, 12) if mentions(q, c, every=True)][:5],
-                       lambda: [c for c in src_openverse(q, 12) if mentions(q, c, every=True)][:4]):
+        for search in (lambda: [c for c in src_commons(q, 12) if mentions(q, c, every=True)][:4],
+                       lambda: [c for c in src_commons_video(q, 12) if mentions(q, c, every=True)][:2],
+                       lambda: [c for c in src_openverse(q, 12) if mentions(q, c, every=True)][:3]):
             try:
                 cands += [c for c in search() if c["url"] not in seen_img]
             except Exception:
@@ -622,7 +745,8 @@ def pick_visuals(title, script, dest, own=None, pageimage=None, limit=6):
             continue
         try:  # the LLM judges meaning, not just matching words
             pick = int(llm(PICK_PROMPT.format(sentence=sents[k], query=q, candidates="\n".join(
-                f"{n + 1}. {re.sub(r'[_]', ' ', c['name'])[:90]} ({c['source']})" for n, c in enumerate(cands[:10]))), 0.1).get("pick", 0) or 0)
+                f"{n + 1}. {re.sub(r'[_]', ' ', c['name'])[:90]} ({'video, ' if c.get('kind') == 'video' else ''}{c['source']})"
+                for n, c in enumerate(cands[:10]))), 0.1).get("pick", 0) or 0)
         except Exception:
             pick = 0
         if not 1 <= pick <= min(10, len(cands)):
@@ -632,6 +756,20 @@ def pick_visuals(title, script, dest, own=None, pageimage=None, limit=6):
         seen_img.add(c["url"])
         chosen.append(c | {"sentence": k, "query": q})
         print(f"  sentence {k + 1}: {q!r} -> {c['name'][:60]} [{c['source']}]")
+    for t in topics:  # explainers: lead images of the researched articles (usually diagrams) fill gaps in order
+        if len(chosen) >= min(limit, len(sents)):
+            break
+        free = sorted(set(range(len(sents))) - {c["sentence"] for c in chosen})
+        try:
+            c = next((c for c in src_entity(t, every=True) if c["url"] not in seen_img), None)
+        except Exception:
+            c = None
+        if c and free:  # place it on the sentence that talks about this topic, else the first empty one
+            k = next((k for k in free if mentions(t, {"name": sents[k]})), free[0])
+            seen_img.add(c["url"])
+            chosen.append(c | {"sentence": k, "query": t})
+            print(f"  sentence {k + 1}: researched topic {t!r} -> {c['name'][:60]} [{c['source']}]")
+    chosen.sort(key=lambda c: c["sentence"])
     if len(chosen) < 2:  # too little found for the script: fall back to the article's own images
         print("  few matches for the script; using the article's images")
         return fetch_images(title, pageimage, dest, own=own)
@@ -643,6 +781,38 @@ def pick_visuals(title, script, dest, own=None, pageimage=None, limit=6):
         except Exception as e:
             print(f"  image failed: {c['name']} ({e})")
     return out
+
+
+def download_clip(clip, dest, seconds=12):
+    """Fetch only the part of a video we use (ffmpeg seeks over HTTP), skip any opening slate, drop the audio,
+    and save a small H.264 MP4 once."""
+    import hashlib, subprocess, imageio_ffmpeg
+    path = dest / f"clip_{hashlib.sha1(clip['url'].encode()).hexdigest()[:10]}.mp4"
+    ok = lambda: path.exists() and path.stat().st_size > 20_000
+
+    def convert(src, input_params=()):
+        dur = next(imageio_ffmpeg.read_frames(src, input_params=list(input_params))).get("duration") or 0
+        skip = min(dur * 0.25, 120) if dur > 20 else 0  # long clips usually open with a title slate
+        subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(), "-y", "-loglevel", "error", *input_params, "-ss", f"{skip:.1f}", "-i", src,
+                        "-t", str(seconds), "-an", "-vf", "scale=-2:720", "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
+                        "-pix_fmt", "yuv420p", str(path)], timeout=600)
+
+    if not ok():
+        try:  # MP4 can be read straight from the server, fetching only the part we use
+            convert(clip["url"], ["-user_agent", BRAND["user_agent"]])
+        except Exception:
+            pass
+    if not ok():  # WebM/Ogg often can't seek over HTTP: download the file (Commons clips are capped at 150 MB)
+        raw = dest / (path.stem + ".src")
+        try:
+            raw.write_bytes(fetch(clip["url"]))
+            convert(str(raw))
+        finally:
+            raw.unlink(missing_ok=True)
+    if not ok():
+        path.unlink(missing_ok=True)
+        raise RuntimeError(f"couldn't convert the clip {clip.get('name', '')}")
+    return {k: v for k, v in clip.items() if k != "tags"} | {"path": str(path)}  # thumb kept: poster in the editor
 
 
 def fetch_images(title, pageimage, dest, want=4, limit=6, own=None):
@@ -705,7 +875,7 @@ def roman(s):
 
 
 NUM = r"\d+(?:\.\d+)*"
-SPEAK = re.compile(rf"(?P<num>(?<![\w.]){NUM}(?:\s*[–—]\s*{NUM})?)(?![\w])|(?P<rom>\b(?P<w>[A-Za-z]+) (?P<r>[IVXLC]{{1,7}})\b(?![\w-]))")
+SPEAK = re.compile(rf"(?P<num>(?<![\w.]){NUM}(?:\s*[–—]\s*{NUM}|-{NUM})?)(?![\w])|(?P<rom>\b(?P<w>[A-Za-z]+) (?P<r>[IVXLC]{{1,7}})\b(?![\w-]))")
 
 
 def say_number(expr):
@@ -715,7 +885,7 @@ def say_number(expr):
         if len(parts) == 2:  # decimal: digits after the point are read one by one
             return f"{parts[0]} point {' '.join(parts[1])}"
         return " point ".join(parts)  # plain number, or a version like 5.4.8
-    return " to ".join(one(x) for x in re.split(r"\s*[–—]\s*", expr))
+    return " to ".join(one(x) for x in re.split(r"\s*[–—]\s*|-", expr))
 
 
 def speakable_map(text):
@@ -725,7 +895,7 @@ def speakable_map(text):
 
     def fix(m):
         if m["num"]:
-            if "." not in m["num"] and not re.search("[–—]", m["num"]):
+            if "." not in m["num"] and not re.search("[–—-]", m["num"]):
                 return m[0]  # plain numbers are read fine
             spoken = say_number(m["num"])
         else:
@@ -1040,9 +1210,30 @@ def render(meta, words, audio_path, duration, out_path, frame_at=None):
     ImageDraw.Draw(mask).rounded_rectangle((0, 0, PW, PH), 36, fill=255)
 
     # panel sources: article images, else a branded text card
-    srcs, cues = [], []
+    class Clip:  # a video in the panel: frames streamed from ffmpeg, looped if the sentence outlasts the clip
+        def __init__(self, path):
+            self.path, self.gen = path, None
+            self.first = self.next()
+
+        def next(self):
+            for _ in range(2):
+                if self.gen is None:
+                    self.gen = imageio_ffmpeg.read_frames(self.path, output_params=[
+                        "-vf", f"scale={PW}:{PH}:force_original_aspect_ratio=increase,crop={PW}:{PH}", "-r", str(FPS)])
+                    next(self.gen)  # metadata
+                try:
+                    return Image.frombytes("RGB", (PW, PH), next(self.gen))
+                except StopIteration:
+                    self.gen = None
+            raise RuntimeError(f"no frames in {self.path}")
+
+    srcs, cues, still = [], [], set()  # still: whole-image cards (logos, diagrams) that must not be zoomed into
     for img in meta["images"]:
         try:
+            if img.get("kind") == "video":
+                srcs.append((Clip(img["path"]), fit_lines("Video: " + credit(img), "body", 26, PW, 2, min_size=18) if credit(img) else None))
+                cues.append(img.get("sentence"))
+                continue
             im = Image.open(img["path"])
             if img.get("fit") == "contain":  # logo/diagram: whole, centred on a light card, never cropped
                 card = Image.new("RGB", (int(PW * 1.15), int(PH * 1.15)), "#F4F5F7")
@@ -1050,6 +1241,7 @@ def render(meta, words, audio_path, duration, out_path, frame_at=None):
                 scale = 0.62 if re.search(r"logo|wordmark|icon|symbol", img.get("name", ""), re.I) else 0.92  # screenshots fill the card
                 im.thumbnail((int(card.width * scale), int(card.height * scale)), Image.LANCZOS)
                 card.paste(im, ((card.width - im.width) // 2, (card.height - im.height) // 2), im)
+                still.add(len(srcs))
                 srcs.append((card, fit_lines("Image: " + credit(img), "body", 26, PW, 2, min_size=18) if credit(img) else None))
                 cues.append(img.get("sentence"))
                 continue
@@ -1077,9 +1269,11 @@ def render(meta, words, audio_path, duration, out_path, frame_at=None):
         cues.append(None)
         # ponytail: one text card when no free images exist; add AI image gen (mflux) if this happens often
 
-    def kb(i, p):  # Ken Burns crop of source i at progress p in [0,1]
+    def kb(i, p, start=False):  # Ken Burns crop of source i at progress p in [0,1]; clips play instead
+        if isinstance(srcs[i][0], Clip):
+            return srcs[i][0].first if start else srcs[i][0].next()
         im = srcs[i][0]
-        z = 1 + 0.12 * (p if i % 2 == 0 else 1 - p)
+        z = 1 + (0.04 if i in still else 0.12) * (p if i % 2 == 0 else 1 - p)
         bw0 = min(im.width, im.height * PW / PH)
         bw, bh = bw0 / z, bw0 / z * PH / PW
         dx = 1 if i % 2 == 0 else -1
@@ -1126,7 +1320,7 @@ def render(meta, words, audio_path, duration, out_path, frame_at=None):
         i = max(k for k in range(n) if starts[k] <= t)
         panel = kb(i, (t - starts[i]) / max(0.1, ends[i] - starts[i]))
         if i < n - 1 and t > ends[i] - fade:
-            panel = Image.blend(panel, kb(i + 1, 0), 1 - (ends[i] - t) / fade)
+            panel = Image.blend(panel, kb(i + 1, 0, start=True), 1 - (ends[i] - t) / fade)
         im = bg.copy()
         im.paste(panel, (PX, PY), mask)
         fd = ImageDraw.Draw(im)
@@ -1247,9 +1441,15 @@ def make(con, pageid):
     upsert(con, pageid, ep=ep)
     try:
         origin = row["origin"] or "wikipedia"
+        prompt = None
         if origin == "wikipedia":
             title, desc, text, pageimage = fetch_article(pageid)
             src = dict(url=page_url(title), own=None)
+        elif origin == "question":
+            a = research(row["ref"])
+            title, desc, text, pageimage, prompt = a["title"], a["description"], a["text"], None, QUESTION_PROMPT
+            src = dict(url=a["url"], own=None, credit=a["credit"], source_label=a["source_label"], popularity=None,
+                       topics=a["titles"])
         else:
             import sources
             a = sources.fetch_article(origin, row["ref"])
@@ -1257,9 +1457,9 @@ def make(con, pageid):
             src = dict(url=a["url"], own=a["images"], credit=a["credit"], source_label=a["source_label"],
                        popularity=a.get("popularity"))
         print(f"[{ep:03d}] {title}" + ("" if origin == "wikipedia" else f"  [{origin}]") + "\n  writing script…")
-        s = write_script(title, text)
+        s = write_script(title, text, prompt)
         print(f"  \"{s['title']}\"\n  fetching images…")
-        images = pick_visuals(title, s["script"], work, own=src.pop("own"), pageimage=pageimage)
+        images = pick_visuals(title, s["script"], work, own=src.pop("own"), pageimage=pageimage, topics=src.get("topics", ()))
         print(f"  {len(images)} images")
         m = dict(ep=ep, pageid=pageid, origin=origin, article_title=title, description=desc,
                  title=s["title"], script=s["script"], tags=s["tags"], images=images, **src)
@@ -1436,7 +1636,8 @@ def rerender(con, ep, repick_images=False, narration=None):
         m["narration"] = "kokoro"
     if repick_images:
         print("  picking images from the script…")
-        m["images"] = pick_visuals(m["article_title"], m["script"], WORK / str(row["pageid"]), own=[]) or m["images"]
+        m["images"] = pick_visuals(m["article_title"], m["script"], WORK / str(row["pageid"]), own=[],
+                                   topics=m.get("topics", ())) or m["images"]
     produce(con, m, Path(row["video_path"]) if row["video_path"] else OUT / f"{ep:03d}-rerender.mp4")
     score_video(con, row["pageid"])
 
@@ -1576,8 +1777,10 @@ def selftest():
     assert al[7][1:] == [2.4, 3.3] and al[8][1:] == [3.3, 4]  # '20,000' fills the gap the recogniser heard as words
     assert visual_query("August 2026", "PHP2Shell") == "PHP2Shell" and visual_query("70 percent", "X") == "X"
     assert visual_query("Internet Archive", "X") == "Internet Archive" and visual_query("World War II", "X") == "World War II"
+    assert mentions("web crawlers", {"name": "Web crawler"}, every=True)
     assert mentions("Internet Archive", {"name": "Internet Archive logo.svg"}) and not mentions("Internet Archive", {"name": "Cat.jpg"})
     assert speakable("PHP versions 5.4–8.5 that") == "PHP versions 5 point 4 to 8 point 5 that"
+    assert speakable("holding 89-90% of searches") == "holding 89 to 90% of searches"
     assert speakable("PHP 5.4.8. Pi is 3.14 in 2026, from 1914–1918.") == "PHP 5 point 4 point 8. Pi is 3 point 1 4 in 2026, from 1914 to 1918."
     spoken, pairs = speakable_map("in versions 5.4–8.5. World War II ended")
     w = [[t, k, k + 1] for k, t in enumerate(spoken.replace(".", " .").split())]
@@ -1600,6 +1803,9 @@ def main():
     r = sub.add_parser("run"); r.add_argument("--url"); r.add_argument("--force", action="store_true")
     r.add_argument("--upload", action="store_true"); r.add_argument("--publish-at")
     a = sub.add_parser("add"); a.add_argument("urls", nargs="+"); a.add_argument("--force", action="store_true")
+    ak = sub.add_parser("ask", help="make an explainer that answers a question")
+    ak.add_argument("question"); ak.add_argument("--now", action="store_true", help="make it right away")
+    ak.add_argument("--force", action="store_true")
     u = sub.add_parser("upload"); u.add_argument("--publish-at"); u.add_argument("--ep", type=int)
     lg = sub.add_parser("log"); lg.add_argument("n", nargs="?", type=int, default=30)
     sub.add_parser("selftest")
@@ -1629,6 +1835,11 @@ def main():
         return web.serve(args.port, not args.no_open)
     if args.cmd == "selftest":
         return selftest()
+    if args.cmd == "ask":
+        pid = add_question(con, args.question, args.force)
+        if pid and args.now:
+            make(con, pid)
+        return
     if args.cmd == "add":
         for url in args.urls:
             add_curated(con, url, args.force)

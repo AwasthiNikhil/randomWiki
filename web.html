@@ -136,7 +136,7 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
 .vsearch input, .vsearch select { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; color: var(--text); }
 .vsearch input { flex: 1; min-width: 140px; }
 .vresults { display: grid; grid-template-columns: repeat(auto-fill, minmax(88px, 1fr)); gap: 6px; margin-top: 8px; max-height: 270px; overflow: auto; }
-.vres { padding: 0; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; cursor: pointer; aspect-ratio: 1; background: var(--panel2); }
+.vres { position: relative; padding: 0; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; cursor: pointer; aspect-ratio: 1; background: var(--panel2); }
 .vres:hover { border-color: var(--accent); }
 .vres.added { border: 2px solid var(--ok); opacity: .55; }
 .detail .btns { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
@@ -418,6 +418,15 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
         </div>
       </div>
       <div>
+        <h4>Explain a question</h4>
+        <div class="row wrap">
+          <input id="ask" placeholder="e.g. How does a search engine work?" aria-label="Question to explain">
+          <button class="btn primary" id="askNow" title="Research it on Wikipedia and make an explainer now">Make now</button>
+          <button class="btn" id="askSave" title="Save the question to the ideabank">Save idea</button>
+        </div>
+        <div class="hint">Researched from several Wikipedia articles, then answered step by step.</div>
+      </div>
+      <div>
         <h4>Publish</h4>
         <div class="row">
           <input id="publishAt" type="datetime-local" aria-label="Go public at (optional)">
@@ -514,7 +523,7 @@ function potDetail(p) {
     <div class="hint">${esc(i.why)} · ${i.views60.toLocaleString()} article views in 60 days · ${i.languages} languages · ${i.seconds}s</div>`;
 }
 
-const ORIGIN_NAMES = {wikipedia: "Wikipedia", web: "Article", hackernews: "Hacker News", arxiv: "arXiv", apod: "NASA APOD"};
+const ORIGIN_NAMES = {wikipedia: "Wikipedia", web: "Article", hackernews: "Hacker News", arxiv: "arXiv", apod: "NASA APOD", question: "Question"};
 const STATUS_LABEL = {queued: "idea", rendered: "in queue"};
 const statusLabel = st => STATUS_LABEL[st] || st;
 const originName = p => ORIGIN_NAMES[p.origin || "wikipedia"] || p.origin;
@@ -583,12 +592,12 @@ function renderQueue() {
 let edImages = [];
 function wireVisuals(p) {
   edImages = (p.images || []).map(i => ({...i}));
-  const imgSrc = i => i.file ? `/work/${p.pageid}/${encodeURIComponent(i.file)}` : i.thumb;
+  const imgSrc = i => i.kind === "video" ? i.thumb : i.file ? `/work/${p.pageid}/${encodeURIComponent(i.file)}` : i.thumb;
   const strip = () => {
     $("#vStrip").innerHTML = edImages.map((i, n) => `
       <div class="vtile ${i.file ? "" : "new"}" draggable="true" tabindex="0" data-i="${n}"
            title="${esc((i.name || "") + (i.credit || i.license ? " · " + (i.credit || i.license) : ""))}" aria-label="Image ${n + 1}: ${esc(i.name)}. Arrow keys to move.">
-        <img src="${esc(imgSrc(i))}" alt=""><span class="n">${n + 1}</span>
+        <img src="${esc(imgSrc(i))}" alt=""><span class="n">${n + 1}${i.kind === "video" ? " ▶" : ""}</span>
         <button class="x" data-rm="${n}" aria-label="Remove image ${n + 1}">✕</button>
       </div>`).join("") || `<span class="hint">No images: the video will use a title card.</span>`;
     document.querySelectorAll(".vres").forEach(b => b.classList.toggle("added", edImages.some(i => same(i, results[+b.dataset.r]))));
@@ -614,7 +623,7 @@ function wireVisuals(p) {
     const j = await r.json();
     results = j.results || [];
     $("#vResults").innerHTML = !r.ok ? `<span class="hint">${esc(j.error)}</span>` : !results.length ? `<span class="hint">No free-licensed images found.</span>`
-      : results.map((c, n) => `<button class="vres" data-r="${n}" data-url="${esc(c.url)}" title="${esc(c.name + " · " + (c.artist && !/^unknown/i.test(c.artist) ? c.artist + " · " : "") + c.license)}"><img src="${esc(c.thumb)}" alt="${esc(c.name)}" loading="lazy"></button>`).join("");
+      : results.map((c, n) => `<button class="vres" data-r="${n}" data-url="${esc(c.url)}" title="${esc(c.name + " · " + (c.artist && !/^unknown/i.test(c.artist) ? c.artist + " · " : "") + c.license)}"><img src="${esc(c.thumb)}" alt="${esc(c.name)}" loading="lazy">${c.kind === "video" ? `<span class="n" style="position:absolute;left:4px;bottom:4px;font:600 11px var(--mono);background:#000c;padding:0 5px;border-radius:4px">▶</span>` : ""}</button>`).join("");
     strip();
   };
   $("#vGo").onclick = search;
@@ -710,6 +719,7 @@ function openDetail(id) {
           <select id="vSource" aria-label="Image source">
             <option value="article">This article</option><option value="commons" selected>Wikimedia Commons</option>
             <option value="openverse">Openverse (Flickr etc.)</option><option value="nasa">NASA</option><option value="met">The Met (art &amp; history)</option>
+            <option value="commons_video">▶ Commons videos</option><option value="nasa_video">▶ NASA videos</option>
           </select>
           <input id="vQuery" value="${esc(p.title)}" aria-label="Image search">
           <button class="btn" id="vGo">Search</button>
@@ -872,6 +882,10 @@ $("#qAdd").onclick = () => {
   const items = $("#qText").value.split("\n").map(x => x.trim()).filter(Boolean);
   if (items.length) exec("add " + items.map(quote).join(" ")).then(ok => ok && ($("#qText").value = ""));
 };
+const askCmd = now => { const q = $("#ask").value.trim(); if (!q) return termLine("! type a question first", "err");
+  exec(`ask ${quote(q)}` + (now ? " --now" : "")).then(ok => ok && ($("#ask").value = "")); };
+$("#askNow").onclick = () => askCmd(true);
+$("#askSave").onclick = () => askCmd(false);
 $("#upload").onclick = () => exec("upload" + publishArg());
 $("#search").oninput = e => { q = e.target.value; renderLog(); };
 $("#epSearch").oninput = e => { epQ = e.target.value; renderEpisodes(); };

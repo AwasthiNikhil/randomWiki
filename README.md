@@ -16,6 +16,15 @@ Articles go in, and branded YouTube Shorts come out. Wikipedia is the main sourc
 7. **Score:** each video gets a 0–100 potential score from topic demand, hook, appeal, reach, visuals and length.
 8. **Publish:** YouTube Data API upload, private or scheduled, best potential first. Credits go into the description automatically.
 
+## Explain a question
+Type a question in the studio's **Explain a question** box, or run `./rw ask "How does a search engine work?" --now`.
+- **Research:** the local LLM names the Wikipedia articles that together answer it. Those, plus the Simple English version of the main one, become the research notes.
+- **Script:** opens with the question and answers it in steps ("First… Next… Finally…"), using only facts from the notes, and is fact-checked.
+- **Visuals:** picked per sentence. Gaps are filled with the lead images of the researched articles, which are usually diagrams, placed on the sentence that mentions them.
+- **Credits:** every article used is credited.
+
+Visuals can also be **video clips**: free-licensed Wikimedia Commons clips (using Wikimedia's own small transcodes) and NASA footage (public domain). They're trimmed to 12 s, skip any opening slate, are muted, and play in the panel. Auto-pick can choose them for named things; in the visuals editor, pick *▶ Commons videos* or *▶ NASA videos*.
+
 ## Sources
 | Source | Find ideas | What the script is written from | Images |
 |---|---|---|---|
