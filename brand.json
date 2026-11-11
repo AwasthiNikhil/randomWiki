@@ -1,0 +1,27 @@
+{
+  "channel": "Random Wiki",
+  "tagline": "One random Wikipedia page. Every day.",
+  "outro_line": "That was today's random page. Follow for tomorrow's.",
+  "colors": {
+    "bg": "#0E1116",
+    "panel": "#1A1F29",
+    "accent": "#FFC83D",
+    "text": "#FFFFFF",
+    "muted": "#9AA4B2"
+  },
+  "fonts": {
+    "display": "brand/fonts/Anton-Regular.ttf",
+    "body": "brand/fonts/Inter.ttf"
+  },
+  "voice": "bm_george",
+  "voice_lang": "b",
+  "voice_speed": 1.0,
+  "music": "brand/music.mp3",
+  "music_volume": 0.08,
+  "llm": "llama3.1:8b",
+  "ollama_url": "http://localhost:11434",
+  "min_score": 7,
+  "max_seconds": 58,
+  "hashtags": ["wikipedia", "didyouknow", "history", "facts"],
+  "user_agent": "RandomWikiShorts/0.1 (personal non-commercial project)"
+}

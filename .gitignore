@@ -1,0 +1,19 @@
+# secrets
+secrets/
+.env
+
+# generated: database, working files, videos
+data/
+work/
+out/
+
+# local toolchain and model caches (recreated by ./setup.sh)
+.venv/
+.cache/
+.tools/
+__pycache__/
+
+# downloaded/personal brand assets
+brand/fonts/
+brand/music.mp3
+.DS_Store
