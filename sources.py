@@ -6,7 +6,7 @@ key is a stable unique id ("hackernews:8863"); credit goes in the YouTube descri
 video footer; images are free-licensed picks only (never a web page's own images: they are copyrighted);
 popularity (0-1, optional) feeds the potential score. Wikipedia itself stays on rw.py's optimised path.
 """
-import hashlib, html, math, random, re, urllib.parse, urllib.robotparser
+import hashlib, html, http.client, math, random, re, urllib.parse, urllib.robotparser
 import xml.etree.ElementTree as ET
 
 from rw import fetch, get_json
@@ -53,6 +53,8 @@ def fetch_page(url):
         raise SystemExit(f"{urllib.parse.urlsplit(url).netloc} {why}.{hint}") from None
     except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
         raise SystemExit(f"couldn't reach {urllib.parse.urlsplit(url).netloc}: {getattr(e, 'reason', e)}") from None
+    except (ValueError, http.client.InvalidURL):
+        raise SystemExit(f"that isn't a valid link: {url}") from None
 
 
 
@@ -231,10 +233,17 @@ def page_links(html_text, base, limit):
     return out
 
 
+def looks_like_link(text):
+    """'https://x.com/a', 'x.com/a', 'r/todayilearned'-style links vs plain words like 'black holes'."""
+    return bool(re.match(r"^(https?://\S+|[\w-]+(\.[\w-]+)+(/\S*)?)$", text.strip()))
+
+
 def discover_link(url, limit):
     """Any link -> (what it is, candidates). Candidates may be Wikipedia titles (origin "wikipedia")."""
     import trafilatura
     url = url.strip()
+    if not looks_like_link(url):  # plain words: a topic, explored through Wikipedia's link network
+        return f'topic "{url}": exploring Wikipedia around it', [dict(origin="topic", ref=url, title=url, summary="")]
     u = urllib.parse.urlsplit(url if "://" in url else "https://" + url)
     host, path = u.netloc.removeprefix("www.").lower(), u.path
     if host.endswith("wikipedia.org") and "/wiki/" in path:
@@ -317,6 +326,8 @@ def selftest():  # link detection and id stability (no network)
     assert detect("https://example.com/story") == ("web", "https://example.com/story")
     assert synthetic_id("web:x") == synthetic_id("web:x") > 10 ** 12 > synthetic_id("web:y") - 10 ** 13
     assert strip_tags("<p>a &amp; <b>b</b></p>") == "a & b"
+    assert looks_like_link("https://a.com/x") and looks_like_link("example.org/blog") and looks_like_link("chandanshakya.com.np")
+    assert not looks_like_link("laravel test driven development") and not looks_like_link("black holes")
     listing = ('<a href="/2026/11/why-octopuses-dream">Why octopuses dream, according to new sleep research</a>'
                '<a href="/about">About us and our long editorial history here</a><a href="/tag/science">Science</a>'
                '<a href="https://other.com/x-1">An external story that should be ignored entirely</a>')

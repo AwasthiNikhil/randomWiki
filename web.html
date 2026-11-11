@@ -776,7 +776,7 @@ $("#makeUrl").onclick = () => { const u = $("#url").value.trim(); if (u) exec(`r
 $("#queueUrl").onclick = () => { const u = $("#url").value.trim(); if (u) exec(`add ${quote(u)}`).then(ok => ok && ($("#url").value = "")); };
 const publishArg = () => { const v = $("#publishAt").value; return v ? " --publish-at " + new Date(v).toISOString().replace(/\.\d+Z$/, "Z") : ""; };
 const SOURCE_HINT = {
-  link: "Paste any link: a blog, news section, RSS feed, r/subreddit, Wikipedia Category: or List of… page, HN list…",
+  link: "Paste a link (blog, news section, feed, subreddit, Wikipedia category or list…) or type a topic",
   wikipedia: "Topic to explore, e.g. Nepal, jazz, black holes (empty = fully random)",
   hackernews: "No input needed: today's top stories", apod: "No input needed: latest Astronomy Pictures of the Day",
   arxiv: "Topic to search papers for, e.g. black holes", rss: "Feed URL, e.g. https://www.nasa.gov/feed/",

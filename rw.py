@@ -232,7 +232,9 @@ def discover_source(con, origin, want=5, arg=None):
             print(f"   –  {c['title'][:60]}  ({e})")
             continue
         pid = sources.synthetic_id(a["key"])
-        if con.execute("select 1 from pages where pageid=?", (pid,)).fetchone():
+        seen = con.execute("select status from pages where pageid=?", (pid,)).fetchone()
+        if seen:  # never process the same item twice; say so instead of skipping silently
+            print(f"   –  {a['title'][:60]}  (already in your log as {seen['status'].replace('queued', 'idea').replace('rendered', 'in queue')})")
             continue
         base = dict(title=a["title"], url=a["url"], source=origin if origin in ("rss", "link") else "random",
                     origin=a["origin"], ref=c["ref"], via=arg if origin == "link" else None)
@@ -314,7 +316,7 @@ def link_graph(seed, max_degree, frontier_size=25):
     return levels
 
 
-def explore(con, key, degree="any", want=5, max_checks=300):
+def explore(con, key, degree="any", want=5, max_checks=60):  # ~60 LLM checks max, so a dead-end topic stops in minutes
     """Queue up to `want` interesting pages within `degree` hops of the topic `key`."""
     import random
     seed = resolve_seed(key)
@@ -340,7 +342,9 @@ def explore(con, key, degree="any", want=5, max_checks=300):
                 found.append(p["pageid"])
                 if len(found) >= want:
                     return found
-    print(f"found {len(found)} of {want} after checking {checked} pages" + ("" if found else "; try another degree"))
+    print(f"found {len(found)} of {want} after checking {checked} pages around '{seed}'" + ("" if found else
+          ". Nothing passed the interest filter: technical or niche topics rarely score high. Try a broader topic, "
+          "another degree, a lower minimum score in Settings, or add specific articles with the Ideabank's top box."))
     return found
 
 
