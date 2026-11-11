@@ -599,6 +599,11 @@ function wireVisuals(p) {
     strip();
   };
   $("#vGo").onclick = search;
+  $("#vAuto").onclick = async () => {  // saves the text first, then re-picks images and re-renders
+    if (await post("/api/script", {pageid: p.pageid, title: $("#edTitle").value, script: $("#edScript").value})) {
+      dlg.close(); exec(`rerender --ep ${p.ep} --repick-images`);
+    }
+  };
   $("#vQuery").onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); search(); } };
   $("#vResults").onclick = e => {
     const b = e.target.closest(".vres"); if (!b) return;
@@ -690,6 +695,7 @@ function openDetail(id) {
           <input id="vQuery" value="${esc(p.title)}" aria-label="Image search">
           <button class="btn" id="vGo">Search</button>
           <label class="btn" style="cursor:pointer">Upload own<input type="file" accept="image/*" id="vFile" hidden multiple></label>
+          <button class="btn" id="vAuto" title="Pick an image for each thing the narration mentions (Wikipedia, Commons, Openverse), timed to when it's said">Auto-pick from script</button>
         </div>
         <div class="vresults" id="vResults"></div>
         <div class="btns" style="margin-top:12px"><button class="btn primary" data-rerender="${p.pageid}" data-ep="${p.ep}">Save &amp; re-render</button>

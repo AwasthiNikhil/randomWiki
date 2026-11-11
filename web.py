@@ -239,9 +239,9 @@ class H(BaseHTTPRequestHandler):
                 return self.send(200, {"results": fn(qs["q"])})
             except Exception as e:
                 return self.send(502, {"error": f"{qs['source']} search failed: {e}"})
-        m = re.fullmatch(r"/work/(\d+)/([\w.\-]+\.jpg)", path)  # episode images (thumbnails in the editor)
+        m = re.fullmatch(r"/work/(\d+)/([\w.\-]+\.(jpg|png))", path)  # episode images (thumbnails in the editor)
         if m and (rw.WORK / m[1] / m[2]).is_file():
-            return self.send_file(rw.WORK / m[1] / m[2], "image/jpeg")
+            return self.send_file(rw.WORK / m[1] / m[2], "image/png" if m[3] == "png" else "image/jpeg")
         m = re.fullmatch(r"/(video|fonts)/([\w.\-\[\],]+)", path)
         if m:  # basename only: no path traversal
             base = rw.OUT if m[1] == "video" else rw.ROOT / "brand" / "fonts"

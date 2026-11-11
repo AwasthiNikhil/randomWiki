@@ -432,19 +432,22 @@ OK_LICENSE = re.compile(r"^(cc[ -]?by|cc0|cc-zero|public domain|pd)", re.I)
 COMMONS_API = "https://commons.wikimedia.org/w/api.php"
 
 
-def commons_files(pages, limit):
-    """imageinfo pages -> usable, free-licensed image dicts."""
+def commons_files(pages, limit, entity=False):
+    """imageinfo pages -> usable, free-licensed image dicts. entity=True: the lead image of a Wikipedia article about
+    the thing itself, so logos, flags and SVG diagrams are allowed (SVGs come as PNG renders) and shown whole."""
     got = []
     for f in pages:
         ii = (f.get("imageinfo") or [{}])[0]
         meta = {k: v.get("value") for k, v in ii.get("extmetadata", {}).items()}
-        if (BAD_FILE.search(f["title"]) or ii.get("mime") not in ("image/jpeg", "image/png", "image/webp")
-                or ii.get("width", 0) < 600 or ii.get("height", 0) < 450
+        svg = ii.get("mime") == "image/svg+xml"
+        if ((not entity and BAD_FILE.search(f["title"])) or ii.get("mime") not in ("image/jpeg", "image/png", "image/webp") + (("image/svg+xml",) if entity else ())
+                or (not svg and (ii.get("width", 0) < (300 if entity else 600) or ii.get("height", 0) < (200 if entity else 450)))
                 or meta.get("NonFree") or not OK_LICENSE.match(meta.get("LicenseShortName") or "")):
             continue
-        got.append(dict(source="commons", url=ii.get("thumburl") or ii["url"], thumb=ii.get("thumburl") or ii["url"],
+        got.append(dict(source="wikipedia" if entity else "commons", url=ii.get("thumburl") or ii["url"], thumb=ii.get("thumburl") or ii["url"],
                         page=ii.get("descriptionurl"), name=f["title"][5:],
-                        artist=strip_html(meta.get("Artist")) or "unknown", license=meta.get("LicenseShortName")))
+                        artist=strip_html(meta.get("Artist")) or "unknown", license=meta.get("LicenseShortName"))
+                   | ({"fit": "contain"} if svg or re.search(r"logo|wordmark|icon|diagram|map|chart|screenshot|screen shot|interface|homepage|\.png$", f["title"], re.I) else {}))
         if len(got) >= limit:
             break
     return got
@@ -509,13 +512,137 @@ def download_image(img, dest):
     """Download one candidate into the episode folder; returns it with 'path' set, or None."""
     from PIL import Image
     import hashlib, io
-    path = dest / f"img_{hashlib.sha1(img['url'].encode()).hexdigest()[:10]}.jpg"
-    if not path.exists():
+    stem = dest / f"img_{hashlib.sha1(img['url'].encode()).hexdigest()[:10]}"
+    path = next((p for p in (stem.with_suffix(".png"), stem.with_suffix(".jpg")) if p.exists()), None)
+    if not path:
         time.sleep(0.5)  # Wikimedia rate-limits bursts
         data = fetch(img["url"])
         im = Image.open(io.BytesIO(data))  # also validates that it really is an image
-        im.convert("RGB").save(path, "JPEG", quality=92) if im.format not in ("JPEG",) else path.write_bytes(data)
+        if im.mode in ("RGBA", "LA") or "transparency" in im.info:  # logos: keep transparency (JPEG would turn it black)
+            path = stem.with_suffix(".png")
+            im.convert("RGBA").save(path, "PNG")
+        else:
+            path = stem.with_suffix(".jpg")
+            path.write_bytes(data) if im.format == "JPEG" else im.convert("RGB").save(path, "JPEG", quality=92)
     return {k: v for k, v in img.items() if k not in ("thumb", "tags")} | {"path": str(path)}
+
+
+VISUAL_PROMPT = """You pick images for a YouTube Short. For each numbered sentence of the narration, give ONE short image
+search query (1-5 words) naming the most concrete, picturable thing it mentions: a named person, place, building,
+organisation, company, product, software, logo, artwork, animal, object or event. Use proper nouns exactly as written.
+If a sentence has nothing concrete, repeat the main subject.
+
+Main subject: {title}
+Sentences:
+{sentences}
+
+Reply as JSON: {{"queries": ["<query for sentence 1>", "<query for sentence 2>", ...]}}"""
+
+
+MONTHS = r"jan(uary)?|feb(ruary)?|mar(ch)?|apr(il)?|may|june?|july?|aug(ust)?|sep(tember)?|oct(ober)?|nov(ember)?|dec(ember)?"
+
+
+def visual_query(q, subject):
+    """Dates and numbers aren't pictures: 'August 2026' or '70 percent' -> the main subject."""
+    rest = re.sub(rf"\b({MONTHS})\b|\b\d[\d,.%]*\b|\b(percent|century|year|years|day|days|today|yesterday)\b", "", q, flags=re.I)
+    return q if len(re.sub(r"\W", "", rest)) >= 3 else subject
+
+
+PICK_PROMPT = """A YouTube Short says: "{sentence}"
+It needs an image of: {query}
+Candidate images (title or file name, then source):
+{candidates}
+
+Which ONE clearly shows {query} in the sense this sentence means? Reject candidates that only share a word with a
+different meaning (a uniform patch is not a software patch) or that are about something else.
+Reply as JSON: {{"pick": <candidate number, or 0 if none fit>}}"""
+
+
+def split_sentences(script):
+    return [x for x in re.split(r"(?<=[.!?])\s+", script.strip()) if x]
+
+
+def src_entity(q, limit=2):
+    """Lead images of the Wikipedia articles a search for q finds ('White House' -> the White House photo)."""
+    r = wiki(generator="search", gsrsearch=q, gsrlimit=3, prop="pageimages", piprop="name")
+    # only articles that are actually about the query ('Internet Archive' -> 'Internet Archive', not 'Website')
+    names = [p["pageimage"] for p in sorted(r.get("query", {}).get("pages", []), key=lambda p: p.get("index", 0))
+             if p.get("pageimage") and mentions(q, {"name": p["title"]})]
+    if not names:
+        return []
+    info = wiki(titles="|".join("File:" + n for n in names), **IMAGE_PROPS).get("query", {}).get("pages", [])
+    order = {"File:" + n.replace("_", " "): k for k, n in enumerate(names)}
+    return commons_files(sorted(info, key=lambda f: order.get(f["title"], 99)), limit, entity=True)
+
+
+def mentions(query, c, every=False):
+    """Does a search result mention the query (title or tags)? every=True: all of its words, not just half."""
+    words = {w.lower() for w in re.findall(r"[A-Za-z0-9]{3,}", query)} - {"the", "and", "for", "with"}
+    hay = (c.get("name", "") + " " + c.get("tags", "")).lower()
+    hits = sum(w in hay for w in words)
+    return bool(words) and (hits == len(words) if every else hits >= max(1, len(words) // 2))
+
+
+def pick_visuals(title, script, dest, own=None, pageimage=None, limit=6):
+    """One image per sentence where possible, for the concrete thing that sentence mentions, from Wikipedia entity
+    images, then Commons, then Openverse. Each image remembers its sentence so it appears when that is spoken."""
+    sents = split_sentences(script)
+    try:
+        qs = [str(q).strip() for q in llm(VISUAL_PROMPT.format(title=title, sentences="\n".join(
+            f"{k + 1}. {x}" for k, x in enumerate(sents))), 0.2).get("queries", [])]
+    except Exception:
+        qs = []
+    qs = [visual_query(q, title) for q in (qs + [title] * len(sents))[:len(sents)]]
+    chosen, seen_q, seen_img = [], set(), set()
+    for k, q in enumerate(qs):
+        if len(chosen) >= limit or not q or q.lower() in seen_q:
+            continue  # the same thing again: keep the current image on screen
+        seen_q.add(q.lower())
+        try:  # 1. the lead image of a Wikipedia article about exactly this thing: the most reliable match
+            entity = [c for c in src_entity(q) if c["url"] not in seen_img]
+        except Exception:
+            entity = []
+        if entity:
+            c = entity[0]
+            seen_img.add(c["url"])
+            chosen.append(c | {"sentence": k, "query": q})
+            print(f"  sentence {k + 1}: {q!r} -> {c['name'][:60]} [{c['source']}]")
+            continue
+        if not re.search(r"[A-Z]", q):  # 3. generic phrase: photo search would match words, not meaning
+            print(f"  sentence {k + 1}: {q!r} -> keeping the previous image")
+            continue
+        cands = []  # 2. a named thing: photo libraries, all words required, then a meaning check
+        for search in (lambda: [c for c in src_commons(q, 12) if mentions(q, c, every=True)][:5],
+                       lambda: [c for c in src_openverse(q, 12) if mentions(q, c, every=True)][:4]):
+            try:
+                cands += [c for c in search() if c["url"] not in seen_img]
+            except Exception:
+                pass
+        if not cands:
+            continue
+        try:  # the LLM judges meaning, not just matching words
+            pick = int(llm(PICK_PROMPT.format(sentence=sents[k], query=q, candidates="\n".join(
+                f"{n + 1}. {re.sub(r'[_]', ' ', c['name'])[:90]} ({c['source']})" for n, c in enumerate(cands[:10]))), 0.1).get("pick", 0) or 0)
+        except Exception:
+            pick = 0
+        if not 1 <= pick <= min(10, len(cands)):
+            print(f"  sentence {k + 1}: {q!r} -> nothing fitting")
+            continue
+        c = cands[pick - 1]
+        seen_img.add(c["url"])
+        chosen.append(c | {"sentence": k, "query": q})
+        print(f"  sentence {k + 1}: {q!r} -> {c['name'][:60]} [{c['source']}]")
+    if len(chosen) < 2:  # too little found for the script: fall back to the article's own images
+        print("  few matches for the script; using the article's images")
+        return fetch_images(title, pageimage, dest, own=own)
+    chosen[0]["sentence"] = 0  # something on screen from the first second
+    out = []
+    for c in chosen:
+        try:
+            out.append(download_image(c, dest))
+        except Exception as e:
+            print(f"  image failed: {c['name']} ({e})")
+    return out
 
 
 def fetch_images(title, pageimage, dest, want=4, limit=6, own=None):
@@ -737,6 +864,27 @@ def ensure_fonts():
 
 
 # ---------- rendering ----------
+def image_starts(cues, words, duration, min_gap=1.5):
+    """When each image appears: the moment its sentence starts being spoken. None if images have no sentence cues.
+    Entries become None (image dropped) when an image would show for less than min_gap seconds."""
+    if not cues or any(c is None for c in cues):
+        return None
+    sent_start, k = {0: 0.0}, 0
+    for j, w in enumerate(words):
+        if j and re.search(r"[.!?][\"')\]]*$", words[j - 1][0]):
+            k += 1
+            sent_start[k] = w[1]
+    out, last = [], -min_gap
+    for i, c in enumerate(cues):
+        t = 0.0 if i == 0 else sent_start.get(c)
+        if t is None or t - last < min_gap or t > duration - min_gap:
+            out.append(None)
+            continue
+        out.append(t)
+        last = t
+    return out
+
+
 def render(meta, words, audio_path, duration, out_path, frame_at=None):
     """Draw the branded video and encode it to out_path. With frame_at=seconds, save just that frame as an image."""
     import subprocess, imageio_ffmpeg
@@ -808,10 +956,19 @@ def render(meta, words, audio_path, duration, out_path, frame_at=None):
     ImageDraw.Draw(mask).rounded_rectangle((0, 0, PW, PH), 36, fill=255)
 
     # panel sources: article images, else a branded text card
-    srcs = []
+    srcs, cues = [], []
     for img in meta["images"]:
         try:
             im = Image.open(img["path"])
+            if img.get("fit") == "contain":  # logo/diagram: whole, centred on a light card, never cropped
+                card = Image.new("RGB", (int(PW * 1.15), int(PH * 1.15)), "#F4F5F7")
+                im = im.convert("RGBA")
+                scale = 0.62 if re.search(r"logo|wordmark|icon|symbol", img.get("name", ""), re.I) else 0.92  # screenshots fill the card
+                im.thumbnail((int(card.width * scale), int(card.height * scale)), Image.LANCZOS)
+                card.paste(im, ((card.width - im.width) // 2, (card.height - im.height) // 2), im)
+                srcs.append((card, fit_lines("Image: " + credit(img), "body", 26, PW, 2, min_size=18) if credit(img) else None))
+                cues.append(img.get("sentence"))
+                continue
             if im.mode in ("RGBA", "LA", "P"):
                 im = im.convert("RGBA")
                 flat = Image.new("RGB", im.size, C["panel"])
@@ -821,6 +978,7 @@ def render(meta, words, audio_path, duration, out_path, frame_at=None):
             s = max(PW * 1.15 / im.width, PH * 1.15 / im.height)
             srcs.append((im.resize((round(im.width * s), round(im.height * s)), Image.LANCZOS),
                          fit_lines("Image: " + credit(img), "body", 26, PW, 2, min_size=18) if credit(img) else None))
+            cues.append(img.get("sentence"))
         except Exception as e:
             print(f"  skip image {img['path']}: {e}")
     if not srcs:
@@ -832,6 +990,7 @@ def render(meta, words, audio_path, duration, out_path, frame_at=None):
             cd.text((card.width // 2, cy), line, font=cf, fill=C["accent"], anchor="mt")
             cy += cf.size * 1.2
         srcs.append((card, None))
+        cues.append(None)
         # ponytail: one text card when no free images exist; add AI image gen (mflux) if this happens often
 
     def kb(i, p):  # Ken Burns crop of source i at progress p in [0,1]
@@ -870,13 +1029,20 @@ def render(meta, words, audio_path, duration, out_path, frame_at=None):
             cap_cache[key] = im
         return cap_cache[key]
 
-    n, seg, fade = len(srcs), duration / len(srcs), 0.4
+    starts = image_starts(cues, words, duration)
+    if starts is None:  # no sentence cues (older videos, hand-picked mixes): spread evenly
+        starts = [k * duration / len(srcs) for k in range(len(srcs))]
+    else:  # images whose sentence comes too soon after the previous image are dropped
+        keep = [k for k in range(len(srcs)) if k < len(starts) and starts[k] is not None]
+        srcs, starts = [srcs[k] for k in keep], [starts[k] for k in keep]
+    n, fade = len(srcs), 0.4
+    ends = starts[1:] + [duration]
 
     def frame(t):
-        i = min(int(t / seg), n - 1)
-        panel = kb(i, (t - i * seg) / seg)
-        if i < n - 1 and t > (i + 1) * seg - fade:
-            panel = Image.blend(panel, kb(i + 1, 0), 1 - ((i + 1) * seg - t) / fade)
+        i = max(k for k in range(n) if starts[k] <= t)
+        panel = kb(i, (t - starts[i]) / max(0.1, ends[i] - starts[i]))
+        if i < n - 1 and t > ends[i] - fade:
+            panel = Image.blend(panel, kb(i + 1, 0), 1 - (ends[i] - t) / fade)
         im = bg.copy()
         im.paste(panel, (PX, PY), mask)
         fd = ImageDraw.Draw(im)
@@ -1008,7 +1174,7 @@ def make(con, pageid):
         print(f"[{ep:03d}] {title}" + ("" if origin == "wikipedia" else f"  [{origin}]") + "\n  writing script…")
         s = write_script(title, text)
         print(f"  \"{s['title']}\"\n  fetching images…")
-        images = fetch_images(title, pageimage, work, own=src.pop("own"))
+        images = pick_visuals(title, s["script"], work, own=src.pop("own"), pageimage=pageimage)
         print(f"  {len(images)} images")
         m = dict(ep=ep, pageid=pageid, origin=origin, article_title=title, description=desc,
                  title=s["title"], script=s["script"], tags=s["tags"], images=images, **src)
@@ -1157,7 +1323,7 @@ def voicetest(text=None):
     print("voice sample saved: data/voice_preview.wav")
 
 
-def rerender(con, ep):
+def rerender(con, ep, repick_images=False):
     """Re-voice and re-render an episode from its saved (possibly hand-edited) script. No LLM rewrite."""
     row = con.execute("select * from pages where ep=?", (ep,)).fetchone()
     if not row or not (WORK / str(row["pageid"]) / "meta.json").exists():
@@ -1167,6 +1333,9 @@ def rerender(con, ep):
     m = json.loads((WORK / str(row["pageid"]) / "meta.json").read_text())
     print(f"[{ep:03d}] re-rendering {m['article_title']}")
     m.pop("potential", None)
+    if repick_images:
+        print("  picking images from the script…")
+        m["images"] = pick_visuals(m["article_title"], m["script"], WORK / str(row["pageid"]), own=[]) or m["images"]
     produce(con, m, Path(row["video_path"]) if row["video_path"] else OUT / f"{ep:03d}-rerender.mp4")
     score_video(con, row["pageid"])
 
@@ -1295,6 +1464,13 @@ def selftest():
     assert speakable("Henry VIII's wives; Apollo XI") == "Henry the Eighth's wives; Apollo Eleven"
     assert [roman(x) for x in ["II", "IV", "IX", "XIV", "XL", "XC", "LVII", "IIII", "VX", "IC"]] == [2, 4, 9, 14, 40, 90, 57, None, None, None]
     assert speakable("Mix of I and II") == "Mix of I and II"
+    ws = [["One.", 0, 1], ["Two", 2, 2.5], ["two.", 2.5, 3], ["Three", 4, 4.5], ["three.", 4.5, 5], ["Four.", 6.2, 6.8]]
+    assert image_starts([0, 1, 2, 3], ws, 7) == [0.0, 2, 4, None]  # 'Four.' starts too close to the end
+    assert image_starts([0, 1, 1], ws, 7) == [0.0, 2, None]  # same sentence twice: second image dropped
+    assert image_starts([0, None], ws, 7) is None  # hand-picked image without a cue: even spacing
+    assert visual_query("August 2026", "PHP2Shell") == "PHP2Shell" and visual_query("70 percent", "X") == "X"
+    assert visual_query("Internet Archive", "X") == "Internet Archive" and visual_query("World War II", "X") == "World War II"
+    assert mentions("Internet Archive", {"name": "Internet Archive logo.svg"}) and not mentions("Internet Archive", {"name": "Cat.jpg"})
     assert speakable("PHP versions 5.4–8.5 that") == "PHP versions 5 point 4 to 8 point 5 that"
     assert speakable("PHP 5.4.8. Pi is 3.14 in 2026, from 1914–1918.") == "PHP 5 point 4 point 8. Pi is 3 point 1 4 in 2026, from 1914 to 1918."
     spoken, pairs = speakable_map("in versions 5.4–8.5. World War II ended")
@@ -1328,6 +1504,7 @@ def main():
     up = sub.add_parser("unpublish"); up.add_argument("--ep", type=int, required=True)
     up.add_argument("--keep-local", action="store_true")
     rr = sub.add_parser("rerender"); rr.add_argument("--ep", type=int, required=True)
+    rr.add_argument("--repick-images", action="store_true", help="choose new images from what the script mentions")
     dc = sub.add_parser("discover"); dc.add_argument("--count", type=int, default=5)
     dc.add_argument("--topic"); dc.add_argument("--degree", choices=["1", "2", "3", "any"], default="any")
     dc.add_argument("--source", choices=["wikipedia", "link", "hackernews", "rss", "arxiv", "apod"], default="wikipedia")
@@ -1363,7 +1540,7 @@ def main():
     elif args.cmd == "unpublish":
         unpublish(con, args.ep, args.keep_local)
     elif args.cmd == "rerender":
-        rerender(con, args.ep)
+        rerender(con, args.ep, args.repick_images)
     elif args.cmd == "discover" and args.source != "wikipedia":
         discover_source(con, args.source, args.count, {"rss": args.feed, "link": args.link}.get(args.source, args.topic))
     elif args.cmd == "discover":

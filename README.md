@@ -5,7 +5,7 @@ Articles go in, and branded YouTube Shorts come out. Wikipedia is the main sourc
 1. **Pick:** random articles, or ideas found around a topic through its Wikipedia link network (1–3 hops). Stubs, lists and disambiguation pages are dropped, and a local LLM scores the rest out of 10.
 2. **Log:** every page that comes up is stored in SQLite with a status and the reason, so nothing is ever processed twice.
 3. **Script:** Ollama writes a 45–55s narration from the full article, then fact-checks it against the article. You can edit it before rendering again.
-4. **Visuals:** the article's own free-licensed images, topped up from a Wikimedia Commons search. You can also pick from Openverse, NASA and The Met, or upload your own.
+4. **Visuals:** chosen from what the narration mentions, sentence by sentence. Each named thing (a person, place, organisation, product or logo) gets the lead image of its own Wikipedia article. Named things without one are searched in Commons and Openverse, needing all the words to match plus an LLM meaning check. Vague phrases keep the previous image rather than show a wrong one. Each image appears when its sentence is spoken; logos and screenshots are shown whole on a light card. Falls back to the article's own images. In the visuals editor you can **Auto-pick from script**, search NASA and The Met, or upload your own.
 5. **Voice:** Kokoro TTS. Its per-word timestamps drive word-highlighted captions, and Roman numerals are read correctly ("World War Two").
 6. **Render:** a branded 1080×1920 layout drawn with Pillow and encoded with ffmpeg.
 7. **Score:** each video gets a 0–100 potential score from topic demand, hook, appeal, reach, visuals and length.
