@@ -2,8 +2,11 @@
 
   ./rw run [--url URL] [--upload] [--publish-at ISO]   make one video
   ./rw add URL [URL ...]                              queue curated pages
-  ./rw upload PAGEID [--publish-at ISO]               upload a rendered video
+  ./rw discover [--count N] [--topic KEY --degree 1|2|3|any]   queue N ideas (random, or around a topic)
+  ./rw upload [--ep N] [--publish-at ISO]             upload every rendered video (or just episode N)
+  ./rw rerender --ep N                                re-voice/re-render from the saved (edited) script
   ./rw log [N]                                        show the page log
+  ./rw web [--port 8765]                              local studio UI in the browser
   ./rw selftest
 """
 import argparse, json, os, re, sqlite3, sys, time, urllib.parse, urllib.request
@@ -52,7 +55,15 @@ def db():
         pageid integer primary key, title text, url text, source text, status text,
         score integer, reason text, ep integer, video_path text, video_id text,
         created text default current_timestamp, updated text default current_timestamp)""")
+    for col in ("potential integer", "rank integer", "via text"):  # added after v1; ignore if present
+        try:
+            con.execute(f"alter table pages add column {col}")
+        except sqlite3.OperationalError:
+            pass
     return con
+
+
+QUEUE_ORDER = "order by rank is null, rank, source='curated' desc, created"  # manual drag order first
 
 
 def upsert(con, pageid, **f):
@@ -77,7 +88,7 @@ SCORE_PROMPT = """You choose topics for a YouTube Shorts channel that turns rand
 Rate how likely this article is to make a viewer think "wait, what?".
 Most random articles (minor species, small villages, obscure athletes, routine politicians, ordinary companies, albums) score 1-4.
 Score 7+ only if the text contains a genuinely surprising fact, strange event, record, mystery, scandal or conflict.
-
+{context}
 Title: {title}
 Text: {text}
 
@@ -140,28 +151,142 @@ def precheck(p):
     return None
 
 
-def discover(con, max_batches=15):
-    for _ in range(max_batches):
-        res = wiki(generator="random", grnnamespace=0, grnlimit=20,
-                   prop="info|pageprops|pageviews|extracts", ppprop="disambiguation",
-                   exintro=1, explaintext=1, exlimit=20)
+CANDIDATE_PROPS = dict(prop="info|pageprops|pageviews|extracts", ppprop="disambiguation",
+                       exintro=1, explaintext=1, exlimit=20)
+JUNK_TITLE = re.compile(r"^(List|Lists|Index|Outline|Timeline|Glossary) of |^\d{1,4}s?( BC| AD)?$|^\d{4} in |"
+                        r"^(January|February|March|April|May|June|July|August|September|October|November|December) \d")
+
+
+def evaluate(con, p, source, via=None, seed=None):
+    """Filter + LLM-score one candidate page; logs it and queues it if good. Returns True if queued."""
+    if p.get("missing") or con.execute("select 1 from pages where pageid=?", (p["pageid"],)).fetchone():
+        return False
+    base = dict(title=p["title"], url=page_url(p["title"]), source=source, via=via)
+    reason = precheck(p)
+    if reason:
+        upsert(con, p["pageid"], status="rejected", reason=reason, **base)
+        return False
+    context = (f"\nThe channel is currently exploring topics connected to {seed}. "
+               f"The article must still be fascinating on its own, not just related.\n") if seed else ""
+    s = llm(SCORE_PROMPT.format(title=p["title"], text=p.get("extract", "")[:3000], context=context), 0.2)
+    score = int(s.get("score", 0) or 0)
+    ok = score >= BRAND["min_score"]
+    upsert(con, p["pageid"], status="queued" if ok else "rejected", score=score,
+           reason=f"llm: {s.get('hook') if ok else s.get('reason')}", **base)
+    print(f"  {score:>2}/10  {p['title']}" + (f"   [{via}]" if via else "") + ("  -> queued" if ok else ""))
+    return ok
+
+
+def discover(con, want=1):
+    """Pull random pages until `want` pass the filters; they are queued. Returns their pageids."""
+    found = []
+    for _ in range(10 + 8 * want):  # ~1 in 50 random pages passes; each batch is 20 pages
+        res = wiki(generator="random", grnnamespace=0, grnlimit=20, **CANDIDATE_PROPS)
         for p in res["query"]["pages"]:
-            if con.execute("select 1 from pages where pageid=?", (p["pageid"],)).fetchone():
-                continue
-            base = dict(title=p["title"], url=page_url(p["title"]), source="random")
-            reason = precheck(p)
-            if reason:
-                upsert(con, p["pageid"], status="rejected", reason=reason, **base)
-                continue
-            s = llm(SCORE_PROMPT.format(title=p["title"], text=p.get("extract", "")[:3000]), 0.2)
-            score = int(s.get("score", 0))
-            ok = score >= BRAND["min_score"]
-            upsert(con, p["pageid"], status="queued" if ok else "rejected", score=score,
-                   reason=f"llm: {s.get('hook') if ok else s.get('reason')}", **base)
-            print(f"  {score:>2}/10  {p['title']}")
-            if ok:
-                return p["pageid"]
-    raise SystemExit("No interesting page found; run again.")
+            if evaluate(con, p, "random"):
+                found.append(p["pageid"])
+                if len(found) >= want:
+                    return found
+    if not found:
+        raise SystemExit("No interesting page found; run again.")
+    print(f"found {len(found)} of {want}; run again for more")
+    return found
+
+
+def wiki_all(max_calls=3, **params):
+    """wiki() following 'continue' for up to max_calls requests."""
+    out, cont = [], {}
+    for _ in range(max_calls):
+        r = wiki(**params, **cont)
+        out.append(r)
+        if "continue" not in r:
+            break
+        cont = r["continue"]
+    return out
+
+
+def resolve_seed(key):
+    """Any key ('nepal', 'black holes', 'Beatles') -> best matching article title."""
+    p = wiki(titles=key, redirects=1, prop="pageprops", ppprop="disambiguation")["query"]["pages"][0]
+    if not p.get("missing") and "disambiguation" not in p.get("pageprops", {}):
+        return p["title"]
+    hits = wiki(list="search", srsearch=key, srlimit=1, srnamespace=0)["query"]["search"]
+    if not hits:
+        raise SystemExit(f"No Wikipedia article found for '{key}'")
+    return hits[0]["title"]
+
+
+def link_graph(seed, max_degree, frontier_size=25):
+    """Map the seed's network: {degree: {title: [strength, path]}}.
+    Degree 1 = linked from the seed, linking to it, or mentioning it. Degrees 2-3 follow outgoing links
+    from the best-connected pages one level closer. Strength = number of distinct links found to the page."""
+    import random
+    levels = {d: {} for d in range(1, max_degree + 1)}
+    seen = {seed}
+
+    def add(d, title, parent_path):
+        if title in seen and title not in levels[d]:
+            return
+        seen.add(title)
+        node = levels[d].setdefault(title, [0, parent_path + [title]])
+        node[0] += 1
+
+    for r in wiki_all(3, titles=seed, prop="links", plnamespace=0, pllimit="max"):
+        for pg in r["query"]["pages"]:
+            for l in pg.get("links", []):
+                add(1, l["title"], [seed])
+    for r in wiki_all(2, list="backlinks", bltitle=seed, blnamespace=0, bllimit="max", blfilterredir="nonredirects"):
+        for l in r["query"]["backlinks"]:
+            add(1, l["title"], [seed])
+    for l in wiki(list="search", srsearch=seed, srlimit=100, srnamespace=0)["query"]["search"]:
+        add(1, l["title"], [seed])
+
+    for d in range(2, max_degree + 1):
+        prev = sorted(levels[d - 1].items(), key=lambda kv: -kv[1][0])
+        prev = [kv for kv in prev if not JUNK_TITLE.search(kv[0])]
+        # best-connected parents plus a random slice, so distant results aren't always the same
+        frontier = prev[:frontier_size // 2] + random.sample(prev[frontier_size // 2:], min(frontier_size // 2, max(0, len(prev) - frontier_size // 2)))
+        for i in range(0, len(frontier), 25):
+            chunk = dict(frontier[i:i + 25])
+            for r in wiki_all(3, titles="|".join(chunk), redirects=1, prop="links", plnamespace=0, pllimit="max"):
+                back = {x["to"]: x["from"] for x in r["query"].get("redirects", [])}
+                for pg in r["query"]["pages"]:
+                    parent = chunk.get(pg["title"]) or chunk.get(back.get(pg["title"]))
+                    if not parent:
+                        continue
+                    for l in pg.get("links", []):
+                        add(d, l["title"], parent[1])
+    return levels
+
+
+def explore(con, key, degree="any", want=5, max_checks=300):
+    """Queue up to `want` interesting pages within `degree` hops of the topic `key`."""
+    import random
+    seed = resolve_seed(key)
+    degrees = [1, 2, 3] if degree == "any" else [int(degree)]
+    print(f"exploring the network around '{seed}' (degree {degree})…")
+    levels = link_graph(seed, max(degrees))
+    for d in sorted(levels):
+        print(f"  degree {d}: {len(levels[d])} pages")
+    known = {r[0] for r in con.execute("select title from pages")}
+    cands = [(t, n) for d in degrees for t, n in levels[d].items() if t not in known and not JUNK_TITLE.search(t)]
+    random.shuffle(cands)
+    cands.sort(key=lambda c: (-min(c[1][0], 5), len(c[1][1])))  # strongest links first, then closest
+    found, checked = [], 0
+    for i in range(0, min(len(cands), max_checks), 20):
+        batch = dict(cands[i:i + 20])
+        res = wiki(titles="|".join(batch), redirects=1, **CANDIDATE_PROPS)
+        redirects = {r["to"]: r["from"] for r in res["query"].get("redirects", [])}
+        for p in res["query"]["pages"]:
+            checked += 1
+            node = batch.get(p.get("title")) or batch.get(redirects.get(p.get("title")))
+            via = " → ".join(node[1]) if node else seed
+            if evaluate(con, p, "seed", via=via, seed=seed):
+                found.append(p["pageid"])
+                if len(found) >= want:
+                    return found
+    print(f"found {len(found)} of {want} after checking {checked} pages" + ("" if found else "; try another degree"))
+    return found
 
 
 def resolve(url_or_title):
@@ -174,9 +299,11 @@ def resolve(url_or_title):
     return p["pageid"], p["title"]
 
 
-def add_curated(con, url, force=False):
+def add_curated(con, url, force=False, make_now=False):
     pageid, title = resolve(url)
     row = con.execute("select status from pages where pageid=?", (pageid,)).fetchone()
+    if make_now and row and row["status"] == "queued":
+        return pageid  # already waiting in the queue: just make it, keep its source/reason
     if row and row["status"] in ("rendered", "uploaded", "queued") and not force:
         print(f"skip: {title} is already {row['status']} (use --force)")
         return None
@@ -226,64 +353,178 @@ UNKNOWN = re.compile(r"^(unknown|anonymous|unidentified|not specified|none|n/a)\
 
 
 def credit(img):
-    """'Ludwig Wegmann · CC BY-SA 3.0' or just 'Public domain' when the author is unknown."""
+    """'Ludwig Wegmann · CC BY-SA 3.0', just 'Public domain' when the author is unknown, '' for own images."""
+    if not img.get("license"):
+        return ""
     artist = img.get("artist") or ""
     return img["license"] if not artist or UNKNOWN.match(artist) else f"{artist} · {img['license']}"
 
 
 BAD_FILE = re.compile(r"icon|logo|flag|symbol|commons-|wiki|ambox|question_book|edit-|stub|padlock|signature|location_map|blank", re.I)
 OK_LICENSE = re.compile(r"^(cc[ -]?by|cc0|cc-zero|public domain|pd)", re.I)
+COMMONS_API = "https://commons.wikimedia.org/w/api.php"
 
 
-def fetch_images(title, pageimage, dest, limit=6):
-    """Free-licensed images from the article itself (Commons), then Openverse."""
+def commons_files(pages, limit):
+    """imageinfo pages -> usable, free-licensed image dicts."""
     got = []
-    res = wiki(generator="images", titles=title, gimlimit=50, prop="imageinfo",
-               iiprop="url|size|mime|extmetadata", iiurlwidth=1400)
-    files = res.get("query", {}).get("pages", [])
-    files.sort(key=lambda f: f["title"].replace(" ", "_") != f"File:{pageimage}")  # lead image first
-    for f in files:
+    for f in pages:
         ii = (f.get("imageinfo") or [{}])[0]
         meta = {k: v.get("value") for k, v in ii.get("extmetadata", {}).items()}
         if (BAD_FILE.search(f["title"]) or ii.get("mime") not in ("image/jpeg", "image/png", "image/webp")
                 or ii.get("width", 0) < 600 or ii.get("height", 0) < 450
                 or meta.get("NonFree") or not OK_LICENSE.match(meta.get("LicenseShortName") or "")):
             continue
-        got.append(dict(url=ii.get("thumburl") or ii["url"], page=ii.get("descriptionurl"),
-                        name=f["title"][5:], artist=strip_html(meta.get("Artist")) or "unknown",
-                        license=meta.get("LicenseShortName")))
+        got.append(dict(source="commons", url=ii.get("thumburl") or ii["url"], thumb=ii.get("thumburl") or ii["url"],
+                        page=ii.get("descriptionurl"), name=f["title"][5:],
+                        artist=strip_html(meta.get("Artist")) or "unknown", license=meta.get("LicenseShortName")))
         if len(got) >= limit:
             break
-    if len(got) < 2:  # fallback: Openverse, only results that mention the topic
-        words = {w.lower() for w in re.findall(r"\w{4,}", title)}
-        try:
-            ov = get_json("https://api.openverse.org/v1/images/",
-                          {"q": title, "license_type": "commercial", "page_size": 10})
-        except Exception:
-            ov = {"results": []}
-        for r in ov.get("results", []):
-            hay = (r.get("title", "") + " " + " ".join(t["name"] for t in r.get("tags") or [])).lower()
-            if words & set(re.findall(r"\w{4,}", hay)) and (r.get("width") or 0) >= 600:
-                got.append(dict(url=r["url"], page=r.get("foreign_landing_url"), name=r.get("title") or "image",
-                                artist=r.get("creator") or "unknown",
-                                license=f"CC {r['license'].upper()} {r.get('license_version', '')}".strip()))
-            if len(got) >= limit:
-                break
+    return got
+
+
+IMAGE_PROPS = dict(prop="imageinfo", iiprop="url|size|mime|extmetadata", iiurlwidth=1400)
+
+
+def src_article(title, limit=12, pageimage=None):
+    pages = wiki(generator="images", titles=title, gimlimit=50, **IMAGE_PROPS).get("query", {}).get("pages", [])
+    pages.sort(key=lambda f: f["title"].replace(" ", "_") != f"File:{pageimage}")  # lead image first
+    return commons_files(pages, limit)
+
+
+def src_commons(q, limit=24):
+    r = get_json(COMMONS_API, {"action": "query", "format": "json", "formatversion": 2, "generator": "search",
+                               "gsrsearch": f"{q} filetype:bitmap", "gsrnamespace": 6, "gsrlimit": 40, **IMAGE_PROPS})
+    pages = sorted(r.get("query", {}).get("pages", []), key=lambda f: f.get("index", 0))
+    return commons_files(pages, limit)
+
+
+def src_openverse(q, limit=24):
+    # anonymous Openverse requests are capped at 20 per page
+    r = get_json("https://api.openverse.org/v1/images/", {"q": q, "license_type": "commercial", "page_size": min(limit, 20)})
+    return [dict(source="openverse", url=x["url"], thumb=x.get("thumbnail") or x["url"], page=x.get("foreign_landing_url"),
+                 name=x.get("title") or "image", artist=x.get("creator") or "unknown",
+                 license=f"CC {x['license'].upper()} {x.get('license_version', '')}".strip(),
+                 tags=" ".join(t["name"] for t in x.get("tags") or []))
+            for x in r.get("results", []) if (x.get("width") or 0) >= 600]
+
+
+def src_nasa(q, limit=24):
+    items = get_json("https://images-api.nasa.gov/search", {"q": q, "media_type": "image"})["collection"]["items"]
     out = []
-    for i, g in enumerate(got):
-        path = dest / f"img{i}.jpg"
+    for it in items[:limit]:
+        d, thumb = it["data"][0], it["links"][0]["href"]
+        out.append(dict(source="nasa", url=thumb.replace("~thumb.", "~large."), thumb=thumb,
+                        page=f"https://images.nasa.gov/details/{d['nasa_id']}", name=d.get("title", "NASA image"),
+                        artist=d.get("photographer") or d.get("center") or "NASA", license="Public domain (NASA)"))
+    return out
+
+
+def src_met(q, limit=12):
+    ids = get_json("https://collectionapi.metmuseum.org/public/collection/v1.1/search",  # v1 retired 2026-10-01
+                   {"q": q, "hasImages": "true", "limit": limit * 2}).get("objectIDs") or []
+    out = []
+    for oid in ids[:limit * 2]:
+        o = get_json(f"https://collectionapi.metmuseum.org/public/collection/v1/objects/{oid}")
+        if o.get("isPublicDomain") and o.get("primaryImage"):
+            out.append(dict(source="met", url=o["primaryImage"], thumb=o.get("primaryImageSmall") or o["primaryImage"],
+                            page=o.get("objectURL"), name=o.get("title") or "artwork",
+                            artist=o.get("artistDisplayName") or "The Met", license="CC0 (The Met)"))
+            if len(out) >= limit:
+                break
+    return out
+
+
+IMAGE_SOURCES = {"article": src_article, "commons": src_commons, "openverse": src_openverse, "nasa": src_nasa, "met": src_met}
+
+
+def download_image(img, dest):
+    """Download one candidate into the episode folder; returns it with 'path' set, or None."""
+    from PIL import Image
+    import hashlib, io
+    path = dest / f"img_{hashlib.sha1(img['url'].encode()).hexdigest()[:10]}.jpg"
+    if not path.exists():
+        time.sleep(0.5)  # Wikimedia rate-limits bursts
+        data = fetch(img["url"])
+        im = Image.open(io.BytesIO(data))  # also validates that it really is an image
+        im.convert("RGB").save(path, "JPEG", quality=92) if im.format not in ("JPEG",) else path.write_bytes(data)
+    return {k: v for k, v in img.items() if k not in ("thumb", "tags")} | {"path": str(path)}
+
+
+def fetch_images(title, pageimage, dest, want=4, limit=6):
+    """Automatic pick: the article's own images, topped up from a Commons search, then on-topic Openverse."""
+    got = src_article(title, limit, pageimage)
+    for extra in (lambda: src_commons(title, 10), lambda: src_openverse(title, 10)):
+        if len(got) >= want:
+            break
         try:
-            time.sleep(1)
-            path.write_bytes(fetch(g["url"]))
-            g["path"] = str(path)
-            out.append(g)
+            words = {w.lower() for w in re.findall(r"\w{4,}", title)}
+            for c in extra():
+                hay = (c["name"] + " " + c.get("tags", "")).lower()
+                if c["url"] not in {g["url"] for g in got} and words & set(re.findall(r"\w{4,}", hay)):
+                    got.append(c)
+                if len(got) >= want:
+                    break
+        except Exception as e:
+            print(f"  image search failed: {e}")
+    out = []
+    for g in got[:limit]:
+        try:
+            out.append(download_image(g, dest))
         except Exception as e:
             print(f"  image failed: {g['name']} ({e})")
     return out
 
 
+ONES = ("zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen "
+        "sixteen seventeen eighteen nineteen").split()
+TENS = {2: "twenty", 3: "thirty", 4: "forty", 5: "fifty", 6: "sixty", 7: "seventy", 8: "eighty", 9: "ninety"}
+IRREGULAR_ORD = {"one": "first", "two": "second", "three": "third", "five": "fifth", "eight": "eighth",
+                 "nine": "ninth", "twelve": "twelfth"}
+# after these words a Roman numeral is a number ("World War Two"); otherwise it is regnal ("Elizabeth the Second")
+CARDINAL_AFTER = {"war", "part", "chapter", "volume", "vol", "phase", "act", "book", "type", "class", "mark", "mk",
+                  "apollo", "gemini", "bowl", "episode", "season", "series", "round", "stage", "grade", "level",
+                  "generation", "article", "title", "section", "vatican", "schedule", "category", "division", "league"}
+
+
+def number_words(n, ordinal=False):
+    w = ONES[n] if n < 20 else TENS[n // 10] + (f"-{ONES[n % 10]}" if n % 10 else "")
+    if ordinal:
+        head, _, last = w.rpartition("-")
+        last = IRREGULAR_ORD.get(last) or (last[:-1] + "ieth" if last.endswith("y") else last + "th")
+        w = f"{head}-{last}" if head else last
+    return w
+
+
+def roman(s):
+    """'XIV' -> 14, or None if not a canonical Roman numeral (1-99)."""
+    v = {"I": 1, "V": 5, "X": 10, "L": 50, "C": 100}
+    if not s or any(c not in v for c in s):
+        return None
+    n = sum(-v[a] if b and v[a] < v[b] else v[a] for a, b in zip(s, list(s[1:]) + [None]))
+    canon, k = "", n
+    for r, val in (("XC", 90), ("L", 50), ("XL", 40), ("X", 10), ("IX", 9), ("V", 5), ("IV", 4), ("I", 1)):
+        while k >= val:
+            canon, k = canon + r, k - val
+    return n if 0 < n < 100 and canon == s else None
+
+
+def speakable(text):
+    """Text the voice model reads correctly: 'World War II' -> 'World War Two', 'Louis XIV' -> 'Louis the Fourteenth'."""
+    def fix(m):
+        word, num = m[1], m[2]
+        n = roman(num)
+        cardinal = word.lower() in CARDINAL_AFTER
+        regnal = word[0].isupper() and not cardinal  # names are capitalised: "Charles III", not "and II"
+        if not n or not (cardinal or regnal) or (not cardinal and num in ("I", "X", "C", "L")):  # "Malcolm X"
+            return m[0]
+        return f"{word} {number_words(n).title()}" if cardinal else f"{word} the {number_words(n, True).title()}"
+    return re.sub(r"\b([A-Za-z]+) ([IVXLC]{1,7})\b(?![\w-])", fix, text)
+
+
 def tts(text, dest):
     """Kokoro narration -> wav + per-word timings [(word, start, end)]."""
+    text = speakable(text)
     import numpy as np, soundfile as sf
     from kokoro import KPipeline
     pipe = KPipeline(lang_code=BRAND["voice_lang"], repo_id="hexgrad/Kokoro-82M")
@@ -399,7 +640,7 @@ def render(meta, words, audio_path, duration, out_path):
             im = im.convert("RGB")
             s = max(PW * 1.15 / im.width, PH * 1.15 / im.height)
             srcs.append((im.resize((round(im.width * s), round(im.height * s)), Image.LANCZOS),
-                         fit_lines("Image: " + credit(img), "body", 26, PW, 2, min_size=18)))
+                         fit_lines("Image: " + credit(img), "body", 26, PW, 2, min_size=18) if credit(img) else None))
         except Exception as e:
             print(f"  skip image {img['path']}: {e}")
     if not srcs:
@@ -498,10 +739,62 @@ def description(m):
              f"Read the full article: {m['url']}", "",
              f"Episode {m['ep']} of {BRAND['channel']}. {BRAND['tagline']}", "", "CREDITS",
              f"Text adapted from the Wikipedia article \"{m['article_title']}\", CC BY-SA 4.0: {m['url']}"]
-    lines += [f"Image: \"{i['name']}\", {credit(i).replace(' · ', ', ')}: {i['page']}" for i in m["images"]]
+    lines += [f"Image: \"{i['name']}\", {credit(i).replace(' · ', ', ')}: {i['page']}" for i in m["images"] if credit(i)]
     lines += ["Narration: AI voice (Kokoro TTS). Fonts: Anton, Inter (SIL OFL).", "",
               " ".join("#" + re.sub(r"\W", "", t) for t in BRAND["hashtags"] + m["tags"][:3])]
     return "\n".join(lines)[:4900]
+
+
+APPEAL_PROMPT = """Rate this YouTube Short as it would appear to someone scrolling the Shorts feed.
+Title: {title}
+Opening line: {hook}
+Topic: {topic} ({desc})
+
+hook: 1-10, how strongly the title and opening line create curiosity to keep watching. Vague or textbook = low.
+appeal: 1-10, how interesting the topic is to a broad international audience. Niche, local or technical = low.
+Reply as JSON: {{"hook": <1-10>, "appeal": <1-10>, "why": "<one short sentence>"}}"""
+
+# ponytail: hand-set weights with no performance data yet; refit them against real YouTube views
+# (Analytics API) once ~30 videos are public.
+WEIGHTS = {"demand": 25, "hook": 25, "appeal": 15, "reach": 10, "interest": 10, "visuals": 10, "length": 5}
+
+
+def potential_score(views60, langs, hook, appeal, interest, images, seconds):
+    """Signals -> (0-100 score, {signal: 0-1}). Pure function so it can be tested and refitted."""
+    import math
+    parts = {
+        "demand": min(1, math.log10(views60 + 1) / 5),        # 100k views in 60 days = full marks
+        "hook": hook / 10, "appeal": appeal / 10,
+        "reach": min(1, langs / 60),                          # 60+ Wikipedia language editions
+        "interest": interest / 10,
+        "visuals": min(1, images / 4),
+        "length": max(0, 1 - max(0, abs(seconds - 40) - 10) / 20),  # 30-50s ideal, 0 at <=10s or >=70s
+    }
+    return round(sum(WEIGHTS[k] * v for k, v in parts.items())), {k: round(v, 2) for k, v in parts.items()}
+
+
+def score_video(con, pageid):
+    """Compute and store the potential score for a rendered video."""
+    import soundfile as sf
+    row = con.execute("select * from pages where pageid=?", (pageid,)).fetchone()
+    mpath = WORK / str(pageid) / "meta.json"
+    m = json.loads(mpath.read_text())
+    p = wiki(pageids=pageid, prop="pageviews|langlinks", pvipdays=60, lllimit="max")["query"]["pages"][0]
+    views = sum(v or 0 for v in (p.get("pageviews") or {}).values())
+    langs = len(p.get("langlinks") or [])
+    hook_line = m["script"].split(". ")[0]
+    a = llm(APPEAL_PROMPT.format(title=m["title"], hook=hook_line, topic=m["article_title"], desc=m.get("description", "")), 0.2)
+    clamp = lambda v: max(1, min(10, int(v or 5)))
+    hook, appeal = clamp(a.get("hook")), clamp(a.get("appeal"))
+    seconds = sf.info(str(WORK / str(pageid) / "voice.wav")).duration
+    score, parts = potential_score(views, langs, hook, appeal, row["score"] or hook, len(m["images"]), seconds)
+    m["potential"] = dict(score=score, parts=parts, why=a.get("why", ""), views60=views, languages=langs,
+                          seconds=round(seconds, 1), scored=time.strftime("%Y-%m-%d"))
+    mpath.write_text(json.dumps(m, indent=2))
+    con.execute("update pages set potential=? where pageid=?", (score, pageid))
+    con.commit()
+    print(f"  potential {score}/100  (views60={views}, languages={langs}, hook={hook}, appeal={appeal})")
+    return score
 
 
 def make(con, pageid):
@@ -516,22 +809,47 @@ def make(con, pageid):
         s = write_script(title, text)
         print(f"  \"{s['title']}\"\n  fetching images…")
         images = fetch_images(title, pageimage, work)
-        print(f"  {len(images)} images\n  voicing…")
-        narration = s["script"].strip() + " " + BRAND["outro_line"]
-        words, dur = tts(narration, work / "voice.wav")
+        print(f"  {len(images)} images")
         m = dict(ep=ep, pageid=pageid, article_title=title, description=desc, url=page_url(title),
                  title=s["title"], script=s["script"], tags=s["tags"], images=images)
-        m["yt_description"] = description(m)
-        (work / "meta.json").write_text(json.dumps(m, indent=2))
         out = OUT / f"{ep:03d}-{re.sub(r'[^a-z0-9]+', '-', title.lower()).strip('-')[:50]}.mp4"
-        print(f"  rendering {dur:.1f}s…")
-        render(m, words, work / "voice.wav", dur, out)
-        upsert(con, pageid, status="rendered", video_path=str(out))
-        print(f"  done: {out}")
-        return out
+        produce(con, m, out)
     except BaseException as e:
         upsert(con, pageid, status="failed", reason=f"{type(e).__name__}: {e}"[:300])
         raise
+    try:
+        score_video(con, pageid)
+    except Exception as e:  # a failed score never costs us the video
+        print(f"  could not score: {e}")
+    return out
+
+
+def produce(con, m, out):
+    """Voice + render a video from its meta (script, title, images) and save everything."""
+    work = WORK / str(m["pageid"])
+    print("  voicing…")
+    words, dur = tts(m["script"].strip() + " " + BRAND["outro_line"], work / "voice.wav")
+    m["yt_description"] = description(m)
+    (work / "meta.json").write_text(json.dumps(m, indent=2))
+    print(f"  rendering {dur:.1f}s…")
+    render(m, words, work / "voice.wav", dur, out)
+    upsert(con, m["pageid"], status="rendered", video_path=str(out))
+    print(f"  done: {out}")
+
+
+def rerender(con, ep):
+    """Re-voice and re-render an episode from its saved (possibly hand-edited) script. No LLM rewrite."""
+    row = con.execute("select * from pages where ep=?", (ep,)).fetchone()
+    if not row or not (WORK / str(row["pageid"]) / "meta.json").exists():
+        raise SystemExit(f"episode {ep} has no saved script to re-render")
+    if row["status"] == "uploaded":
+        raise SystemExit(f"episode {ep} is already on YouTube; a re-render can't replace it there")
+    m = json.loads((WORK / str(row["pageid"]) / "meta.json").read_text())
+    print(f"[{ep:03d}] re-rendering {m['article_title']}")
+    m.pop("potential", None)
+    produce(con, m, Path(row["video_path"]) if row["video_path"] else OUT / f"{ep:03d}-rerender.mp4")
+    score_video(con, row["pageid"])
+
 
 
 def upload(con, pageid, publish_at=None):
@@ -571,6 +889,21 @@ def upload(con, pageid, publish_at=None):
     print(f"  uploaded: https://youtube.com/shorts/{resp['id']} ({status['privacyStatus']})")
 
 
+def upload_pending(con, publish_at=None, ep=None):
+    """Upload every rendered-but-not-uploaded video (or just episode `ep`), best potential first."""
+    rows = con.execute("select pageid, ep, title from pages where status='rendered' and (? is null or ep=?) "
+                       "order by potential is null, potential desc, ep",
+                       (ep, ep)).fetchall()
+    if not rows:
+        print(f"episode {ep} is not ready to upload" if ep else "nothing to upload")
+    for r in rows:
+        print(f"[{r['ep']:03d}] uploading {r['title']}")
+        try:
+            upload(con, r["pageid"], publish_at)
+        except Exception as e:  # keep going; it stays 'rendered' and is retried next time
+            print(f"  upload failed: {e}")
+
+
 def selftest():
     g = group_words([["In", 0, .1], ["1932,", .1, .5], ["Australia", .5, .9], ["lost", .9, 1], ["a", 1, 1.1],
                      ["war", 1.1, 1.3], ["to", 1.3, 1.4], ["emus.", 1.4, 1.8]])
@@ -579,10 +912,24 @@ def selftest():
     assert strip_html('<bdi>Unknown author<span style="display: none;">Unknown author</span></bdi>') == "Unknown author"
     assert credit({"artist": "Unknown author", "license": "Public domain"}) == "Public domain"
     assert credit({"artist": "Fairfax", "license": "Public domain"}) == "Fairfax · Public domain"
+    assert credit({"artist": "", "license": ""}) == ""  # own upload: no credit line
     assert precheck({"title": "List of moths", "length": 9e9}) == "list page"
     assert precheck({"title": "X", "length": 9000, "pageviews": {"a": 100, "b": None}}).startswith("low views")
     assert precheck({"title": "X", "length": 9000, "pageviews": {"a": 500}}) is None
     assert precheck({"title": "X", "length": 9000, "pageviews": {"a": None}}) is None
+    hi, _ = potential_score(200000, 80, 9, 9, 9, 6, 42)
+    lo, parts = potential_score(30, 2, 3, 2, 3, 0, 75)
+    assert hi >= 90 and lo <= 25 and parts["length"] == 0 and parts["visuals"] == 0, (hi, lo, parts)
+    assert potential_score(0, 0, 10, 10, 10, 4, 40)[0] == 65  # perfect content, zero demand/reach
+    assert JUNK_TITLE.search("List of rivers") and JUNK_TITLE.search("1990s") and JUNK_TITLE.search("2015 in Nepal")
+    assert not JUNK_TITLE.search("Mount Everest") and not JUNK_TITLE.search("1918 flu pandemic")
+    assert speakable("served in World War II and World War I.") == "served in World War Two and World War One."
+    assert speakable("Elizabeth II met Louis XIV at Super Bowl LVII") == \
+        "Elizabeth the Second met Louis the Fourteenth at Super Bowl Fifty-Seven"
+    assert speakable("Malcolm X said I am") == "Malcolm X said I am" and speakable("Pope John Paul II.") == "Pope John Paul the Second."
+    assert speakable("Henry VIII's wives; Apollo XI") == "Henry the Eighth's wives; Apollo Eleven"
+    assert [roman(x) for x in ["II", "IV", "IX", "XIV", "XL", "XC", "LVII", "IIII", "VX", "IC"]] == [2, 4, 9, 14, 40, 90, 57, None, None, None]
+    assert speakable("Mix of I and II") == "Mix of I and II"
     print("selftest ok")
 
 
@@ -592,13 +939,21 @@ def main():
     r = sub.add_parser("run"); r.add_argument("--url"); r.add_argument("--force", action="store_true")
     r.add_argument("--upload", action="store_true"); r.add_argument("--publish-at")
     a = sub.add_parser("add"); a.add_argument("urls", nargs="+"); a.add_argument("--force", action="store_true")
-    u = sub.add_parser("upload"); u.add_argument("pageid", type=int); u.add_argument("--publish-at")
+    u = sub.add_parser("upload"); u.add_argument("--publish-at"); u.add_argument("--ep", type=int)
     lg = sub.add_parser("log"); lg.add_argument("n", nargs="?", type=int, default=30)
     sub.add_parser("selftest")
+    rr = sub.add_parser("rerender"); rr.add_argument("--ep", type=int, required=True)
+    dc = sub.add_parser("discover"); dc.add_argument("--count", type=int, default=5)
+    dc.add_argument("--topic"); dc.add_argument("--degree", choices=["1", "2", "3", "any"], default="any")
+    sc = sub.add_parser("score"); sc.add_argument("--all", action="store_true")
+    wb = sub.add_parser("web"); wb.add_argument("--port", type=int, default=8765); wb.add_argument("--no-open", action="store_true")
     args = ap.parse_args()
     for d in (DB.parent, WORK, OUT, SECRETS):
         d.mkdir(exist_ok=True)
     con = db()
+    if args.cmd == "web":
+        import web
+        return web.serve(args.port, not args.no_open)
     if args.cmd == "selftest":
         return selftest()
     if args.cmd == "add":
@@ -609,23 +964,40 @@ def main():
             print(f"{row['status']:<9} {row['score'] or '':>2} {row['source']:<8} {row['pageid']:>9}  "
                   f"{row['title'][:45]:<45}  {(row['reason'] or '')[:60]}")
         print(dict(con.execute("select status, count(*) from pages group by status").fetchall()))
+    elif args.cmd == "rerender":
+        rerender(con, args.ep)
+    elif args.cmd == "discover":
+        if args.topic:
+            explore(con, args.topic, args.degree, args.count)
+        else:
+            print(f"finding {args.count} interesting random pages…")
+            discover(con, args.count)
+    elif args.cmd == "score":
+        rows = con.execute("select pageid, ep, title from pages where ep is not null and status in ('rendered','uploaded') "
+                           "and (? or potential is null) order by ep", (args.all,)).fetchall()
+        for r in rows:
+            if (WORK / str(r["pageid"]) / "meta.json").exists():
+                print(f"[{r['ep']:03d}] {r['title']}")
+                score_video(con, r["pageid"])
+        if not rows:
+            print("everything is scored (use --all to rescore)")
     elif args.cmd == "upload":
-        upload(con, args.pageid, args.publish_at)
+        upload_pending(con, args.publish_at, args.ep)
     elif args.cmd == "run":
         if args.url:
-            pageid = add_curated(con, args.url, args.force)
+            pageid = add_curated(con, args.url, args.force, make_now=True)
             if pageid is None:
                 return
         else:
             row = con.execute("select pageid from pages where status='queued' "
-                              "order by source='curated' desc, created limit 1").fetchone()
+                              f"{QUEUE_ORDER} limit 1").fetchone()
             pageid = row["pageid"] if row else None
             if pageid is None:
                 print("discovering…")
-                pageid = discover(con)
+                pageid = discover(con)[0]
         make(con, pageid)
         if args.upload:
-            upload(con, pageid, args.publish_at)
+            upload_pending(con, args.publish_at)
 
 
 if __name__ == "__main__":

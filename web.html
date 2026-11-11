@@ -1,0 +1,561 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Random Wiki Studio</title>
+<style>
+@font-face { font-family: Anton; src: url(/fonts/Anton-Regular.ttf); }
+@font-face { font-family: Inter; src: url(/fonts/Inter.ttf); font-weight: 100 900; }
+:root {
+  --bg: #0E1116; --panel: #161B23; --panel2: #1D232E; --line: #262D3A;
+  --text: #E8ECF1; --muted: #8A94A3; --accent: #FFC83D; --ok: #4ADE80; --bad: #F87171; --info: #60A5FA;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { background: var(--bg); color: var(--text); font: 14px/1.5 Inter, system-ui, sans-serif; }
+button, input { font: inherit; color: inherit; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+.app { display: grid; grid-template-columns: 1fr 440px; grid-template-rows: auto 1fr; height: 100vh; }
+header { grid-column: 1 / -1; display: flex; align-items: center; gap: 14px; padding: 14px 24px; border-bottom: 1px solid var(--line); }
+.logo { width: 34px; height: 34px; border-radius: 8px; background: var(--accent); color: var(--bg); display: grid; place-items: center; font: 24px Anton; }
+.brand { font: 24px Anton; letter-spacing: .5px; }
+.brand small { font: 500 13px Inter; color: var(--muted); margin-left: 8px; letter-spacing: 0; }
+.stats { margin-left: auto; display: flex; gap: 18px; color: var(--muted); font-size: 13px; }
+.stats b { color: var(--text); font-weight: 600; }
+
+main { overflow: auto; padding: 20px 24px 40px; }
+.tabs { display: flex; gap: 4px; margin-bottom: 18px; border-bottom: 1px solid var(--line); }
+.tab { background: none; border: 0; padding: 8px 14px; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; font-weight: 500; }
+.tab.on { color: var(--text); border-color: var(--accent); }
+
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 18px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; cursor: pointer; transition: border-color .15s, transform .15s; text-align: left; padding: 0; }
+.card:hover { border-color: var(--accent); transform: translateY(-2px); }
+.card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.thumb { aspect-ratio: 9 / 16; background: var(--panel2); display: grid; place-items: center; color: var(--muted); font: 40px Anton; }
+.thumb video { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; }
+.card .body { padding: 10px 12px 12px; }
+.ep { font: 600 12px var(--mono); color: var(--accent); }
+.card .top { display: flex; justify-content: space-between; align-items: center; }
+.pot { font: 600 12px var(--mono); padding: 1px 7px; border-radius: 6px; background: var(--panel2); color: var(--muted); }
+.pot.hi { color: var(--ok); background: #13261b; } .pot.mid { color: var(--accent); background: #2a2210; }
+.bars { display: grid; grid-template-columns: 90px 1fr 34px; gap: 6px 10px; align-items: center; font-size: 12px; color: var(--muted); }
+.bar { height: 6px; background: var(--panel2); border-radius: 3px; overflow: hidden; }
+.bar i { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
+.card h3 { margin: 2px 0 8px; font-size: 14px; font-weight: 600; line-height: 1.3; }
+
+.chip { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .4px; border: 1px solid; }
+.s-uploaded { color: var(--ok); border-color: #2c5e3e; background: #13261b; }
+.s-rendered { color: var(--accent); border-color: #6b5520; background: #2a2210; }
+.s-queued { color: var(--info); border-color: #284a75; background: #111f33; }
+.s-failed { color: var(--bad); border-color: #6b2c2c; background: #2a1313; }
+.s-rejected, .s-skipped { color: var(--muted); border-color: var(--line); background: var(--panel2); }
+
+.toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; align-items: center; }
+.filter { background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px; cursor: pointer; color: var(--muted); font-size: 12px; }
+.filter.on { color: var(--bg); background: var(--accent); border-color: var(--accent); font-weight: 600; }
+.toolbar .count { color: var(--muted); font-size: 12px; }
+.sort { margin-left: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; color: var(--text); }
+.sort + .search { margin-left: 0; }
+.search { margin-left: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; width: 240px; max-width: 100%; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th { text-align: left; color: var(--muted); font-weight: 500; padding: 8px; border-bottom: 1px solid var(--line); position: sticky; top: -20px; background: var(--bg); }
+td { padding: 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+td.reason { color: var(--muted); max-width: 420px; }
+td.num { font-family: var(--mono); color: var(--muted); white-space: nowrap; }
+
+aside { border-left: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; background: #0B0E12; }
+.actions { padding: 18px; display: grid; gap: 14px; border-bottom: 1px solid var(--line); }
+.actions h4 { margin: 0 0 6px; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); font-weight: 600; }
+.row { display: flex; gap: 8px; }
+.row.wrap { flex-wrap: wrap; }
+.row.wrap input { flex-basis: 100%; }
+.row.wrap .btn { flex: 1; }
+.row input { flex: 1; min-width: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+.row input:focus, .search:focus, .prompt input:focus { outline: none; border-color: var(--accent); }
+.btn { background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 14px; cursor: pointer; white-space: nowrap; font-weight: 500; }
+.btn:hover:not(:disabled) { border-color: var(--accent); }
+.btn.primary { background: var(--accent); color: var(--bg); border-color: var(--accent); font-weight: 600; }
+.btn.primary:hover:not(:disabled) { filter: brightness(1.08); }
+.btn.danger { color: var(--bad); }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.hint { color: var(--muted); font-size: 12px; margin-top: 4px; }
+
+.term { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.term-head { display: flex; align-items: center; gap: 10px; padding: 10px 18px; border-bottom: 1px solid var(--line); font-size: 12px; color: var(--muted); }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.dot.run { background: var(--ok); box-shadow: 0 0 0 4px #4ade8022; animation: pulse 1.2s infinite; }
+@keyframes pulse { 50% { opacity: .4; } }
+.term-head .btn { margin-left: auto; padding: 3px 10px; font-size: 12px; }
+pre.out { flex: 1; margin: 0; padding: 14px 18px; overflow: auto; font: 12.5px/1.55 var(--mono); color: #C9D1D9; white-space: pre-wrap; word-break: break-word; }
+.out .cmd { color: var(--accent); }
+.out .err { color: var(--bad); }
+.out .good { color: var(--ok); }
+.prompt { display: flex; align-items: center; gap: 8px; padding: 10px 18px; border-top: 1px solid var(--line); font-family: var(--mono); }
+.prompt span { color: var(--accent); }
+.prompt input { flex: 1; background: transparent; border: 0; font-family: var(--mono); font-size: 13px; }
+
+dialog { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 16px; padding: 0; width: min(980px, 94vw); max-height: 90vh; }
+dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
+.detail { display: grid; grid-template-columns: 300px 1fr; max-height: 90vh; }
+.detail video { width: 100%; aspect-ratio: 9/16; background: #000; display: block; }
+.detail .info { padding: 20px 24px; overflow: auto; }
+.detail h2 { margin: 4px 0 2px; font: 30px/1.15 Anton; letter-spacing: .3px; }
+.detail .sub { color: var(--muted); margin-bottom: 14px; }
+.detail h5 { margin: 18px 0 6px; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); }
+.detail .box { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; }
+.detail textarea, .detail input.edit { width: 100%; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font: 13px/1.55 Inter, sans-serif; color: var(--text); }
+.detail textarea { min-height: 190px; resize: vertical; }
+.detail textarea:focus, .detail input.edit:focus { outline: none; border-color: var(--accent); }
+.vstrip { display: flex; gap: 8px; flex-wrap: wrap; min-height: 60px; }
+.vtile { position: relative; width: 92px; aspect-ratio: 1; border-radius: 8px; overflow: hidden; border: 1px solid var(--line); cursor: grab; background: var(--panel2); }
+.vtile:focus-visible { outline: 2px solid var(--accent); }
+.vtile img, .vres img { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; }
+.vtile .x { position: absolute; top: 4px; right: 4px; width: 22px; height: 22px; border-radius: 50%; border: 0; background: #000c; color: #fff; cursor: pointer; font-size: 11px; }
+.vtile .n { position: absolute; left: 4px; bottom: 4px; font: 600 11px var(--mono); background: #000c; padding: 0 5px; border-radius: 4px; }
+.vtile.new { border-color: var(--ok); }
+.vtile.dragging { opacity: .35; }
+.vsearch { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+.vsearch input, .vsearch select { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; color: var(--text); }
+.vsearch input { flex: 1; min-width: 140px; }
+.vresults { display: grid; grid-template-columns: repeat(auto-fill, minmax(88px, 1fr)); gap: 6px; margin-top: 8px; max-height: 270px; overflow: auto; }
+.vres { padding: 0; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; cursor: pointer; aspect-ratio: 1; background: var(--panel2); }
+.vres:hover { border-color: var(--accent); }
+.vres.added { border: 2px solid var(--ok); opacity: .55; }
+.detail .btns { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
+.close { position: absolute; top: 10px; right: 12px; background: var(--panel2); border: 1px solid var(--line); border-radius: 50%; width: 32px; height: 32px; cursor: pointer; }
+.qadd { display: flex; gap: 8px; margin-bottom: 18px; align-items: flex-start; }
+.qadd textarea { flex: 1; min-height: 64px; resize: vertical; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font: 13px var(--mono); color: var(--text); }
+.qadd textarea:focus { outline: none; border-color: var(--accent); }
+.qlist { display: grid; gap: 10px; }
+.explore { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; margin-bottom: 18px; display: grid; gap: 10px; }
+.explore .row { flex-wrap: wrap; }
+.explore input { min-width: 180px; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg button { background: var(--panel2); border: 0; padding: 7px 12px; cursor: pointer; color: var(--muted); font-size: 13px; }
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button.on { background: var(--accent); color: var(--bg); font-weight: 600; }
+.via { font-size: 12px; color: var(--muted); margin-top: 4px; }
+.via b { color: var(--info); font-weight: 500; }
+.grip { cursor: grab; background: none; border: 0; color: var(--muted); font-size: 18px; padding: 4px; line-height: 1; border-radius: 6px; }
+.grip:focus-visible { outline: 2px solid var(--accent); }
+.qitem.dragging { opacity: .4; }
+.qitem { display: grid; grid-template-columns: 22px 34px 1fr auto; gap: 14px; align-items: center; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+.qitem.next { border-color: var(--accent); }
+.qpos { font: 20px Anton; color: var(--muted); text-align: center; }
+.qitem.next .qpos { color: var(--accent); }
+.qitem h3 { margin: 0 0 2px; font-size: 15px; font-weight: 600; }
+.qmeta { color: var(--muted); font-size: 12px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.qwhy { color: var(--text); opacity: .8; font-size: 13px; margin-top: 4px; }
+.qbtns { display: flex; gap: 6px; }
+.tag { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .4px; }
+.tag.curated { color: var(--info); } .tag.random { color: var(--muted); } .tag.seed { color: var(--ok); }
+.empty { color: var(--muted); padding: 40px 0; text-align: center; }
+
+@media (max-width: 900px) {
+  .app { grid-template-columns: 1fr; grid-template-rows: auto auto auto; height: auto; }
+  aside { border-left: 0; border-top: 1px solid var(--line); }
+  .term { height: 60vh; }
+  main { padding: 16px; }
+  header { padding: 12px 16px; flex-wrap: wrap; }
+  .stats { margin-left: 0; width: 100%; }
+  .detail { grid-template-columns: 1fr; }
+  .detail video { max-height: 60vh; }
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="logo">?</div>
+    <div class="brand" id="brand">RANDOM WIKI<small>studio</small></div>
+    <div class="stats" id="stats"></div>
+  </header>
+
+  <main>
+    <div class="tabs" role="tablist">
+      <button class="tab on" data-tab="episodes" role="tab">Episodes</button>
+      <button class="tab" data-tab="queue" role="tab" id="queueTab">Queue</button>
+      <button class="tab" data-tab="log" role="tab">Page log</button>
+    </div>
+    <section id="episodes">
+      <div class="toolbar">
+        <span id="epFilters" style="display:contents"></span>
+        <span class="count" id="epCount"></span>
+        <select class="sort" id="epSort" aria-label="Sort">
+          <option value="potential">Best potential</option><option value="new">Newest first</option><option value="old">Oldest first</option><option value="score">Highest score</option>
+        </select>
+        <input class="search" id="epSearch" placeholder="Search title, narration, ep 12…" aria-label="Search episodes">
+      </div>
+      <div id="epGrid"></div>
+    </section>
+    <section id="queue" hidden>
+      <div class="qadd">
+        <textarea id="qText" placeholder="Paste Wikipedia links or titles, one per line, to queue them" aria-label="Links to queue"></textarea>
+        <button class="btn primary" id="qAdd">Add to queue</button>
+      </div>
+      <div class="explore">
+        <h4 style="margin:0;font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--muted)">Find ideas</h4>
+        <div class="row">
+          <input id="qTopic" placeholder="Topic to explore, e.g. Nepal, jazz, black holes (empty = fully random)" aria-label="Topic">
+        </div>
+        <div class="row" style="align-items:center">
+          <span class="count">Degree of relation</span>
+          <div class="seg" id="qDegree" role="radiogroup" aria-label="Degree of relation">
+            <button data-deg="1" class="on" title="Pages the topic links to, that link to it, or mention it">1 · direct</button>
+            <button data-deg="2" title="One hop further: linked from those pages">2</button>
+            <button data-deg="3" title="Two hops further: distant, surprising connections">3 · distant</button>
+            <button data-deg="any" title="Mix of all three">any</button>
+          </div>
+          <span class="count">How many</span>
+          <select class="sort" id="qCount" aria-label="How many ideas" style="margin-left:0"><option>3</option><option selected>5</option><option>10</option></select>
+          <button class="btn primary" id="qFind">Find ideas</button>
+        </div>
+      </div>
+      <div id="qList"></div>
+    </section>
+    <section id="log" hidden>
+      <div class="toolbar" id="filters"></div>
+      <table><thead><tr><th>Status</th><th>Score</th><th>Title</th><th>Source</th><th>Reason</th><th>When</th></tr></thead>
+      <tbody id="logrows"></tbody></table>
+    </section>
+  </main>
+
+  <aside>
+    <div class="actions">
+      <div>
+        <h4>Generate</h4>
+        <div class="row">
+          <button class="btn primary" data-cmd="run" title="Next queued page, otherwise a random interesting one">Make next video</button>
+        </div>
+      </div>
+      <div>
+        <h4>From a Wikipedia link</h4>
+        <div class="row wrap">
+          <input id="url" placeholder="https://en.wikipedia.org/wiki/…" aria-label="Wikipedia URL">
+          <button class="btn" id="makeUrl">Make now</button>
+          <button class="btn" id="queueUrl">Queue</button>
+        </div>
+      </div>
+      <div>
+        <h4>Publish</h4>
+        <div class="row">
+          <input id="publishAt" type="datetime-local" aria-label="Go public at (optional)">
+          <button class="btn primary" id="upload">Upload pending</button>
+        </div>
+        <div class="hint" id="pendingHint">Uploads every rendered video, best potential first. To upload one, open it and click Upload. Leave the time empty to upload as private.</div>
+      </div>
+    </div>
+    <div class="term">
+      <div class="term-head"><span class="dot" id="dot"></span><span id="jobLabel">idle</span><button class="btn danger" id="stop" disabled>Stop</button></div>
+      <pre class="out" id="out" aria-live="polite"></pre>
+      <form class="prompt" id="prompt"><span>rw ›</span><input id="cmd" placeholder="run --url … · add … · upload · log 20" autocomplete="off" aria-label="Command"></form>
+    </div>
+  </aside>
+</div>
+
+<dialog id="dlg"><button class="close" onclick="dlg.close()" aria-label="Close">✕</button><div id="dlgBody"></div></dialog>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+let pages = [], running = false, since = 0, statusFilter = "all", q = "", epFilter = "all", epQ = "", epSort = "potential", qDegree = "1";
+// load video previews only when their card scrolls near the viewport
+const lazy = new IntersectionObserver(es => es.forEach(e => {
+  if (e.isIntersecting) { e.target.src = e.target.dataset.src; lazy.unobserve(e.target); }
+}), {rootMargin: "400px"});
+
+async function post(path, body) {
+  const r = await fetch(path, {method: "POST", headers: {"Content-Type": "application/json", "X-RW": "1"}, body: JSON.stringify(body || {})});
+  const j = await r.json();
+  if (!r.ok) termLine("! " + j.error, "err");
+  return r.ok;
+}
+// mark running right away so even a job that ends between polls triggers a refresh
+const exec = cmd => post("/api/exec", {cmd}).then(ok => { if (ok) running = true; return ok; });
+const quote = s => "'" + s.replace(/'/g, "'\\''") + "'";
+
+function termLine(text, cls) {
+  const out = $("#out"), atBottom = out.scrollHeight - out.scrollTop - out.clientHeight < 40;
+  const el = document.createElement("div");
+  el.textContent = text;
+  el.className = cls || (text.startsWith("$ ") ? "cmd" : /error|failed|traceback|exit [1-9]/i.test(text) ? "err" : /done:|uploaded:|exit 0|selftest ok/.test(text) ? "good" : "");
+  out.appendChild(el);
+  if (atBottom) out.scrollTop = out.scrollHeight;
+}
+
+async function loadPages() {
+  const j = await (await fetch("/api/pages")).json();
+  pages = j.pages;
+  $("#brand").innerHTML = esc(j.brand.channel.toUpperCase()) + "<small>studio</small>";
+  const n = s => pages.filter(p => p.status === s).length;
+  $("#stats").innerHTML = `<span><b>${n("uploaded")}</b> uploaded</span><span><b>${n("rendered")}</b> ready</span><span><b>${n("queued")}</b> queued</span><span><b>${pages.length}</b> pages seen</span>`;
+  $("#pendingHint").textContent = n("rendered") ? `${n("rendered")} video${n("rendered") > 1 ? "s" : ""} ready to upload. Leave the time empty to upload as private.` : "Nothing waiting. Rendered videos appear here.";
+  renderEpisodes(); renderQueue(); renderLog();
+}
+
+function renderEpisodes() {
+  const eps = pages.filter(p => p.ep || p.status === "failed");
+  const statuses = ["all", ...new Set(eps.map(p => p.status))];
+  if (!statuses.includes(epFilter)) epFilter = "all";
+  $("#epFilters").innerHTML = statuses.map(s => `<button class="filter ${s === epFilter ? "on" : ""}" data-ef="${s}">${s} ${s === "all" ? eps.length : eps.filter(p => p.status === s).length}</button>`).join("");
+  const ql = epQ.toLowerCase().trim(), num = ql.match(/^(?:ep\s*)?0*(\d+)$/);
+  const key = {potential: p => -(p.potential ?? -1) + (p.status === "uploaded" ? 1000 : 0), new: p => -(p.ep ?? 1e9), old: p => p.ep ?? 1e9, score: p => -(p.score ?? 0)}[epSort];
+  const shown = eps
+    .filter(p => epFilter === "all" || p.status === epFilter)
+    .filter(p => !ql || (num && p.ep === +num[1]) || [p.title, p.yt_title, p.script].some(x => (x || "").toLowerCase().includes(ql)))
+    .sort((a, b) => key(a) - key(b));
+  $("#epCount").textContent = shown.length === eps.length ? "" : `${shown.length} of ${eps.length}`;
+  $("#epGrid").innerHTML = !eps.length ? `<div class="empty">No videos yet. Click <b>Make next video</b>.</div>`
+    : !shown.length ? `<div class="empty">No videos match.</div>` : `<div class="grid">${shown.map(p => `
+    <button class="card" data-id="${p.pageid}">
+      <div class="thumb">${p.video ? `<video data-src="/video/${encodeURIComponent(p.video)}#t=1.5" preload="metadata" muted></video>` : "?"}</div>
+      <div class="body"><div class="top"><span class="ep">${p.ep ? "EP " + String(p.ep).padStart(3, "0") : "—"}</span>${potBadge(p)}</div>
+      <h3>${esc(p.yt_title || p.title)}</h3><span class="chip s-${p.status}">${p.status}</span></div>
+    </button>`).join("")}</div>`;
+  document.querySelectorAll("#epGrid video[data-src]").forEach(v => lazy.observe(v));
+}
+
+// sqlite's current_timestamp (the created column) is UTC; show it in local time
+const localTime = utc => utc ? new Date(utc.replace(" ", "T") + "Z").toLocaleString([], {month: "short", day: "numeric", hour: "2-digit", minute: "2-digit"}) : "";
+const potBadge = p => p.potential == null ? "" :
+  `<span class="pot ${p.potential >= 75 ? "hi" : p.potential >= 55 ? "mid" : ""}" title="Predicted potential (0-100)">▲ ${p.potential}</span>`;
+const LABELS = {demand: "Topic demand", hook: "Hook", appeal: "Broad appeal", reach: "Global reach", interest: "Interest", visuals: "Visuals", length: "Length fit"};
+function potDetail(p) {
+  const i = p.potential_info; if (!i) return "";
+  return `<h5>Potential ${potBadge(p)}</h5>
+    <div class="bars">${Object.entries(i.parts).map(([k, v]) => `<span>${LABELS[k] || k}</span><div class="bar"><i style="width:${v * 100}%"></i></div><span>${Math.round(v * 100)}</span>`).join("")}</div>
+    <div class="hint">${esc(i.why)} · ${i.views60.toLocaleString()} article views in 60 days · ${i.languages} languages · ${i.seconds}s</div>`;
+}
+
+function renderQueue() {
+  // same order rw run uses: curated first, then oldest
+  const qs = pages.filter(p => p.status === "queued").sort((a, b) =>
+    (a.rank == null) - (b.rank == null) || (a.rank ?? 0) - (b.rank ?? 0) ||
+    (b.source === "curated") - (a.source === "curated") || (a.created || "").localeCompare(b.created || ""));
+  $("#queueTab").textContent = qs.length ? `Queue (${qs.length})` : "Queue";
+  $("#qList").innerHTML = !qs.length ? `<div class="empty">Queue is empty. <b>Make next video</b> will discover a random page.<br>Add links above, or click <b>Find ideas</b> to queue a few random candidates to review.</div>`
+    : `<div class="qlist">${qs.map((p, i) => `
+      <div class="qitem ${i === 0 ? "next" : ""}" draggable="true" data-qid="${p.pageid}">
+        <button class="grip" aria-label="Reorder ${esc(p.title)} (drag, or use arrow keys)" title="Drag to reorder (or focus and press ↑/↓)">⠿</button>
+        <div class="qpos">${i + 1}</div>
+        <div>
+          <h3>${esc(p.title)}</h3>
+          <div class="qmeta">
+            ${i === 0 ? `<span class="chip s-rendered">next up</span>` : ""}
+            <span class="tag ${p.source}">${p.source}</span>
+            ${p.score ? `<span>interest ${p.score}/10</span>` : ""}
+            <span>added ${esc(localTime(p.created))}</span>
+            <a href="${esc(p.url)}" target="_blank" rel="noopener">Wikipedia ↗</a>
+          </div>
+          ${p.reason && p.reason !== "curated" ? `<div class="qwhy">${esc(p.reason.replace(/^llm: /, ""))}</div>` : ""}
+          ${p.via ? `<div class="via">${p.via.split(" → ").length - 1}° · ${p.via.split(" → ").map((x, j, a) => j === 0 ? `<b>${esc(x)}</b>` : esc(x)).join(" → ")}</div>` : ""}
+        </div>
+        <div class="qbtns">
+          <button class="btn primary" data-make="${esc(p.url)}">Make now</button>
+          <button class="btn danger" data-skip="${p.pageid}">Remove</button>
+        </div>
+      </div>`).join("")}</div>`;
+}
+
+// ---- visuals editor: edImages is the ordered list that "Save & re-render" sends
+let edImages = [];
+function wireVisuals(p) {
+  edImages = (p.images || []).map(i => ({...i}));
+  const imgSrc = i => i.file ? `/work/${p.pageid}/${encodeURIComponent(i.file)}` : i.thumb;
+  const strip = () => {
+    $("#vStrip").innerHTML = edImages.map((i, n) => `
+      <div class="vtile ${i.file ? "" : "new"}" draggable="true" tabindex="0" data-i="${n}"
+           title="${esc((i.name || "") + (i.credit || i.license ? " · " + (i.credit || i.license) : ""))}" aria-label="Image ${n + 1}: ${esc(i.name)}. Arrow keys to move.">
+        <img src="${esc(imgSrc(i))}" alt=""><span class="n">${n + 1}</span>
+        <button class="x" data-rm="${n}" aria-label="Remove image ${n + 1}">✕</button>
+      </div>`).join("") || `<span class="hint">No images: the video will use a title card.</span>`;
+    document.querySelectorAll(".vres").forEach(b => b.classList.toggle("added", edImages.some(i => same(i, results[+b.dataset.r]))));
+  };
+  const same = (a, b) => !!b && (a.url === b.url || (a.name && a.name === b.name));
+  const move = (from, to) => { if (to < 0 || to >= edImages.length) return; edImages.splice(to, 0, edImages.splice(from, 1)[0]); strip(); };
+  let results = [];
+  strip();
+  let dragI = null;
+  $("#vStrip").ondragstart = e => { dragI = +e.target.closest(".vtile")?.dataset.i; e.target.classList.add("dragging"); };
+  $("#vStrip").ondragover = e => e.preventDefault();
+  $("#vStrip").ondrop = e => { e.preventDefault(); const over = e.target.closest(".vtile"); if (over && dragI != null) move(dragI, +over.dataset.i); dragI = null; };
+  $("#vStrip").ondragend = () => { dragI = null; strip(); };
+  $("#vStrip").onkeydown = e => {
+    const tile = e.target.closest(".vtile"); if (!tile || !["ArrowLeft", "ArrowRight"].includes(e.key)) return;
+    const i = +tile.dataset.i, to = i + (e.key === "ArrowLeft" ? -1 : 1); move(i, to);
+    document.querySelector(`.vtile[data-i="${Math.max(0, Math.min(to, edImages.length - 1))}"]`)?.focus();
+  };
+  $("#vStrip").onclick = e => { const rm = e.target.closest("[data-rm]"); if (rm) { edImages.splice(+rm.dataset.rm, 1); strip(); } };
+  const search = async () => {
+    $("#vResults").innerHTML = `<span class="hint">Searching…</span>`;
+    const r = await fetch(`/api/images/search?source=${$("#vSource").value}&q=${encodeURIComponent($("#vQuery").value)}`);
+    const j = await r.json();
+    results = j.results || [];
+    $("#vResults").innerHTML = !r.ok ? `<span class="hint">${esc(j.error)}</span>` : !results.length ? `<span class="hint">No free-licensed images found.</span>`
+      : results.map((c, n) => `<button class="vres" data-r="${n}" data-url="${esc(c.url)}" title="${esc(c.name + " · " + (c.artist && !/^unknown/i.test(c.artist) ? c.artist + " · " : "") + c.license)}"><img src="${esc(c.thumb)}" alt="${esc(c.name)}" loading="lazy"></button>`).join("");
+    strip();
+  };
+  $("#vGo").onclick = search;
+  $("#vQuery").onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); search(); } };
+  $("#vResults").onclick = e => {
+    const b = e.target.closest(".vres"); if (!b) return;
+    const c = results[+b.dataset.r], at = edImages.findIndex(i => same(i, c));
+    if (at >= 0) edImages.splice(at, 1); else edImages.push({...c});
+    strip();
+  };
+  $("#vFile").onchange = async e => {
+    for (const f of e.target.files) {
+      const r = await fetch(`/api/upload_image?pageid=${p.pageid}`, {method: "POST", headers: {"X-RW": "1"}, body: f});
+      const j = await r.json();
+      if (r.ok) edImages.push(j.image); else termLine("! " + j.error, "err");
+    }
+    e.target.value = ""; strip();
+  };
+}
+
+function renderLog() {
+  const statuses = ["all", ...new Set(pages.map(p => p.status))];
+  $("#filters").innerHTML = statuses.map(s => `<button class="filter ${s === statusFilter ? "on" : ""}" data-f="${s}">${s} ${s === "all" ? pages.length : pages.filter(p => p.status === s).length}</button>`).join("")
+    + `<input class="search" id="search" placeholder="Search titles…" value="${esc(q)}">`;
+  const rows = pages.filter(p => (statusFilter === "all" || p.status === statusFilter) && p.title.toLowerCase().includes(q.toLowerCase()));
+  $("#logrows").innerHTML = rows.slice(0, 1000).map(p => `<tr>
+    <td><span class="chip s-${p.status}">${p.status}</span></td><td class="num">${p.score ?? ""}</td>
+    <td><a href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.title)}</a></td><td>${esc(p.source)}</td>
+    <td class="reason">${esc(p.reason)}</td><td class="num">${esc((p.updated || "").slice(5, 16))}</td></tr>`).join("");
+  const s = $("#search"); s.oninput = e => { q = e.target.value; renderLog(); const n = $("#search"); n.focus(); n.setSelectionRange(q.length, q.length); };
+}
+
+function openDetail(id) {
+  const p = pages.find(x => x.pageid == id);
+  const yt = p.video_id ? `https://youtube.com/shorts/${p.video_id}` : null;
+  $("#dlgBody").innerHTML = `<div class="detail">
+    ${p.video ? `<video src="/video/${encodeURIComponent(p.video)}" controls autoplay playsinline></video>` : `<div class="thumb">?</div>`}
+    <div class="info">
+      <div class="ep">${p.ep ? "EP " + String(p.ep).padStart(3, "0") : ""} &nbsp;<span class="chip s-${p.status}">${p.status}</span></div>
+      <h2>${esc(p.yt_title || p.title)}</h2>
+      <div class="sub">${esc(p.title)} · <a href="${esc(p.url)}" target="_blank" rel="noopener">Wikipedia ↗</a>${yt ? ` · <a href="${yt}" target="_blank" rel="noopener">YouTube ↗</a>` : ""}</div>
+      <div class="btns">
+        ${p.status === "rendered" ? `<button class="btn primary" data-upload="${p.ep}">Upload this video</button>` : ""}
+        ${p.status !== "uploaded" ? `<button class="btn" data-remake="${esc(p.url)}">Remake</button>` : ""}
+        ${["rendered", "queued", "failed"].includes(p.status) ? `<button class="btn danger" data-skip="${p.pageid}">Skip (don't upload)</button>` : ""}
+      </div>
+      ${potDetail(p)}
+      ${p.status === "failed" ? `<h5>Error</h5><div class="box">${esc(p.reason)}</div>` : ""}
+      ${p.script && p.status !== "uploaded" ? `
+        <h5>YouTube title</h5><input class="edit" id="edTitle" maxlength="100" value="${esc(p.yt_title)}">
+        <h5>Narration <span id="edCount" style="text-transform:none;letter-spacing:0"></span></h5>
+        <textarea id="edScript">${esc(p.script)}</textarea>
+        <h5>Visuals <span style="text-transform:none;letter-spacing:0">· drag to reorder, × to remove, click a result to add</span></h5>
+        <div class="vstrip" id="vStrip"></div>
+        <div class="vsearch">
+          <select id="vSource" aria-label="Image source">
+            <option value="article">This article</option><option value="commons" selected>Wikimedia Commons</option>
+            <option value="openverse">Openverse (Flickr etc.)</option><option value="nasa">NASA</option><option value="met">The Met (art &amp; history)</option>
+          </select>
+          <input id="vQuery" value="${esc(p.title)}" aria-label="Image search">
+          <button class="btn" id="vGo">Search</button>
+          <label class="btn" style="cursor:pointer">Upload own<input type="file" accept="image/*" id="vFile" hidden multiple></label>
+        </div>
+        <div class="vresults" id="vResults"></div>
+        <div class="btns" style="margin-top:12px"><button class="btn primary" data-rerender="${p.pageid}" data-ep="${p.ep}">Save &amp; re-render</button>
+        <span class="hint" style="align-self:center">Applies your text and visuals, re-voices and re-renders (about 1–2 min). No AI rewrite.</span></div>`
+      : p.script ? `<h5>Narration</h5><div class="box">${esc(p.script)}</div>` : ""}
+      ${p.yt_description ? `<h5>YouTube description</h5><div class="box">${esc(p.yt_description)}</div>` : ""}
+    </div></div>`;
+  dlg.showModal();
+  if ($("#vStrip")) wireVisuals(p);
+  const ed = $("#edScript");
+  if (ed) { const n = () => $("#edCount").textContent = `· ${ed.value.trim().split(/\s+/).length} words (aim 85–128)`; ed.oninput = n; n(); }
+}
+
+async function poll() {
+  try {
+    const j = await (await fetch("/api/job?since=" + since)).json();
+    j.lines.forEach(l => termLine(l));
+    since = j.next;
+    const was = running; running = j.running;
+    $("#dot").className = "dot" + (running ? " run" : "");
+    $("#jobLabel").textContent = running ? j.cmd : (j.cmd ? `idle · last: ${j.cmd}` : "idle");
+    document.querySelectorAll("[data-cmd], #makeUrl, #queueUrl, #upload, #qAdd, #qFind, [data-remake], [data-upload], [data-make], [data-rerender]").forEach(b => b.disabled = running);
+    $("#stop").disabled = !running;
+    if (was && !running) loadPages();
+  } catch (e) {
+    $("#jobLabel").textContent = "server not reachable";
+  }
+  setTimeout(poll, running ? 700 : 2500);
+}
+
+document.addEventListener("click", async e => {
+  const t = e.target.closest("button"); if (!t) return;
+  if (t.dataset.tab) {
+    document.querySelectorAll(".tab").forEach(b => b.classList.toggle("on", b === t));
+    ["episodes", "queue", "log"].forEach(id => $("#" + id).hidden = t.dataset.tab !== id);
+  } else if (t.dataset.f) { statusFilter = t.dataset.f; renderLog(); }
+  else if (t.dataset.ef) { epFilter = t.dataset.ef; renderEpisodes(); }
+  else if (t.dataset.id) openDetail(t.dataset.id);
+  else if (t.dataset.cmd) exec(t.dataset.cmd);
+  else if (t.dataset.upload) { dlg.close(); exec(`upload --ep ${+t.dataset.upload}` + publishArg()); }
+  else if (t.dataset.make) exec(`run --url ${quote(t.dataset.make)}`);
+  else if (t.dataset.rerender) {
+    const pid = +t.dataset.rerender;
+    t.disabled = true; t.textContent = "Saving…";
+    const ok = await post("/api/script", {pageid: pid, title: $("#edTitle").value, script: $("#edScript").value})
+      && await post("/api/images", {pageid: pid, images: edImages});
+    if (ok) { dlg.close(); exec(`rerender --ep ${+t.dataset.ep}`); } else { t.disabled = false; t.textContent = "Save & re-render"; }
+  }
+  else if (t.dataset.remake) { dlg.close(); exec(`run --force --url ${quote(t.dataset.remake)}`); }
+  else if (t.dataset.skip) { if (await post("/api/skip", {pageid: +t.dataset.skip})) { if (dlg.open) dlg.close(); termLine("removed/skipped page " + t.dataset.skip); loadPages(); } }
+});
+$("#makeUrl").onclick = () => { const u = $("#url").value.trim(); if (u) exec(`run --url ${quote(u)}`).then(ok => ok && ($("#url").value = "")); };
+$("#queueUrl").onclick = () => { const u = $("#url").value.trim(); if (u) exec(`add ${quote(u)}`).then(ok => ok && ($("#url").value = "")); };
+const publishArg = () => { const v = $("#publishAt").value; return v ? " --publish-at " + new Date(v).toISOString().replace(/\.\d+Z$/, "Z") : ""; };
+$("#qFind").onclick = () => {
+  const topic = $("#qTopic").value.trim();
+  exec(`discover --count ${$("#qCount").value}` + (topic ? ` --topic ${quote(topic)} --degree ${qDegree}` : ""));
+};
+$("#qDegree").onclick = e => {
+  const b = e.target.closest("[data-deg]"); if (!b) return;
+  qDegree = b.dataset.deg;
+  $("#qDegree").querySelectorAll("button").forEach(x => { x.classList.toggle("on", x === b); x.setAttribute("aria-checked", x === b); });
+};
+
+// drag (mouse) or arrow keys on the grip (keyboard) to reorder; saved immediately
+const saveOrder = () => post("/api/reorder", {order: [...document.querySelectorAll("#qList .qitem")].map(el => +el.dataset.qid)}).then(loadPages);
+let dragEl = null;
+$("#qList").addEventListener("dragstart", e => { dragEl = e.target.closest(".qitem"); dragEl?.classList.add("dragging"); });
+$("#qList").addEventListener("dragover", e => {
+  e.preventDefault();
+  const over = e.target.closest(".qitem"); if (!dragEl || !over || over === dragEl) return;
+  const r = over.getBoundingClientRect();
+  over.parentNode.insertBefore(dragEl, e.clientY > r.top + r.height / 2 ? over.nextSibling : over);
+});
+$("#qList").addEventListener("dragend", () => { if (dragEl) { dragEl.classList.remove("dragging"); dragEl = null; saveOrder(); } });
+$("#qList").addEventListener("keydown", e => {
+  if (!e.target.classList.contains("grip") || !["ArrowUp", "ArrowDown"].includes(e.key)) return;
+  e.preventDefault();
+  const item = e.target.closest(".qitem"), sib = e.key === "ArrowUp" ? item.previousElementSibling : item.nextElementSibling;
+  if (!sib) return;
+  item.parentNode.insertBefore(item, e.key === "ArrowUp" ? sib : sib.nextSibling);
+  const id = item.dataset.qid;
+  saveOrder().then(() => document.querySelector(`.qitem[data-qid="${id}"] .grip`)?.focus());
+});
+$("#qAdd").onclick = () => {
+  const items = $("#qText").value.split("\n").map(x => x.trim()).filter(Boolean);
+  if (items.length) exec("add " + items.map(quote).join(" ")).then(ok => ok && ($("#qText").value = ""));
+};
+$("#upload").onclick = () => exec("upload" + publishArg());
+$("#epSearch").oninput = e => { epQ = e.target.value; renderEpisodes(); };
+$("#epSort").onchange = e => { epSort = e.target.value; renderEpisodes(); };
+$("#stop").onclick = () => post("/api/stop");
+$("#prompt").onsubmit = e => { e.preventDefault(); const c = $("#cmd").value.trim(); if (c) exec(c.replace(/^(\.\/)?rw\s+/, "")).then(ok => ok && ($("#cmd").value = "")); };
+dlg.addEventListener("close", () => { const v = dlg.querySelector("video"); if (v) v.pause(); });
+
+loadPages(); poll();
+</script>
+</body>
+</html>

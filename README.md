@@ -33,9 +33,13 @@ The voice model (about 300 MB) downloads on the first run.
 ./rw run                      # next queued page (curated first), else discover a random one
 ./rw run --url <wiki url>     # make a curated/fixed video now (also retries a failed page)
 ./rw add <url> [<url> ...]    # queue curated pages for later runs
+./rw discover [--count 5] [--topic nepal --degree 1|2|3|any]   # queue ideas: random, or from a topic's link network
 ./rw run --upload [--publish-at 2026-11-12T15:00:00Z]
-./rw upload <pageid>          # upload an already rendered video (review it first)
+./rw upload [--ep N]          # upload every rendered video not yet uploaded, or just episode N
+./rw score [--all]            # predict how well each video may do (0-100)
+./rw rerender --ep N          # re-voice + re-render from the saved (hand-edited) script
 ./rw log [N]                  # rejected / queued / rendered / uploaded / failed, with reasons
+./rw web                      # studio UI at http://127.0.0.1:8765 (browse, generate, publish)
 ./rw selftest
 ```
 `--force` re-makes a page that was already rendered or uploaded.
