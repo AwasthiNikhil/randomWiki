@@ -47,10 +47,11 @@
       5,
       6
     ],
-    "upload": true,
+    "upload": false,
     "publish": "private",
     "publish_time": "15:00",
     "fallback": "wikipedia",
-    "fallback_arg": ""
+    "fallback_arg": "",
+    "pick": "order"
   }
 }

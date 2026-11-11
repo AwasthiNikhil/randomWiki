@@ -967,7 +967,7 @@ def produce(con, m, out):
 # ---------- automation (macOS launchd) ----------
 SCHEDULE_DEFAULTS = {"enabled": False, "times": ["09:00"], "days": [0, 1, 2, 3, 4, 5, 6], "upload": True,
                      "publish": "private", "publish_time": "15:00", "fallback": "wikipedia", "fallback_arg": "",
-                     "pick": "order"}  # pick: "order" = top of the Publish list, "newest" = the video this run made
+                     "pick": "order"}  # pick: "order" = top of the Queue (ready videos), "newest" = the video this run made
 LAUNCH_LABEL = "com.shortsmachine.auto"
 LAUNCH_PLIST = Path.home() / "Library" / "LaunchAgents" / f"{LAUNCH_LABEL}.plist"
 AUTO_LOG = DB.parent / "auto.log"
@@ -1042,7 +1042,7 @@ def auto(con, dry_run=False):
                 + (f" ({sch['fallback_arg']})" if sch["fallback_arg"] else ""))
         ready = con.execute(f"select ep, title from pages where status='rendered' {UPLOAD_ORDER} limit 1").fetchone()
         which = ("the video it makes" if sch["pick"] == "newest" or not ready
-                 else f"EP {ready['ep']:03d} {ready['title']} (top of the Publish list)")
+                 else f"EP {ready['ep']:03d} {ready['title']} (top of the Queue)")
         plan += f"; then {'upload ' + which + (', public at ' + when + ' UTC' if when else ', private') if sch['upload'] else 'no upload'}"
         print(plan)
         if dry_run:

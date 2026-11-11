@@ -236,8 +236,8 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
   <main>
     <div class="tabs" role="tablist">
       <button class="tab on" data-tab="episodes" role="tab">Episodes</button>
-      <button class="tab" data-tab="queue" role="tab" id="queueTab">Queue</button>
-      <button class="tab" data-tab="publish" role="tab" id="publishTab">Publish</button>
+      <button class="tab" data-tab="queue" role="tab" id="queueTab">Ideabank</button>
+      <button class="tab" data-tab="publish" role="tab" id="publishTab">Queue</button>
       <button class="tab" data-tab="log" role="tab">Page log</button>
       <button class="tab" data-tab="settings" role="tab">Settings</button>
     </div>
@@ -258,8 +258,8 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
     </section>
     <section id="queue" hidden>
       <div class="qadd">
-        <textarea id="qText" placeholder="Paste links (Wikipedia, any article, Hacker News, arXiv, APOD) or Wikipedia titles, one per line" aria-label="Links to queue"></textarea>
-        <button class="btn primary" id="qAdd">Add to queue</button>
+        <textarea id="qText" placeholder="Paste links (Wikipedia, any article, Hacker News, arXiv, APOD) or Wikipedia titles, one per line" aria-label="Links to add to the ideabank"></textarea>
+        <button class="btn primary" id="qAdd">Add to ideabank</button>
       </div>
       <div class="explore">
         <h4 style="margin:0;font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--muted)">Find ideas</h4>
@@ -341,7 +341,7 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
               <div><div class="hint" style="margin-bottom:6px">Days</div>
                 <div class="seg" id="schDays" role="group" aria-label="Days of the week"></div></div>
               <div class="inline">
-                <label style="flex:1;min-width:min(220px,100%)">If the queue is empty, find an idea from
+                <label style="flex:1;min-width:min(220px,100%)">If the ideabank is empty, find an idea from
                   <select id="schFb"><option value="wikipedia">Wikipedia (random, or a topic)</option><option value="hackernews">Hacker News</option>
                   <option value="apod">NASA APOD</option><option value="arxiv">arXiv (topic)</option><option value="rss">RSS feed (URL)</option></select></label>
                 <label style="flex:1;min-width:min(220px,100%)"><span id="schArgLabel">Topic (optional)</span><input id="schArg"></label>
@@ -349,7 +349,7 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
               <label class="check"><input type="checkbox" id="schUp"> Upload to YouTube after making</label>
               <div id="schPick" style="display:grid;gap:6px;padding-left:24px">
                 <span class="hint">Each run publishes</span>
-                <label class="radio"><input type="radio" name="schPick" value="order"> the next video in your <b>Publish</b> list (top first)</label>
+                <label class="radio"><input type="radio" name="schPick" value="order"> the next video in your <b>Queue</b> (top first)</label>
                 <label class="radio"><input type="radio" name="schPick" value="newest"> the video that run just made</label>
               </div>
               <div id="schPub" style="display:grid;gap:6px;padding-left:24px">
@@ -388,7 +388,7 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
       <div>
         <h4>Generate</h4>
         <div class="row">
-          <button class="btn primary" data-cmd="run" title="Next queued page, otherwise a random interesting one">Make next video</button>
+          <button class="btn primary" data-cmd="run" title="Next idea in the ideabank, otherwise a random interesting page">Make next video</button>
         </div>
       </div>
       <div>
@@ -396,7 +396,7 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
         <div class="row wrap">
           <input id="url" placeholder="Wikipedia, article, Hacker News, arXiv or APOD link" aria-label="Link to make a video from">
           <button class="btn" id="makeUrl">Make now</button>
-          <button class="btn" id="queueUrl">Queue</button>
+          <button class="btn" id="queueUrl" title="Save it to the ideabank for later">Save idea</button>
         </div>
       </div>
       <div>
@@ -405,7 +405,7 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
           <input id="publishAt" type="datetime-local" aria-label="Go public at (optional)">
           <button class="btn primary" id="upload">Upload pending</button>
         </div>
-        <div class="hint" id="pendingHint">Uploads every ready video in your Publish order. To upload one, open it and click Upload. Leave the time empty to upload as private.</div>
+        <div class="hint" id="pendingHint">Uploads every video in your Queue, top first. To upload one, open it and click Upload. Leave the time empty to upload as private.</div>
       </div>
     </div>
     <div class="term">
@@ -455,8 +455,8 @@ async function loadPages() {
   $(".logo").innerHTML = j.brand.logo ? `<img src="/brand/logo.png?t=${Date.now()}" alt="" style="width:26px;height:26px;object-fit:contain">` : esc(j.brand.logo_text || "?");
   document.documentElement.style.setProperty("--accent", j.brand.colors.accent);
   const n = s => pages.filter(p => p.status === s).length;
-  $("#stats").innerHTML = `<span><b>${n("uploaded")}</b> uploaded</span><span><b>${n("rendered")}</b> ready</span><span><b>${n("queued")}</b> queued</span><span><b>${pages.length}</b> pages seen</span>`;
-  $("#pendingHint").textContent = n("rendered") ? `${n("rendered")} video${n("rendered") > 1 ? "s" : ""} ready to upload. Leave the time empty to upload as private.` : "Nothing waiting. Rendered videos appear here.";
+  $("#stats").innerHTML = `<span><b>${n("uploaded")}</b> uploaded</span><span><b>${n("rendered")}</b> in queue</span><span><b>${n("queued")}</b> ideas</span><span><b>${pages.length}</b> pages seen</span>`;
+  $("#pendingHint").textContent = n("rendered") ? `${n("rendered")} video${n("rendered") > 1 ? "s" : ""} in the queue. Leave the time empty to upload as private.` : "Nothing waiting. Rendered videos appear here.";
   renderEpisodes(); renderQueue(); renderPublish(); renderLog();
 }
 
@@ -464,7 +464,7 @@ function renderEpisodes() {
   const eps = pages.filter(p => p.ep || p.status === "failed");
   const statuses = ["all", ...new Set(eps.map(p => p.status))];
   if (!statuses.includes(epFilter)) epFilter = "all";
-  $("#epFilters").innerHTML = statuses.map(s => `<button class="filter ${s === epFilter ? "on" : ""}" data-ef="${s}">${s} ${s === "all" ? eps.length : eps.filter(p => p.status === s).length}</button>`).join("");
+  $("#epFilters").innerHTML = statuses.map(s => `<button class="filter ${s === epFilter ? "on" : ""}" data-ef="${s}">${statusLabel(s)} ${s === "all" ? eps.length : eps.filter(p => p.status === s).length}</button>`).join("");
   const ql = epQ.toLowerCase().trim(), num = ql.match(/^(?:ep\s*)?0*(\d+)$/);
   const key = {potential: p => -(p.potential ?? -1) + (p.status === "uploaded" ? 1000 : 0), new: p => -(p.ep ?? 1e9), old: p => p.ep ?? 1e9, score: p => -(p.score ?? 0)}[epSort];
   const shown = eps
@@ -477,7 +477,7 @@ function renderEpisodes() {
     <button class="card" data-id="${p.pageid}">
       <div class="thumb">${p.video ? `<video data-src="/video/${encodeURIComponent(p.video)}#t=1.5" preload="metadata" muted></video>` : "?"}</div>
       <div class="body"><div class="top"><span class="ep">${p.ep ? "EP " + String(p.ep).padStart(3, "0") : "—"}</span>${potBadge(p)}</div>
-      <h3>${esc(p.yt_title || p.title)}</h3><span class="chip s-${p.status}">${p.status}</span></div>
+      <h3>${esc(p.yt_title || p.title)}</h3><span class="chip s-${p.status}">${statusLabel(p.status)}</span></div>
     </button>`).join("")}</div>`;
   document.querySelectorAll("#epGrid video[data-src]").forEach(v => lazy.observe(v));
 }
@@ -495,13 +495,15 @@ function potDetail(p) {
 }
 
 const ORIGIN_NAMES = {wikipedia: "Wikipedia", web: "Article", hackernews: "Hacker News", arxiv: "arXiv", apod: "NASA APOD"};
+const STATUS_LABEL = {queued: "idea", rendered: "in queue"};
+const statusLabel = st => STATUS_LABEL[st] || st;
 const originName = p => ORIGIN_NAMES[p.origin || "wikipedia"] || p.origin;
 
 const uploadOrder = (a, b) => (a.upload_rank == null) - (b.upload_rank == null) || (a.upload_rank ?? 0) - (b.upload_rank ?? 0)
   || (a.potential == null) - (b.potential == null) || (b.potential ?? 0) - (a.potential ?? 0) || a.ep - b.ep;
 function renderPublish() {
   const ready = pages.filter(p => p.status === "rendered").sort(uploadOrder);
-  $("#publishTab").textContent = ready.length ? `Publish (${ready.length})` : "Publish";
+  $("#publishTab").textContent = ready.length ? `Queue (${ready.length})` : "Queue";
   $("#pList").innerHTML = !ready.length ? `<div class="empty">Nothing waiting to upload. Rendered videos appear here.</div>`
     : `<div class="qlist">${ready.map((p, i) => `
       <div class="qitem pitem ${i === 0 ? "next" : ""}" draggable="true" data-sid="${p.pageid}">
@@ -530,8 +532,8 @@ function renderQueue() {
   const qs = pages.filter(p => p.status === "queued").sort((a, b) =>
     (a.rank == null) - (b.rank == null) || (a.rank ?? 0) - (b.rank ?? 0) ||
     (b.source === "curated") - (a.source === "curated") || (a.created || "").localeCompare(b.created || ""));
-  $("#queueTab").textContent = qs.length ? `Queue (${qs.length})` : "Queue";
-  $("#qList").innerHTML = !qs.length ? `<div class="empty">Queue is empty. <b>Make next video</b> will discover a random page.<br>Add links above, or click <b>Find ideas</b> to queue a few random candidates to review.</div>`
+  $("#queueTab").textContent = qs.length ? `Ideabank (${qs.length})` : "Ideabank";
+  $("#qList").innerHTML = !qs.length ? `<div class="empty">Ideabank is empty. <b>Make next video</b> will discover a random page.<br>Add links above, or click <b>Find ideas</b> to add a few random candidates to review.</div>`
     : `<div class="qlist">${qs.map((p, i) => `
       <div class="qitem ${i === 0 ? "next" : ""}" draggable="true" data-sid="${p.pageid}">
         <button class="grip" aria-label="Reorder ${esc(p.title)} (drag, or use arrow keys)" title="Drag to reorder (or focus and press ↑/↓)">⠿</button>
@@ -625,7 +627,7 @@ function renderSelbar() {
 
 function renderLog() {
   const statuses = ["all", ...new Set(pages.map(p => p.status))];
-  $("#filters").innerHTML = statuses.map(s => `<button class="filter ${s === statusFilter ? "on" : ""}" data-f="${s}">${s} ${s === "all" ? pages.length : pages.filter(p => p.status === s).length}</button>`).join("");
+  $("#filters").innerHTML = statuses.map(s => `<button class="filter ${s === statusFilter ? "on" : ""}" data-f="${s}">${statusLabel(s)} ${s === "all" ? pages.length : pages.filter(p => p.status === s).length}</button>`).join("");
   const ql = q.toLowerCase().trim();
   const val = p => p[logSort.key] ?? null;
   const rows = pages
@@ -647,7 +649,7 @@ function renderLog() {
   $("#selAll").onchange = e => { shown.forEach(p => e.target.checked ? selected.add(p.pageid) : selected.delete(p.pageid)); confirming = false; renderLog(); };
   $("#logrows").innerHTML = shown.map(p => `<tr class="${selected.has(p.pageid) ? "sel" : ""}">
     <td class="ck"><input type="checkbox" data-sel="${p.pageid}" ${selected.has(p.pageid) ? "checked" : ""} aria-label="Select ${esc(p.title)}"></td>
-    <td><span class="chip s-${p.status}">${p.status}</span></td><td class="num">${p.score ?? ""}</td>
+    <td><span class="chip s-${p.status}">${statusLabel(p.status)}</span></td><td class="num">${p.score ?? ""}</td>
     <td><a href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.title)}</a></td><td>${esc(p.source)}${p.origin && p.origin !== "wikipedia" ? `<br><span class="tag seed">${esc(originName(p))}</span>` : ""}</td>
     <td class="reason">${esc(p.reason)}</td><td class="num">${esc((p.updated || "").slice(5, 16))}</td></tr>`).join("");
   renderSelbar();
@@ -659,7 +661,7 @@ function openDetail(id) {
   $("#dlgBody").innerHTML = `<div class="detail">
     ${p.video ? `<video src="/video/${encodeURIComponent(p.video)}" controls autoplay playsinline></video>` : `<div class="thumb">?</div>`}
     <div class="info">
-      <div class="ep">${p.ep ? "EP " + String(p.ep).padStart(3, "0") : ""} &nbsp;<span class="chip s-${p.status}">${p.status}</span></div>
+      <div class="ep">${p.ep ? "EP " + String(p.ep).padStart(3, "0") : ""} &nbsp;<span class="chip s-${p.status}">${statusLabel(p.status)}</span></div>
       <h2>${esc(p.yt_title || p.title)}</h2>
       <div class="sub">${esc(p.title)} · <a href="${esc(p.url)}" target="_blank" rel="noopener">${originName(p)} ↗</a>${yt ? ` · <a href="${yt}" target="_blank" rel="noopener">YouTube ↗</a>` : ""}</div>
       <div class="btns">
