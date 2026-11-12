@@ -628,7 +628,7 @@ function renderEpisodes() {
   if (!statuses.includes(epFilter)) epFilter = "all";
   $("#epFilters").innerHTML = statuses.map(s => `<button class="filter ${s === epFilter ? "on" : ""}" data-ef="${s}">${statusLabel(s)} ${s === "all" ? eps.length : eps.filter(p => p.status === s).length}</button>`).join("");
   const ql = epQ.toLowerCase().trim(), num = ql.match(/^(?:ep\s*)?0*(\d+)$/);
-  const key = {potential: p => -(p.potential ?? -1) + (p.status === "uploaded" ? 1000 : 0), new: p => -(p.ep ?? 1e9), old: p => p.ep ?? 1e9, score: p => -(p.score ?? 0)}[epSort];
+  const key = {potential: p => -(p.potential ?? -1) + ({uploaded: 1000, skipped: 2000, rejected: 2000}[p.status] || 0),  // done and skipped go last new: p => -(p.ep ?? 1e9), old: p => p.ep ?? 1e9, score: p => -(p.score ?? 0)}[epSort];
   const shown = eps
     .filter(p => epFilter === "all" || p.status === epFilter)
     .filter(p => !ql || (num && p.ep === +num[1]) || [p.title, p.yt_title, p.script].some(x => (x || "").toLowerCase().includes(ql)))
