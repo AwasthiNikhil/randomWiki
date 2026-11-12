@@ -28,7 +28,12 @@ BRAND = json.loads(BRAND_FILE.read_text())
 C = BRAND["colors"]
 DB = ROOT / "data" / "randomwiki.db"
 WORK, OUT, SECRETS = ROOT / "work", ROOT / "out", ROOT / "secrets"
-LIBRARY = ROOT / "library"  # your downloaded reference videos and clips, kept apart from the videos we make
+MEDIA = ROOT / "media"  # your downloads, kept apart from the videos we make: media/video, media/audio, media/image
+MEDIA_KINDS = ("video", "audio", "image")
+LIBRARY = MEDIA / "video"
+if (ROOT / "library").is_dir() and not MEDIA.exists():  # it was library/ (videos only) before audio and images
+    MEDIA.mkdir()
+    (ROOT / "library").rename(LIBRARY)
 API = "https://en.wikipedia.org/w/api.php"
 W, H, FPS = 1080, 1920, 30
 PX, PY, PW, PH = 40, 440, 1000, 1000  # image panel
@@ -1246,6 +1251,13 @@ def download_image(img, dest):
         return download_clip(img, dest)
     stem = dest / f"img_{hashlib.sha1(img['url'].encode()).hexdigest()[:10]}"
     path = next((p for p in (stem.with_suffix(".png"), stem.with_suffix(".jpg")) if p.exists()), None)
+    if not path and img["url"].startswith("media:"):  # one of your downloaded images
+        import shutil
+        src = MEDIA / "image" / Path(img["url"][6:]).name
+        if not src.is_file():
+            raise RuntimeError(f"not in your media any more: {src.name}")
+        path = stem.with_suffix(src.suffix)
+        shutil.copy(src, path)
     if not path:
         time.sleep(0.5)  # Wikimedia rate-limits bursts
         data = fetch(img["url"])
@@ -1418,7 +1430,7 @@ def download_clip(clip, dest, seconds=12):
     if local and not ok():  # your own download: its start is where you chose to cut it
         src = LIBRARY / Path(clip["url"][8:]).name
         if not src.is_file():
-            raise RuntimeError(f"not in your library any more: {src.name}")
+            raise RuntimeError(f"not in your media any more: {src.name}")
         convert(str(src))
     if not ok() and not local:
         try:  # MP4 can be read straight from the server, fetching only the part we use
@@ -2259,16 +2271,22 @@ def library_poster(path):
     return jpg
 
 
-def library_items():
-    """Your downloads, newest first, as their sidecar details."""
-    out = []
-    for f in sorted(LIBRARY.glob("*.json"), key=lambda f: f.stat().st_mtime, reverse=True) if LIBRARY.exists() else []:
-        try:
-            v = json.loads(f.read_text())
-        except ValueError:
-            continue
-        if (LIBRARY / v.get("file", "")).is_file():
-            out.append(v)
+_side_cache = {}  # sidecar path -> (mtime, details): listing thousands of downloads shouldn't re-read them all
+
+
+def library_items(kind="video"):
+    """Your downloads of one kind, newest first, as their sidecar details."""
+    folder, out = MEDIA / kind, []
+    for f in sorted(folder.glob("*.json"), key=lambda f: f.stat().st_mtime, reverse=True) if folder.exists() else []:
+        mt = f.stat().st_mtime
+        if _side_cache.get(f, (None,))[0] != mt:
+            try:
+                _side_cache[f] = (mt, json.loads(f.read_text()))
+            except ValueError:
+                continue
+        v = _side_cache[f][1]
+        if (folder / v.get("file", "")).is_file():
+            out.append(v | {"kind": kind})
     return out
 
 
@@ -2282,17 +2300,31 @@ def src_library(q, limit=30):
             library_poster(LIBRARY / v["file"])
             out.append(dict(source="library", kind="video", url="library:" + v["file"], name=v["title"], page=v["url"],
                             artist=v.get("uploader") or "", license=v.get("license") or "",
-                            thumb="/library/" + urllib.parse.quote(Path(v["file"]).with_suffix(".jpg").name)))
+                            thumb="/media/video/" + urllib.parse.quote(Path(v["file"]).with_suffix(".jpg").name)))
     return out[:limit]
 
 
+def src_media_images(q, limit=30):
+    """Images you downloaded into media/image, for the visuals editor."""
+    words = q.lower().split()
+    return [dict(source="media", url="media:" + v["file"], thumb="/media/image/" + urllib.parse.quote(v["file"]), name=v["title"],
+                 page=v["url"], artist=v.get("uploader") or "", license=v.get("license") or "")
+            for v in library_items("image")
+            if all(w in " ".join(str(v.get(k, "")) for k in ("title", "uploader", "site", "license", "file")).lower() for w in words)][:limit]
+
+
 IMAGE_SOURCES["library"] = src_library
+IMAGE_SOURCES["media_image"] = src_media_images
 
 
-def download(url, section=None):
-    """Save a video from almost any site (yt-dlp) into library/, with a small sidecar of where it came from."""
+def download(url, section=None, kind="video"):
+    """Save a video or its audio from almost any site (yt-dlp), or an image (direct link, Commons file page, or a page's
+    main image), into media/<kind>/, with a small sidecar of where it came from."""
+    if kind == "image":
+        return download_picture(url)
     import yt_dlp, imageio_ffmpeg
-    LIBRARY.mkdir(exist_ok=True)
+    folder = MEDIA / kind
+    folder.mkdir(parents=True, exist_ok=True)
     cut = None
     if section:
         a, _, b = section.partition("-")
@@ -2302,7 +2334,7 @@ def download(url, section=None):
     suffix = f"-{int(cut[0])}-{int(cut[1])}" if cut else ""
     known = {}
     if re.search(r"commons\.wikimedia\.org/wiki/File:", url):
-        url, known = commons_file(url)
+        url, known = commons_file(url)  # its sound or video
     shown = {"p": -1}
 
     def progress(d):  # a line per 25% instead of yt-dlp's carriage-return bar, which the studio terminal can't show
@@ -2313,29 +2345,80 @@ def download(url, section=None):
                 print(f"  {pct}%")
 
     name = ("WikimediaCommons-" + re.sub(r"[^\w-]+", "_", known["title"])[:80]) if known else "%(extractor_key)s-%(id)s"
-    opts = {"outtmpl": str(LIBRARY / f"{name}{suffix}.%(ext)s"), "noplaylist": True, "quiet": True,
+    ext = "m4a" if kind == "audio" else "mp4"  # one format per kind
+    opts = {"outtmpl": str(folder / f"{name}{suffix}.%(ext)s"), "noplaylist": True, "quiet": True,
             "noprogress": True, "no_warnings": True, "progress_hooks": [progress],
             "logger": type("Quiet", (), {"debug": print_nothing, "warning": print_nothing, "error": print_nothing})(),
-            "format": "bv*[height<=1080][ext=mp4]+ba[ext=m4a]/b[height<=1080][ext=mp4]/bv*[height<=1080]+ba/b",
-            "merge_output_format": "mp4", "ffmpeg_location": imageio_ffmpeg.get_ffmpeg_exe(), "cachedir": False,
-            "postprocessors": [{"key": "FFmpegVideoRemuxer", "preferedformat": "mp4"}]}  # one format for the whole library
+            "ffmpeg_location": imageio_ffmpeg.get_ffmpeg_exe(), "cachedir": False}
+    if kind == "audio":  # just the sound track (or a podcast, a SoundCloud or Bandcamp track…)
+        opts |= {"format": "bestaudio/best", "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": "m4a"}]}
+    else:
+        opts |= {"format": "bv*[height<=1080][ext=mp4]+ba[ext=m4a]/b[height<=1080][ext=mp4]/bv*[height<=1080]+ba/b",
+                 "merge_output_format": "mp4", "postprocessors": [{"key": "FFmpegVideoRemuxer", "preferedformat": "mp4"}]}
     if cut:
         opts |= {"download_ranges": yt_dlp.utils.download_range_func(None, [cut]), "force_keyframes_at_cuts": True}
     try:
         with yt_dlp.YoutubeDL(opts) as y:
             info = y.extract_info(url, download=True)
-            path = Path(y.prepare_filename(info)).with_suffix(".mp4")
+            path = Path(y.prepare_filename(info)).with_suffix("." + ext)
     except yt_dlp.utils.DownloadError as e:
         raise SystemExit(re.sub(r"^ERROR:\s*|;? ?please report this issue.*", "", str(e)).split("\n")[0]) from None
     if not path.exists():  # some sites deliver another container
-        path = next(LIBRARY.glob(path.stem + ".*"))
+        path = next(p for p in folder.glob(path.stem + ".*") if p.suffix != ".json")
     side = dict(title=info.get("title") or path.stem, url=info.get("webpage_url") or url, site=info.get("extractor_key"),
                 uploader=info.get("uploader") or info.get("channel") or "", license=info.get("license") or "",
                 duration=round(cut[1] - cut[0] if cut else info.get("duration") or 0), section=section or "",
                 file=path.name, saved=time.strftime("%Y-%m-%d %H:%M")) | {k: v for k, v in known.items() if v}
     path.with_suffix(".json").write_text(json.dumps(side, indent=1))
-    library_poster(path)
-    print(f"saved: {side['title']} -> library/{path.name}" + (f"  ({section})" if section else ""))
+    if kind == "video":
+        library_poster(path)
+    print(f"saved: {side['title']} -> media/{kind}/{path.name}" + (f"  ({section})" if section else ""))
+    return path
+
+
+def download_picture(url):
+    """An image into media/image: a direct image link, a Wikimedia Commons File: page (with its licence), or any web
+    page's main image (its og:image, what it shows when shared). Galleries and social posts need a gallery tool."""
+    import hashlib, io, html as H
+    from PIL import Image
+    folder = MEDIA / "image"
+    folder.mkdir(parents=True, exist_ok=True)
+    side = dict(url=url, site=urllib.parse.urlsplit(url).netloc.removeprefix("www."), uploader="", license="")
+    if re.search(r"commons\.wikimedia\.org/wiki/File:", url):
+        title = "File:" + urllib.parse.unquote(url.split("File:", 1)[1].split("#")[0].split("?")[0]).replace("_", " ")
+        p = get_json(COMMONS_API, {"action": "query", "format": "json", "formatversion": 2, "titles": title,
+                                   "prop": "imageinfo", "iiprop": "url|extmetadata|mime", "iiurlwidth": 1920})["query"]["pages"][0]
+        ii = (p.get("imageinfo") or [{}])[0]
+        if not ii.get("url") or not str(ii.get("mime", "")).startswith("image/"):
+            raise SystemExit(f"not an image on Wikimedia Commons: {title}")
+        meta = {k: v.get("value") for k, v in ii.get("extmetadata", {}).items()}
+        src, side = ii.get("thumburl") or ii["url"], side | dict(title=p["title"][5:].rsplit(".", 1)[0], site="WikimediaCommons",
+                                                                  uploader=strip_html(meta.get("Artist")), license=meta.get("LicenseShortName") or "")
+    else:  # Wikimedia refuses non-standard thumbnail widths: take the original file instead
+        src = re.sub(r"(upload\.wikimedia\.org/.+?)/thumb(/.+?)/[^/]+$", r"\1\2", url)
+    data = fetch(src)
+    try:
+        im = Image.open(io.BytesIO(data))
+        im.load()
+    except Exception:  # a web page: take its main image
+        page = data.decode("utf-8", "ignore")
+        m = (re.search(r'<meta[^>]+(?:property|name)=["\'](?:og:image|twitter:image)(?::src)?["\'][^>]*content=["\']([^"\']+)', page, re.I)
+             or re.search(r'<meta[^>]+content=["\']([^"\']+)["\'][^>]*(?:property|name)=["\'](?:og:image|twitter:image)', page, re.I))
+        if not m:
+            raise SystemExit("no image found there: paste a direct image link, or the page of a single photo")
+        t = re.search(r'<meta[^>]+property=["\']og:title["\'][^>]*content=["\']([^"\']+)', page, re.I) or re.search(r"<title[^>]*>([^<]+)", page, re.I)
+        side["title"] = H.unescape(t[1]).strip()[:150] if t else side["site"]
+        data = fetch(urllib.parse.urljoin(url, H.unescape(m[1])))
+        im = Image.open(io.BytesIO(data))
+        im.load()
+    side.setdefault("title", Path(urllib.parse.urlsplit(url).path).stem.replace("_", " ")[:150] or side["site"])
+    stem = folder / f"{re.sub(r'[^A-Za-z0-9]+', '', side['site'])[:30]}-{hashlib.sha1(url.encode()).hexdigest()[:10]}"
+    alpha = im.mode in ("RGBA", "LA") or "transparency" in im.info
+    path = stem.with_suffix(".png" if alpha else ".jpg")
+    (im.convert("RGBA") if alpha else im.convert("RGB")).save(path, "PNG" if alpha else "JPEG", quality=92)
+    side |= dict(file=path.name, width=im.width, height=im.height, saved=time.strftime("%Y-%m-%d %H:%M"))
+    path.with_suffix(".json").write_text(json.dumps(side, indent=1))
+    print(f"saved: {side['title']} ({im.width}×{im.height}) -> media/image/{path.name}")
     return path
 
 
@@ -2962,8 +3045,9 @@ def main():
                     help="ideas: your topics and what's trending in them (Settings); wikipedia: random pages")
     dc.add_argument("--feed", help="RSS/Atom feed URL (for --source rss)")
     dc.add_argument("--link", help="any link (for --source link): feed, site, subreddit, Wikipedia category/list, ...")
-    dl = sub.add_parser("download", help="save videos from almost any site into library/ (references, clips)")
+    dl = sub.add_parser("download", help="save videos, audio or images from almost any site into media/ (references, clips)")
     dl.add_argument("urls", nargs="+"); dl.add_argument("--section", help="only part of it, e.g. 1:20-1:45")
+    dl.add_argument("--kind", choices=MEDIA_KINDS, default="video", help="video (default), audio only, or an image")
     cn = sub.add_parser("connect", help="sign in to YouTube or TikTok (opens the browser)")
     cn.add_argument("platform", nargs="?", default="youtube", choices=["youtube", "tiktok"])
     sc = sub.add_parser("score"); sc.add_argument("--all", action="store_true")
@@ -2986,8 +3070,8 @@ def main():
         failed = 0
         for url in args.urls:
             try:
-                download(url, args.section)
-            except SystemExit as e:
+                download(url, args.section, args.kind)
+            except (SystemExit, Exception) as e:  # one bad link doesn't stop the others
                 failed += 1
                 print(f"! {url}: {e}")
         if failed:

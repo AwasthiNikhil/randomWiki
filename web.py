@@ -384,11 +384,14 @@ class H(BaseHTTPRequestHandler):
         if m and (rw.ROOT / m[1] / m[2]).is_file():
             types = {"png": "image/png", "wav": "audio/wav", "mp3": "audio/mpeg"}
             return self.send_file(rw.ROOT / m[1] / m[2], types[m[2].rsplit(".", 1)[1]])
-        if path == "/api/library":
-            return self.send(200, {"items": rw.library_items()})
-        m = re.fullmatch(r"/library/([\w.\-]+\.(mp4|jpg))", urllib.parse.unquote(path))
-        if m and (rw.LIBRARY / m[1]).is_file():  # basename only: no path traversal
-            return self.send_file(rw.LIBRARY / m[1], "video/mp4" if m[2] == "mp4" else "image/jpeg")
+        if path == "/api/library":  # ?kind=video|audio|image, plus how many of each
+            kind = (re.search(r"kind=(video|audio|image)", query) or [0, "video"])[1]
+            return self.send(200, {"items": rw.library_items(kind), "counts": {k: len(rw.library_items(k)) for k in rw.MEDIA_KINDS}})
+        m = re.fullmatch(r"/(?:media/(video|audio|image)|(library))/([\w.\-]+\.(mp4|jpg|png|m4a))", urllib.parse.unquote(path))
+        if m:  # basename only: no path traversal; /library/ is the old address of media/video
+            f = rw.MEDIA / (m[1] or "video") / m[3]
+            if f.is_file():
+                return self.send_file(f, {"mp4": "video/mp4", "jpg": "image/jpeg", "png": "image/png", "m4a": "audio/mp4"}[m[4]])
         if path == "/api/job":
             since = int((re.search(r"since=(\d+)", query) or [0, 0])[1])
             running = bool(job["proc"] and job["proc"].poll() is None)
@@ -498,23 +501,38 @@ class H(BaseHTTPRequestHandler):
                 meta.write_text(json.dumps(m, indent=2))
             elif self.path == "/api/settings":
                 return self.send(200, {"ok": True, "brand": save_brand(body["brand"])})
-            elif self.path == "/api/library_delete":  # body: {"file": "<name>.mp4"}
-                name = str(body.get("file", ""))
-                f = rw.LIBRARY / name
+            elif self.path == "/api/library_delete":  # body: {"file": "<name>", "kind": "video"|"audio"|"image"}
+                name, kind = str(body.get("file", "")), body.get("kind", "video")
+                f = rw.MEDIA / (kind if kind in rw.MEDIA_KINDS else "video") / name
                 if not re.fullmatch(r"[\w.\-]+", name) or not f.is_file():
-                    raise ValueError("no such file in the library")
+                    raise ValueError("no such file in your media")
                 f.unlink()
                 f.with_suffix(".json").unlink(missing_ok=True)
                 f.with_suffix(".jpg").unlink(missing_ok=True)
-            elif self.path == "/api/library_use":  # body: {"file", "pageid"}: add the clip to that video's visuals
-                name, pid = str(body.get("file", "")), int(body["pageid"])
+            elif self.path == "/api/library_use":  # body: {"file", "pageid", "kind"}: a clip or image becomes a visual, audio its music
+                name, pid, kind = str(body.get("file", "")), int(body["pageid"]), body.get("kind", "video")
                 meta = rw.WORK / str(pid) / "meta.json"
-                if not re.fullmatch(r"[\w.\-]+", name) or not (rw.LIBRARY / name).is_file() or not meta.exists():
-                    raise ValueError("pick a clip from the library and a video")
+                if kind not in rw.MEDIA_KINDS or not re.fullmatch(r"[\w.\-]+", name) or not (rw.MEDIA / kind / name).is_file() or not meta.exists():
+                    raise ValueError("pick something from your media and a video")
+                side = next((v for v in rw.library_items(kind) if v["file"] == name), {})
+                if kind == "audio":
+                    store_audio((rw.MEDIA / "audio" / name).read_bytes(), "music", pid)
+                    set_audio_credit(pid, "music.m4a", {"name": side.get("title", name), "artist": side.get("uploader") or "unknown",
+                                                        "license": side.get("license") or "licence not stated", "page": side.get("url", "")})
+                    m = json.loads(meta.read_text())
+                    m["music"] = "own"
+                    meta.write_text(json.dumps(m, indent=2))
+                    return self.send(200, {"ok": True, "music": True})
                 m = json.loads(meta.read_text())
+                if kind == "image":
+                    if len(m["images"]) >= 12:
+                        raise ValueError("that video already has 12 visuals; remove one in its editor first")
+                    m["images"].append(rw.download_image(next(c for c in rw.src_media_images("", 10**6) if c["url"] == "media:" + name), meta.parent))
+                    meta.write_text(json.dumps(m, indent=2))
+                    return self.send(200, {"ok": True, "n": len(m["images"])})
                 if len(m["images"]) >= 12:
                     raise ValueError("that video already has 12 visuals; remove one in its editor first")
-                clip = next(c for c in rw.src_library("") if c["url"] == "library:" + name)
+                clip = next(c for c in rw.src_library("", 10**6) if c["url"] == "library:" + name)
                 m["images"].append(rw.download_clip(clip, meta.parent))
                 meta.write_text(json.dumps(m, indent=2))
                 return self.send(200, {"ok": True, "n": len(m["images"])})

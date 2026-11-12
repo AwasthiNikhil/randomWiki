@@ -64,13 +64,14 @@ Free music and sounds are limited to licences that allow reuse under a narration
 ## Stock media
 In **Connectors → Stock media**, add a free key for **Pexels** and/or **Pixabay** (or set `PEXELS_API_KEY` / `PIXABAY_API_KEY`). Their photos and videos then appear in the editor's search, and auto-pick falls back to them (and to the keyless WordPress Photo Directory) when Wikipedia, Commons and Openverse have nothing for a sentence. Keys are saved in `secrets/stock.json`.
 
-## Library: download videos
-Keep reference videos and clips from other creators' work in `library/`, separate from what you make (git-ignored). In the studio's **Library** tab, paste links (one per line) and optionally a part to keep (`1:20-1:45`); or run `./rw download URL [URL ...] [--section 1:20-1:45]`.
-- Works with YouTube, Vimeo, X, Reddit, TikTok, Instagram, Internet Archive and [many more sites](https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md) through yt-dlp, and with Wikimedia Commons pages through Commons' own API.
-- Saved as MP4 (up to 1080p), next to a `.json` with the title, uploader, source link and licence when the site states one, so you can credit it later.
-- **Use in a video:** on a library card, pick one of your videos and the clip is added to its visuals. Or, in a video's visuals editor, choose **▶ My library** and search. Either way the clip is credited in the description; open the video, place the clip, and **Save & re-render**.
-- Search the library by title, uploader, site or licence. Nothing else is kept: no download history, and yt-dlp's cache is off.
-- Use other people's videos only with permission, under their licence (Creative Commons, public domain), or as fair use.
+## Media: download video, audio and images
+Keep references, clips, music and pictures in `media/` (`video/`, `audio/`, `image/`), separate from what you make (git-ignored). The studio's **Media** tab has a section for each; paste links (one per line), or run `./rw download URL [URL ...] [--kind video|audio|image] [--section 1:20-1:45]`.
+- **Video** and **audio** use yt-dlp: YouTube, Vimeo, X, Reddit, TikTok, Instagram, SoundCloud, Bandcamp, Internet Archive and [many more sites](https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md), plus Wikimedia Commons pages through Commons' own API. Video is saved as MP4 (up to 1080p); audio as M4A, sound only. Both can keep just a part (`1:20-1:45`).
+- **Images:** a direct image link, a Wikimedia Commons file page (with its licence), or any page's main image (the one it shows when shared). Galleries and posts with several images (Instagram carousels, Reddit galleries, Flickr albums) aren't supported yet; [gallery-dl](https://github.com/mikf/gallery-dl) would add them.
+- Each file has a `.json` next to it with the title, uploader, source link and licence when stated, so it can be credited.
+- **Use in a video:** a clip or image is added to the video's visuals; audio becomes the video's music. In a video's editor you can also search **My media**. Whatever you use is credited in the description.
+- Search each section by title, uploader, site or licence. Nothing else is kept: no download history, and yt-dlp's cache is off.
+- Use other people's work only with permission, under its licence (Creative Commons, public domain), or as fair use.
 
 ## Video clips
 Visuals can also be **video clips**: free-licensed Wikimedia Commons clips (using Wikimedia's own small transcodes) and NASA footage (public domain). They're trimmed to 12 s, skip any opening slate, are muted, and play in the panel. Auto-pick can choose them for named things; in the visuals editor, pick *▶ Commons videos* or *▶ NASA videos*.
@@ -203,7 +204,7 @@ In the studio go to **Settings → Automation**: turn it on, pick up to 4 times 
 | `data/randomwiki.db` | page log (git-ignored) |
 | `work/<pageid>/` | images, voice, `meta.json` with script, title, description and credits (git-ignored) |
 | `out/NNN-slug.mp4` | finished videos (git-ignored) |
-| `library/` | videos you downloaded as references or clips, each with a `.json` of its source (git-ignored) |
+| `media/` | video, audio and images you downloaded (`video/`, `audio/`, `image/`), each with a `.json` of its source (git-ignored; was `library/`) |
 | `secrets/` | API keys, OAuth files and platform tokens (git-ignored) |
 
 ## Licences of what gets used

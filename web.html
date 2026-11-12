@@ -179,6 +179,12 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
 .lib .meta { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
 .lib .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; min-width: 0; }
 .lib, .lib .body { min-width: 0; }
+.mediawrap { display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 24px; align-items: start; }
+@media (max-width: 760px) { .mediawrap { grid-template-columns: minmax(0, 1fr); } }
+.snav .count { color: var(--muted); font-size: 12px; margin-left: 4px; }
+.lib img.still { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; background: var(--panel2); }
+.lib .wave { display: grid; place-items: center; aspect-ratio: 3 / 1; background: var(--panel2); color: var(--accent); font: 34px Anton; }
+.lib audio { width: 100%; height: 34px; display: block; }
 .lib select { width: 0; flex: 1 1 0; text-overflow: ellipsis; }
 #libLinks { width: 100%; min-height: 64px; resize: vertical; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font: 13px var(--mono); color: var(--text); }
 #libLinks:focus, #libSection:focus { outline: none; border-color: var(--accent); }
@@ -306,7 +312,7 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
       <a class="tab on" href="#/episodes" data-route="episodes">Episodes</a>
       <a class="tab" href="#/ideabank" data-route="ideabank" id="queueTab">Ideabank</a>
       <a class="tab" href="#/queue" data-route="queue" id="publishTab">Queue</a>
-      <a class="tab" href="#/library" data-route="library" id="libraryTab">Library</a>
+      <a class="tab" href="#/media" data-route="media" id="libraryTab">Media</a>
       <a class="tab" href="#/log" data-route="log">Log</a>
       <a class="tab" href="#/connectors" data-route="connectors">Connectors</a>
       <a class="tab" href="#/settings" data-route="settings">Settings</a>
@@ -593,17 +599,26 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
       </div>
     </section>
     <section id="library" hidden>
-      <div class="explore">
-        <h4 style="margin:0;font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--muted)">Download videos</h4>
-        <textarea id="libLinks" placeholder="Video links, one per line: YouTube, Vimeo, X, Reddit, TikTok, Instagram, Wikimedia Commons, Internet Archive and many more" aria-label="Video links to download"></textarea>
-        <div class="row" style="align-items:center">
-          <input id="libSection" placeholder="Only part of it, e.g. 1:20-1:45 (optional)" aria-label="Section to download" style="flex:1;min-width:0;max-width:320px">
-          <button class="btn primary" id="libGo">Download</button>
+      <div class="mediawrap">
+        <nav class="snav" aria-label="Media">
+          <a href="#/media/video" data-kind="video">Video <span class="count" id="mc_video"></span></a>
+          <a href="#/media/audio" data-kind="audio">Audio <span class="count" id="mc_audio"></span></a>
+          <a href="#/media/image" data-kind="image">Images <span class="count" id="mc_image"></span></a>
+        </nav>
+        <div style="min-width:0">
+          <div class="explore">
+            <h4 id="libHead" style="margin:0;font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--muted)">Download videos</h4>
+            <textarea id="libLinks" aria-label="Links to download"></textarea>
+            <div class="row" style="align-items:center">
+              <input id="libSection" placeholder="Only part of it, e.g. 1:20-1:45 (optional)" aria-label="Section to download" style="flex:1;min-width:0;max-width:320px">
+              <button class="btn primary" id="libGo">Download</button>
+            </div>
+            <span class="hint" id="libHint"></span>
+          </div>
+          <div class="toolbar" style="margin-bottom:12px"><input class="search" id="libSearch" placeholder="Search title, uploader, site, licence…" aria-label="Search media"></div>
+          <div id="libList"></div>
         </div>
-        <span class="hint">Saved to <code>library/</code>, separate from your videos, with where each came from and its licence when the site states one. Use other people's videos only with permission, under their licence (Creative Commons, public domain), or as fair use.</span>
       </div>
-      <div class="toolbar" style="margin-bottom:12px"><input class="search" id="libSearch" placeholder="Search title, uploader, site, licence…" aria-label="Search library"></div>
-      <div id="libList"></div>
     </section>
     <section id="log" hidden>
       <div class="toolbar">
@@ -959,7 +974,7 @@ function wireVisuals(p) {
     const r = await fetch(`/api/images/search?source=${$("#vSource").value}&q=${encodeURIComponent($("#vQuery").value)}`);
     const j = await r.json();
     results = j.results || [];
-    $("#vResults").innerHTML = !r.ok ? `<span class="hint">${esc(j.error)}</span>` : !results.length ? `<span class="hint">${$("#vSource").value === "library" ? "Nothing in your library matches. Download clips in the Library tab." : "No free-licensed images found."}</span>`
+    $("#vResults").innerHTML = !r.ok ? `<span class="hint">${esc(j.error)}</span>` : !results.length ? `<span class="hint">${["library", "media_image"].includes($("#vSource").value) ? "Nothing in your media matches. Download some in the Media tab." : "No free-licensed images found."}</span>`
       : results.map((c, n) => `<button class="vres" data-r="${n}" data-url="${esc(c.url)}" title="${esc(c.name + " · " + (c.artist && !/^unknown/i.test(c.artist) ? c.artist + " · " : "") + c.license)}"><img src="${esc(c.thumb)}" alt="${esc(c.name)}" loading="lazy">${c.kind === "video" ? `<span class="n" style="position:absolute;left:4px;bottom:4px;font:600 11px var(--mono);background:#000c;padding:0 5px;border-radius:4px">▶</span>` : ""}</button>`).join("");
     strip();
   };
@@ -1069,7 +1084,7 @@ async function openDetail(id) {
             <option value="article">This article</option><option value="commons" selected>Wikimedia Commons</option>
             <option value="openverse">Openverse (Flickr etc.)</option><option value="nasa">NASA</option><option value="met">The Met (art &amp; history)</option>
             <option value="wordpress">WordPress Photos (CC0)</option><option value="pexels">Pexels photos</option><option value="pixabay">Pixabay photos</option>
-            <option value="commons_video">▶ Commons videos</option><option value="nasa_video">▶ NASA videos</option><option value="pexels_video">▶ Pexels videos</option><option value="pixabay_video">▶ Pixabay videos</option><option value="library">▶ My library</option>
+            <option value="commons_video">▶ Commons videos</option><option value="nasa_video">▶ NASA videos</option><option value="pexels_video">▶ Pexels videos</option><option value="pixabay_video">▶ Pixabay videos</option><option value="media_image">My media: images</option><option value="library">▶ My media: videos</option>
           </select>
           <input id="vQuery" value="${esc(p.title)}" aria-label="Image search">
           <button class="btn" id="vGo">Search</button>
@@ -1127,7 +1142,7 @@ async function poll() {
     document.querySelectorAll("[data-cmd], #makeNow, #saveIdea, #upload, #qFind, #libGo, [data-remake], [data-upload], [data-make], [data-rerender], [data-unpubgo]").forEach(b => b.disabled = running);
     $("#stop").disabled = !running;
     if (was && !running) {
-      loadPages(); if (!$("#library").hidden) loadLibrary();
+      loadPages(); if (!$("#library").hidden) loadLibrary();  // e.g. a download just finished
       if (S && (!$("#settings").hidden || !$("#connectors").hidden)) reloadSettings();  // e.g. YouTube just connected
     }
   } catch (e) {
@@ -1138,34 +1153,51 @@ async function poll() {
 
 const mmss = s => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, "0")}`;
 let library = [];
+let mediaKind = "video";
+const MEDIA_COPY = {
+  video: {head: "Download videos", ph: "Video links, one per line: YouTube, Vimeo, X, Reddit, TikTok, Instagram, Wikimedia Commons, Internet Archive and many more",
+          hint: "Saved to <code>media/video/</code>, separate from your videos, with where each came from and its licence when the site states one. Use other people's videos only with permission, under their licence (Creative Commons, public domain), or as fair use.",
+          use: "Use in a video", empty: "No videos saved yet. Paste a link above."},
+  audio: {head: "Download audio", ph: "Links, one per line: music, podcasts, or any video whose sound you want (YouTube, SoundCloud, Bandcamp, Internet Archive, Wikimedia Commons…). Only the audio is kept.",
+          hint: "Saved to <code>media/audio/</code> as .m4a, with its source and licence when stated. Use one as a video's music; it's credited in the description. Only use audio you have the rights to. For free music, search in a video's <b>Sound</b> section.",
+          use: "Use as a video's music", empty: "No audio saved yet. Paste a link above."},
+  image: {head: "Download images", ph: "Image links, one per line: a direct image link, a Wikimedia Commons file page, or any page with one main photo",
+          hint: "Saved to <code>media/image/</code> with its source (and licence for Commons). Galleries and posts with several images (Instagram, Reddit galleries, Flickr albums) aren't supported yet. Use images you have the rights to.",
+          use: "Use in a video", empty: "No images saved yet. Paste a link above."}};
 async function loadLibrary() {
-  library = (await (await fetch("/api/library")).json()).items;
-  $("#libraryTab").textContent = `Library (${library.length})`;
+  const j = await (await fetch("/api/library?kind=" + mediaKind)).json();
+  library = j.items;
+  Object.entries(j.counts).forEach(([k, n]) => $("#mc_" + k).textContent = n || "");
+  const total = Object.values(j.counts).reduce((a, b) => a + b, 0);
+  $("#libraryTab").textContent = total ? `Media (${total})` : "Media";
   renderLibrary();
 }
 function renderLibrary() {
-  const words = $("#libSearch").value.toLowerCase().split(/\s+/).filter(Boolean);
+  const words = $("#libSearch").value.toLowerCase().split(/\s+/).filter(Boolean), kind = mediaKind, c = MEDIA_COPY[kind];
   const items = library.filter(v => words.every(w => [v.title, v.uploader, v.site, v.license, v.file].join(" ").toLowerCase().includes(w)));
-  $("#libList").innerHTML = !library.length ? `<div class="empty">Nothing saved yet. Paste a link above.</div>`
-    : !items.length ? `<div class="empty">Nothing matches.</div>` : `<div class="libgrid">${paged("lib", items, words.join(" ")).map(v => `
-    <div class="lib"><video src="/library/${encodeURIComponent(v.file)}" poster="/library/${encodeURIComponent(v.file.replace(/\.mp4$/, ".jpg"))}" controls preload="none"></video>
+  const src = v => `/media/${kind}/${encodeURIComponent(v.file)}`;
+  $("#libList").innerHTML = !library.length ? `<div class="empty">${c.empty}</div>`
+    : !items.length ? `<div class="empty">Nothing matches.</div>` : `<div class="libgrid">${paged("lib", items, kind + "|" + words.join(" ")).map(v => `
+    <div class="lib">${kind === "video" ? `<video src="${src(v)}" poster="/media/video/${encodeURIComponent(v.file.replace(/\.mp4$/, ".jpg"))}" controls preload="none"></video>`
+        : kind === "audio" ? `<div class="wave">♪</div><audio src="${src(v)}" controls preload="none"></audio>`
+        : `<a href="${src(v)}" target="_blank" rel="noopener"><img class="still" src="${src(v)}" alt="${esc(v.title)}" loading="lazy"></a>`}
       <div class="body"><h3>${esc(v.title)}</h3>
-        <div class="meta">${[v.uploader, v.site, v.duration ? mmss(v.duration) : "", v.section ? "part " + v.section : ""].filter(Boolean).map(esc).join(" · ")}</div>
+        <div class="meta">${[v.uploader, v.site, v.duration ? mmss(v.duration) : "", v.width ? `${v.width}×${v.height}` : "", v.section ? "part " + v.section : ""].filter(Boolean).map(esc).join(" · ")}</div>
         ${v.license ? `<div class="meta">Licence: ${esc(v.license)}</div>` : ""}
-        <div class="meta" title="File in library/">${esc(v.file)}</div>
+        <div class="meta" title="File in media/${kind}/">${esc(v.file)}</div>
         <div class="row"><a class="btn sm" href="${esc(v.url)}" target="_blank" rel="noopener">Source ↗</a>
-          <button class="btn sm" data-libuse="${esc(v.file)}">Use in a video</button>
+          <button class="btn sm" data-libuse="${esc(v.file)}">${c.use}</button>
           <button class="btn sm danger" data-libdel="${esc(v.file)}">Delete</button></div>
         <div class="row" data-usebox="${esc(v.file)}" hidden>
-          <select class="sort" style="margin:0;flex:1;min-width:0" aria-label="Video to add this clip to"></select>
-          <button class="btn sm primary" data-libadd="${esc(v.file)}">Add</button></div></div></div>`).join("")}${moreBtn("lib", items.length)}</div>`;
+          <select class="sort" style="margin:0;flex:1;min-width:0" aria-label="Video to use it in"></select>
+          <button class="btn sm primary" data-libadd="${esc(v.file)}">${kind === "audio" ? "Use" : "Add"}</button></div></div></div>`).join("")}${moreBtn("lib", items.length)}</div>`;
   watchMore();
 }
 $("#libSearch").oninput = renderLibrary;
 $("#libGo").onclick = () => {
-  const links = $("#libLinks").value.split("\n").map(x => x.trim()).filter(Boolean), sec = $("#libSection").value.trim();
-  if (!links.length) return termLine("! paste a video link first", "err");
-  exec("download " + links.map(quote).join(" ") + (sec ? ` --section ${quote(sec)}` : "")).then(ok => ok && ($("#libLinks").value = ""));
+  const links = $("#libLinks").value.split("\n").map(x => x.trim()).filter(Boolean), sec = mediaKind === "image" ? "" : $("#libSection").value.trim();
+  if (!links.length) return termLine("! paste a link first", "err");
+  exec(`download --kind ${mediaKind} ` + links.map(quote).join(" ") + (sec ? ` --section ${quote(sec)}` : "")).then(ok => ok && ($("#libLinks").value = ""));
 };
 $("#libList").addEventListener("click", async e => {
   const use = e.target.closest("[data-libuse]"), add = e.target.closest("[data-libadd]");
@@ -1179,15 +1211,16 @@ $("#libList").addEventListener("click", async e => {
   if (add) {
     const box = add.closest("[data-usebox]"), pid = +box.querySelector("select").value; if (!pid) return;
     add.disabled = true; add.textContent = "Adding…";
-    const r = await fetch("/api/library_use", {method: "POST", headers: {"Content-Type": "application/json", "X-RW": "1"}, body: JSON.stringify({file: add.dataset.libadd, pageid: pid})});
-    const j = await r.json(), p = pages.find(x => x.pageid === pid);
-    if (r.ok) { termLine(`added to EP ${String(p.ep).padStart(3, "0")} as visual ${j.n}. Open that video, place it where you want, and click Save & re-render.`, "good"); box.hidden = true; loadPages(); }
+    const r = await fetch("/api/library_use", {method: "POST", headers: {"Content-Type": "application/json", "X-RW": "1"}, body: JSON.stringify({file: add.dataset.libadd, pageid: pid, kind: mediaKind})});
+    const j = await r.json(), p = pages.find(x => x.pageid === pid), ep = String(p.ep).padStart(3, "0");
+    if (r.ok) { termLine(j.music ? `now the music of EP ${ep} (credited in its description). Open it to set the volume, then render.`
+        : `added to EP ${ep} as visual ${j.n}. Open that video, place it where you want, and click Save & re-render.`, "good"); box.hidden = true; loadPages(); }
     else termLine("! " + j.error, "err");
-    add.disabled = false; add.textContent = "Add"; return;
+    add.disabled = false; add.textContent = mediaKind === "audio" ? "Use" : "Add"; return;
   }
   const b = e.target.closest("[data-libdel]"); if (!b) return;
   if (b.textContent !== "Delete for good?") { b.textContent = "Delete for good?"; return; }
-  if (await post("/api/library_delete", {file: b.dataset.libdel})) loadLibrary();
+  if (await post("/api/library_delete", {file: b.dataset.libdel, kind: mediaKind})) loadLibrary();
 });
 document.addEventListener("click", async e => {
   const t = e.target.closest("button"); if (!t) return;
@@ -1309,10 +1342,11 @@ dlg.addEventListener("close", () => {
 });
 
 // ---------------- routes: #/episodes, #/ideabank, #/queue, #/library, #/log, #/connectors, #/settings/<group>, #/video/<pageid> ----------------
-const ROUTES = {episodes: "episodes", ideabank: "queue", queue: "publish", library: "library", log: "log", connectors: "connectors", settings: "settings"};
+const ROUTES = {episodes: "episodes", ideabank: "queue", queue: "publish", media: "library", log: "log", connectors: "connectors", settings: "settings"};
 let tabHash = "#/episodes";
 function route() {
-  const [name, arg] = location.hash.replace(/^#\/?/, "").split("/");
+  let [name, arg] = location.hash.replace(/^#\/?/, "").split("/");
+  if (name === "library") { name = "media"; arg = "video"; }  // the old address
   if (name === "video") {
     if (pages.some(p => p.pageid == arg)) openDetail(arg); else history.replaceState(null, "", tabHash);
     return;
@@ -1329,7 +1363,13 @@ function route() {
     document.querySelectorAll(".snav [data-group]").forEach(a => { a.classList.toggle("on", a.dataset.group === g); a.toggleAttribute("aria-current", a.dataset.group === g); });
     $(".settings").classList.toggle("nopreview", g !== "brand");
   }
-  if (r === "library") loadLibrary();
+  if (r === "media") {
+    mediaKind = MEDIA_COPY[arg] ? arg : "video";
+    document.querySelectorAll("#library .snav a").forEach(a => { a.classList.toggle("on", a.dataset.kind === mediaKind); a.toggleAttribute("aria-current", a.dataset.kind === mediaKind); });
+    const c = MEDIA_COPY[mediaKind];
+    $("#libHead").textContent = c.head; $("#libLinks").placeholder = c.ph; $("#libHint").innerHTML = c.hint; $("#libSection").hidden = mediaKind === "image";
+    loadLibrary();
+  }
   document.title = `${$(".tab.on").textContent.replace(/ \(\d+\)$/, "")} · ${channelName} studio`;
 }
 window.addEventListener("hashchange", route);
