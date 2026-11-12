@@ -1403,7 +1403,6 @@ def render(meta, words, audio_path, duration, out_path, frame_at=None):
     else:
         d.text((105, 113), mark, font=font("display", 70 if len(mark) < 2 else 46), fill=C["bg"], anchor="mm")
     d.text((176, 111), BRAND["channel"].upper(), font=font("display", 62), fill=C["text"], anchor="lm")
-    d.text((W - 60, 111), f"EP {meta['ep']:03d}", font=font("body", 38, "Bold"), fill=C["accent"], anchor="rm")
     # title (<=3 lines) + description (<=2 lines) scaled together to fit the header block
     desc = "" if meta.get("origin") == "question" else meta.get("description") or ""  # older explainers stored a source count here
     room, tw = PY - 24 - 190, W - 120
@@ -1581,7 +1580,7 @@ def render(meta, words, audio_path, duration, out_path, frame_at=None):
 def description(m):
     lines = [m["script"].split(". ")[0].rstrip(".") + ".", "",
              *([f"Source: {m['url']}", ""] if m.get("url") else []),
-             f"Episode {m['ep']} of {BRAND['channel']}. {BRAND['tagline']}", "", "CREDITS",
+             f"{BRAND['channel']}: {BRAND['tagline']}", "", "CREDITS",
              m.get("credit") or f"Text adapted from the Wikipedia article \"{m['article_title']}\", CC BY-SA 4.0: {m['url']}"]
     lines += [f"Image: \"{i['name']}\", {credit(i).replace(' · ', ', ')}: {i['page']}" for i in m["images"] if credit(i)]
     narration = {"recording": f"Narration: {BRAND['channel']}.", "clone": "Narration: AI voice clone of the creator (Chatterbox)."}
