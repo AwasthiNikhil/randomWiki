@@ -533,6 +533,7 @@ Rules:
 - Open by asking the question in a vivid way (one short sentence). For a topic, open with a curious question about it.
 - For "how" questions, answer as 3 or 4 steps in the order they actually happen, using "First", "Next", "Then", "Finally".
   For "why" or "what" questions, give the cause or core idea first, then one concrete example.
+- State this answer clearly by the third sentence, in your own words: {answer}
 - End with a satisfying one-line takeaway.
 - Use ONLY facts from the research notes. Do not invent numbers, names or dates.
 - Do not say "Wikipedia", "this article", "in this video", or ask viewers to like or subscribe.
@@ -542,6 +543,80 @@ Research notes:
 {text}
 
 Reply as JSON: {{"title": "<YouTube title, max 60 characters>", "script": "<narration>", "tags": ["<5 to 8 lowercase tags>"]}}"""
+
+ANSWER_PROMPT = """Question: "{question}"
+
+Research notes:
+{text}
+
+Find the sentence in the notes that answers THIS question directly: for "why", the reason or cause; for "how", the
+mechanism or steps; for "what", what it is. These are NOT answers: background facts about the topic, its history,
+saying it has been studied or debated, or saying the answer is unknown.
+Example: for "Why do cats purr?", "Cats are small carnivores kept as pets" is not an answer; "Purring may help cats
+calm themselves and heal" is.
+Reply as JSON: {{"quote": "<the sentence from the notes that answers it, copied exactly, or empty>",
+"answer": "<the answer in one or two plain sentences, or empty>"}}"""
+
+IS_ANSWER_PROMPT = """Question: "{question}"
+Sentence: "{quote}"
+
+Does this sentence answer the question (give the reason, mechanism or definition it asks for)? Background facts,
+history, or saying it is studied, debated or unknown do not count.
+Reply as JSON: {{"answers": true or false}}"""
+
+ANSWERED_PROMPT = """Question: "{question}"
+
+Narration:
+{script}
+
+Copy the one sentence of the narration that best answers the question (the reason, mechanism or definition it asks
+for). The opening question itself does not count.
+Reply as JSON: {{"quote": "<that sentence, copied exactly>"}}"""
+
+ANSWER_FIX_PROMPT = """This narration for a YouTube Short doesn't answer the question "{question}".
+Rewrite it so that, right after the opening question, it clearly says: {answer}
+Keep it 100 to 120 words, plain spoken English, the hook first and a one-line takeaway last. Use ONLY facts from the notes.
+
+Notes:
+{text}
+
+Narration:
+{script}
+
+Reply as JSON: {{"title": "<max 60 characters>", "script": "<narration, 100-120 words>"}}"""
+
+
+def find_answer(question, text):
+    """Step 1 of the answer check (local model): the answer the research actually contains, or '' if it has none.
+    The model must quote the notes (checked here, so it can't invent one), then judge that quote on its own."""
+    r = llm(ANSWER_PROMPT.format(question=question, text=text[:12000]), 0.1, local=True)
+    answer = str(r.get("answer") or "").strip()
+    return answer if answer and answers(question, str(r.get("quote") or "").strip(), text) else ""
+
+
+def answers(question, quote, text):
+    """True if `quote` really comes from `text` and, judged on its own, answers the question (local model)."""
+    norm = lambda x: re.sub(r"\W+", " ", x).lower().strip()
+    if len(quote.split()) < 4 or norm(quote)[:120] not in norm(text) or "?" in quote:
+        return False
+    return str(llm(IS_ANSWER_PROMPT.format(question=question, quote=quote), 0.1, local=True).get("answers")).lower() == "true"
+
+
+def ensure_answered(s, question, answer, text):
+    """Step 2 (local model): does a sentence of the narration answer the question? If not, rewrite with the answer
+    spelled out; twice at most."""
+    for attempt in range(3):
+        quote = str(llm(ANSWERED_PROMPT.format(question=question, script=s["script"]), 0.1, local=True).get("quote") or "").strip()
+        if answers(question, quote, s["script"]):
+            return s
+        if attempt == 2:
+            raise RuntimeError(f"the script still doesn't answer the question; the research says: {answer[:150]}")
+        print("  script doesn't answer the question; rewriting it around the answer")
+        r = llm(ANSWER_FIX_PROMPT.format(question=question, answer=answer, text=text[:12000], script=s["script"]))
+        if 85 <= len(str(r.get("script", "")).split()) <= 128:
+            s = {**s, **{k: v for k, v in r.items() if v and k in ("title", "script")}}
+            s["title"] = s["title"][:70]
+
 
 RESEARCH_PROMPT = """We are making a 50-second explainer video that answers: "{question}"
 List 3 to 5 English Wikipedia article titles that together contain the answer: the main topic first, then the key
@@ -800,12 +875,12 @@ def add_question(con, question, force=False):
     return pid
 
 
-def write_script(title, text, prompt=None, check=True):
+def write_script(title, text, prompt=None, check=True, answer=""):
     s = {}
     for _ in range(6):
         n = len(str(s.get("script", "")).split())
         if n < 40:  # nothing usable yet: fresh draft
-            s = llm((prompt or SCRIPT_PROMPT).format(title=title, text=text[:12000]))
+            s = llm((prompt or SCRIPT_PROMPT).format(title=title, text=text[:12000], answer=answer))
         else:  # revise the draft we have; far more reliable than redrafting blind
             action = ("Cut the least important sentences and tighten the rest." if n > 128 else
                       "Add one or two more facts from the article." if n < 85 else "Keep the length.")
@@ -820,7 +895,7 @@ def write_script(title, text, prompt=None, check=True):
             if c.get("errors") and 85 <= len(fixed.split()) <= 128:
                 print("  fact-check fixed: " + "; ".join(map(str, c["errors"]))[:300])
                 s["script"] = fixed
-            return s
+            return ensure_answered(s, title, answer, text) if answer else s
         print(f"  script was {n} words / title {len(str(s.get('title', '')))} chars, retrying")
     raise RuntimeError("LLM could not produce a valid script")
 
@@ -1792,13 +1867,17 @@ def make(con, pageid):
     upsert(con, pageid, ep=ep)
     try:
         origin = row["origin"] or "wikipedia"
-        prompt = None
+        prompt, answer = None, ""
         if origin == "wikipedia":
             title, desc, text, pageimage = fetch_article(pageid)
             src = dict(url=page_url(title), own=None)
         elif origin == "question":
             a = research(row["ref"])
             title, desc, text, pageimage, prompt = a["title"], a["description"], a["text"], None, QUESTION_PROMPT
+            answer = find_answer(title, text)
+            if not answer:  # don't make a video that circles the topic without answering
+                raise RuntimeError(f"the research didn't find an answer to \"{title}\"; try rewording the question")
+            print(f"  answer found: {answer[:160]}")
             src = dict(url=a["url"], own=None, credit=a["credit"], source_label=a["source_label"], popularity=None,
                        topics=a["titles"])
         elif origin == "text":
@@ -1821,7 +1900,7 @@ def make(con, pageid):
             src = dict(url=a["url"], own=a["images"], credit=a["credit"], source_label=a["source_label"],
                        popularity=a.get("popularity"))
         print(f"[{ep:03d}] {title}" + ("" if origin == "wikipedia" else f"  [{origin}]") + "\n  writing script…")
-        s = write_script(title, text, prompt, check=origin != "text")  # your own text is yours to vouch for
+        s = write_script(title, text, prompt, check=origin != "text", answer=answer)  # your own text is yours to vouch for
         print(f"  \"{s['title']}\"\n  fetching images…")
         images = pick_visuals(title, s["script"], work, own=src.pop("own"), pageimage=pageimage, topics=src.get("topics", ()))
         print(f"  {len(images)} images")

@@ -12,6 +12,10 @@ In the studio's **Make a video** box, or `./rw run "…"` (`./rw add "…"` save
 | a link to a list: a feed, a site, a subreddit, a Wikipedia category or list | its most interesting items go into the ideabank |
 | nothing | the next idea in the ideabank, else a random interesting Wikipedia page |
 
+**Questions get answered, or no video.** Two checks on the local model:
+1. Before writing, it must quote the sentence in the research that answers the question; the quote is checked against the notes and judged on its own. If there isn't one, the video fails with "the research didn't find an answer" rather than circle the topic.
+2. After writing, it must quote the narration sentence that gives the answer, judged the same way. If none does, the script is rewritten around the answer (twice at most), else the video fails with the reason.
+
 ## AI models: local, Gemini or Claude
 Everything runs locally by default (Ollama). In the studio's **Connectors** tab you can add a Gemini key (free at [aistudio.google.com/apikey](https://aistudio.google.com/apikey)) or an Anthropic key for Claude ([platform.claude.com](https://platform.claude.com/settings/keys)), and choose which model writes:
 - **Research goes beyond Wikipedia.** Gemini uses Google Search if your key's plan includes it; otherwise it picks reliable pages on any site, reads them itself and writes notes from what it read. Claude uses Anthropic's web search and cites the pages it used. Every source is credited. If the model can't read enough, research falls back to Wikipedia rather than script from the model's memory.
