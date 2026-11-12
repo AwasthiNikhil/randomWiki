@@ -143,9 +143,6 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
 .vres.added { border: 2px solid var(--ok); opacity: .55; }
 .detail .btns { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
 .close { position: absolute; top: 10px; right: 12px; background: var(--panel2); border: 1px solid var(--line); border-radius: 50%; width: 32px; height: 32px; cursor: pointer; }
-.qadd { display: flex; gap: 8px; margin-bottom: 18px; align-items: flex-start; }
-.qadd textarea { flex: 1; min-height: 64px; resize: vertical; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font: 13px var(--mono); color: var(--text); }
-.qadd textarea:focus { outline: none; border-color: var(--accent); }
 .qlist { display: grid; gap: 10px; }
 .explore { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; margin-bottom: 18px; display: grid; gap: 10px; }
 .explore .row { flex-wrap: wrap; }
@@ -259,10 +256,6 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
       <div id="pList"></div>
     </section>
     <section id="queue" hidden>
-      <div class="qadd">
-        <textarea id="qText" placeholder="Questions, topics or links, one per line" aria-label="Ideas to add to the ideabank"></textarea>
-        <button class="btn primary" id="qAdd">Add to ideabank</button>
-      </div>
       <div class="explore">
         <h4 style="margin:0;font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--muted)">Find ideas</h4>
         <div class="row">
@@ -411,7 +404,7 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
           <button class="btn primary" id="makeNow" title="Make it now. Empty: the next idea in the ideabank, else a random page">Make now</button>
           <button class="btn" id="saveIdea" title="Save it to the ideabank for later">Save idea</button>
         </div>
-        <div class="hint">Questions and topics are researched, a paragraph becomes the script, and a link is made into a video. A feed, site or category link fills the ideabank instead. Leave it empty to make the next idea.</div>
+        <div class="hint">Questions and topics are researched, a paragraph becomes the script, and a link is made into a video. Paste several links, one per line, to save each as an idea. A feed, site or category link fills the ideabank instead. Leave it empty to make the next idea.</div>
       </div>
       <div>
         <h4>Publish</h4>
@@ -550,7 +543,7 @@ function renderQueue() {
     (a.rank == null) - (b.rank == null) || (a.rank ?? 0) - (b.rank ?? 0) ||
     (b.source === "curated") - (a.source === "curated") || (a.created || "").localeCompare(b.created || ""));
   $("#queueTab").textContent = qs.length ? `Ideabank (${qs.length})` : "Ideabank";
-  $("#qList").innerHTML = !qs.length ? `<div class="empty">Ideabank is empty. <b>Make next video</b> will discover a random page.<br>Add links above, or click <b>Find ideas</b> to add a few random candidates to review.</div>`
+  $("#qList").innerHTML = !qs.length ? `<div class="empty">Ideabank is empty. <b>Make now</b> with an empty box makes a random page.<br>Save your own ideas from the <b>Make a video</b> box, or click <b>Find ideas</b> for a few candidates to review.</div>`
     : `<div class="qlist">${qs.map((p, i) => `
       <div class="qitem ${i === 0 ? "next" : ""}" draggable="true" data-sid="${p.pageid}">
         <button class="grip" aria-label="Reorder ${esc(p.title)} (drag, or use arrow keys)" title="Drag to reorder (or focus and press ↑/↓)">⠿</button>
@@ -751,7 +744,7 @@ async function poll() {
     const was = running; running = j.running;
     $("#dot").className = "dot" + (running ? " run" : "");
     $("#jobLabel").textContent = running ? j.cmd : (j.cmd ? `idle · last: ${j.cmd}` : "idle");
-    document.querySelectorAll("[data-cmd], #makeNow, #saveIdea, #upload, #qAdd, #qFind, [data-remake], [data-upload], [data-make], [data-rerender], [data-unpubgo]").forEach(b => b.disabled = running);
+    document.querySelectorAll("[data-cmd], #makeNow, #saveIdea, #upload, #qFind, [data-remake], [data-upload], [data-make], [data-rerender], [data-unpubgo]").forEach(b => b.disabled = running);
     $("#stop").disabled = !running;
     if (was && !running) loadPages();
   } catch (e) {
@@ -815,8 +808,13 @@ document.addEventListener("click", async e => {
   else if (t.dataset.skip) { if (await post("/api/skip", {pageid: +t.dataset.skip})) { if (dlg.open) dlg.close(); termLine("removed/skipped page " + t.dataset.skip); loadPages(); } }
 });
 $("#makeNow").onclick = () => { const v = $("#input").value.trim(); exec("run" + (v ? " " + quote(v) : "")).then(ok => ok && ($("#input").value = "")); };
-$("#saveIdea").onclick = () => { const v = $("#input").value.trim(); if (!v) return termLine("! type or paste something first", "err");
-  exec(`add ${quote(v)}`).then(ok => ok && ($("#input").value = "")); };
+const LINK = /^(https?:\/\/\S+|[\w-]+(\.[\w-]+)+(\/\S*)?)$/;
+$("#saveIdea").onclick = () => {
+  const v = $("#input").value.trim(); if (!v) return termLine("! type or paste something first", "err");
+  const lines = v.split("\n").map(x => x.trim()).filter(Boolean);
+  const items = lines.length > 1 && lines.every(l => LINK.test(l)) ? lines : [v];  // a list of links: one idea each
+  exec("add " + items.map(quote).join(" ")).then(ok => ok && ($("#input").value = ""));
+};
 const publishArg = () => { const v = $("#publishAt").value; return v ? " --publish-at " + new Date(v).toISOString().replace(/\.\d+Z$/, "Z") : ""; };
 $("#qFind").onclick = () => {
   const v = $("#qTopic").value.trim();
@@ -852,10 +850,6 @@ function sortable(list, endpoint) {
 }
 sortable($("#qList"), "/api/reorder");
 sortable($("#pList"), "/api/reorder_uploads");
-$("#qAdd").onclick = () => {
-  const items = $("#qText").value.split("\n").map(x => x.trim()).filter(Boolean);
-  if (items.length) exec("add " + items.map(quote).join(" ")).then(ok => ok && ($("#qText").value = ""));
-};
 $("#upload").onclick = () => exec("upload" + publishArg());
 $("#search").oninput = e => { q = e.target.value; renderLog(); };
 $("#epSearch").oninput = e => { epQ = e.target.value; renderEpisodes(); };
@@ -1091,7 +1085,7 @@ function readSchedule() {
   sch.enabled = $("#schOn").checked;
   sch.times = [...document.querySelectorAll("[data-ti]")].map(i => i.value).filter(Boolean);
   sch.fallback_arg = $("#schArg").value.trim();  // a link finds ideas in it; anything else is a Wikipedia topic
-  sch.fallback = /^(https?:\/\/\S+|[\w-]+(\.[\w-]+)+(\/\S*)?)$/.test(sch.fallback_arg) ? "link" : "wikipedia";
+  sch.fallback = LINK.test(sch.fallback_arg) ? "link" : "wikipedia";
   sch.upload = $("#schUp").checked;
   sch.publish = document.querySelector("[name=schPub]:checked")?.value || "private";
   sch.pick = document.querySelector("[name=schPick]:checked")?.value || "order";

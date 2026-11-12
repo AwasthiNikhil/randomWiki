@@ -81,7 +81,7 @@ The voice model (about 300 MB) downloads on the first render.
 A local web UI. It's bound to 127.0.0.1 and runs the same commands as the CLI, streaming their output into a terminal panel.
 - **Episodes:** previews you can search, filter and sort by potential. Open one to watch it, edit its title, narration and visuals, then **Save & re-render**. You can also upload it, skip it, delete it, or delete it from YouTube.
 - **Queue:** videos ready to upload, in the order they'll go out. Drag to reorder; videos you haven't placed are sorted by potential score. **Upload pending** and scheduled runs take from the top.
-- **Ideabank:** what gets made next. Drag to reorder, paste links in bulk, or **Find ideas** randomly or around a topic, with a degree-of-relation control.
+- **Ideabank:** what gets made next. Drag to reorder, or **Find ideas** randomly, around a topic (with a degree-of-relation control), or in a link. Add your own with the sidebar's **Save idea**; several links, one per line, become one idea each.
 - **Page log:** every page seen, with reasons. Sortable and searchable, with multi-select delete. Uploaded pages are always kept.
 - **Settings:** channel, colours, Google Fonts, voice, music, LLM and thresholds, with a real-frame preview.
 

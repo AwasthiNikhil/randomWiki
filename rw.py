@@ -444,7 +444,7 @@ def explore(con, key, degree="any", want=5, max_checks=60):  # ~60 LLM checks ma
                     return found
     print(f"found {len(found)} of {want} after checking {checked} pages around '{seed}'" + ("" if found else
           ". Nothing passed the interest filter: technical or niche topics rarely score high. Try a broader topic, "
-          "another degree, a lower minimum score in Settings, or add specific articles with the Ideabank's top box."))
+          "another degree, a lower minimum score in Settings, or save specific ideas with the Make a video box."))
     return found
 
 
