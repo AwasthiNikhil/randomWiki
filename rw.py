@@ -70,7 +70,7 @@ def db():
         pageid integer primary key, title text, url text, source text, status text,
         score integer, reason text, ep integer, video_path text, video_id text,
         created text default current_timestamp, updated text default current_timestamp)""")
-    for col in ("potential integer", "rank integer", "via text", "origin text", "ref text", "upload_rank integer"):  # added after v1; ignore if present
+    for col in ("potential integer", "rank integer", "via text", "origin text", "ref text", "upload_rank integer", "posts text"):  # added after v1; ignore if present
         try:
             con.execute(f"alter table pages add column {col}")
         except sqlite3.OperationalError:
@@ -94,9 +94,11 @@ def upsert(con, pageid, **f):
 # ---------- llm ----------
 GEMINI_API = "https://generativelanguage.googleapis.com/v1beta/models/"
 GEMINI_KEY_FILE = SECRETS / "gemini_api_key"
-gemini_down = None  # why Gemini failed this run; the rest of the run then uses the local model
-gemini_used = {"requests": 0, "tokens": 0}  # this run, for the per-video count
-USAGE_FILE = ROOT / "data" / "gemini_usage.json"  # {pacific date: {model: {requests, tokens}}}
+CLAUDE_KEY_FILE = SECRETS / "anthropic_api_key"
+CLAUDE_MODELS = ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"]
+ai_down = None  # why the cloud model failed this run; the rest of the run then uses the local model
+ai_used = {"requests": 0, "tokens": 0}  # this run, for the per-video count
+USAGE_FILE = ROOT / "data" / "gemini_usage.json"  # {pacific date: {model: {requests, tokens}}}, Gemini and Claude
 
 
 def usage_day():
@@ -106,10 +108,10 @@ def usage_day():
     return datetime.now(ZoneInfo("America/Los_Angeles")).date().isoformat()
 
 
-def count_gemini(model, usage):
-    tokens = int(usage.get("totalTokenCount") or 0)
-    gemini_used["requests"] += 1
-    gemini_used["tokens"] += tokens
+def count_ai(model, tokens):
+    tokens = int(tokens or 0)
+    ai_used["requests"] += 1
+    ai_used["tokens"] += tokens
     try:
         log = json.loads(USAGE_FILE.read_text())
     except (OSError, ValueError):
@@ -121,16 +123,16 @@ def count_gemini(model, usage):
 
 
 def record_usage(pageid, before):
-    """Add the Gemini requests/tokens used since `before` to the video's meta."""
-    used = {k: gemini_used[k] - before[k] for k in gemini_used}
+    """Add the cloud-model requests/tokens used since `before` to the video's meta."""
+    used = {k: ai_used[k] - before[k] for k in ai_used}
     mpath = WORK / str(pageid) / "meta.json"
     if not used["requests"] or not mpath.exists():
         return
     m = json.loads(mpath.read_text())
-    g = m.get("gemini") or {"requests": 0, "tokens": 0}
-    m["gemini"] = {k: g.get(k, 0) + used[k] for k in used}
+    g = m.pop("gemini", None) or m.get("ai") or {"requests": 0, "tokens": 0}  # "gemini": before Claude was an option
+    m["ai"] = {k: g.get(k, 0) + used[k] for k in used}
     mpath.write_text(json.dumps(m, indent=2))
-    print(f"  Gemini: {used['requests']} requests, {used['tokens']:,} tokens")
+    print(f"  AI: {used['requests']} requests, {used['tokens']:,} tokens")
 
 
 def gemini_key():
@@ -156,7 +158,7 @@ def gemini(prompt, temperature=0.7, tools=None):
         try:
             with urllib.request.urlopen(req, timeout=90) as r:
                 d = json.load(r)
-            count_gemini(d.get("modelVersion") or model, d.get("usageMetadata") or {})
+            count_ai(d.get("modelVersion") or model, (d.get("usageMetadata") or {}).get("totalTokenCount"))
             c = d["candidates"][0]
             return "".join(p.get("text", "") for p in c["content"]["parts"]), c
         except urllib.error.HTTPError as e:
@@ -173,6 +175,42 @@ def gemini(prompt, temperature=0.7, tools=None):
     raise RuntimeError(why)
 
 
+def claude_key():
+    """ANTHROPIC_API_KEY from the shell, else the key saved in Connectors (secrets/)."""
+    k = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    return k or (CLAUDE_KEY_FILE.read_text().strip() if CLAUDE_KEY_FILE.exists() else "")
+
+
+def writer():
+    """Which model writes: the one chosen in Connectors if it has a key, else the local one."""
+    want = BRAND.get("ai") or "gemini"
+    return want if {"gemini": gemini_key, "claude": claude_key}.get(want, lambda: "")() else "local"
+
+
+def claude(prompt, tools=None):
+    """One Claude request -> (text, all content blocks). Resends when a long web search pauses the turn."""
+    import anthropic
+    model = BRAND.get("claude_model") or CLAUDE_MODELS[0]
+    extra = {} if "haiku" in model else {"betas": ["server-side-fallback-2026-07-01"], "fallbacks": "default"}  # another model answers if one declines
+    messages, blocks = [{"role": "user", "content": prompt}], []
+    try:
+        client = anthropic.Anthropic(api_key=claude_key(), max_retries=3, timeout=300)
+        for _ in range(4):
+            r = client.beta.messages.create(model=model, max_tokens=16000, messages=messages, tools=tools or anthropic.omit, **extra)
+            count_ai(r.model, r.usage.input_tokens + r.usage.output_tokens)
+            blocks += r.content
+            if r.stop_reason != "pause_turn":
+                break
+            messages = [messages[0], {"role": "assistant", "content": [b.model_dump(exclude_none=True) for b in blocks]}]
+    except anthropic.APIStatusError as e:
+        raise RuntimeError(f"{model}: {e.message.split('. ')[0][:160]}") from None
+    except anthropic.APIConnectionError as e:
+        raise RuntimeError(f"{model}: {type(e).__name__}") from None
+    if r.stop_reason == "refusal":
+        raise RuntimeError(f"{model}: declined")
+    return "".join(b.text for b in r.content if b.type == "text"), blocks
+
+
 def json_in(text):
     """The JSON object in a reply that may wrap it in prose or a code fence."""
     m = re.search(r"\{.*\}", text, re.S)
@@ -180,14 +218,16 @@ def json_in(text):
 
 
 def llm(prompt, temperature=0.7, local=False):
-    """JSON reply from Gemini when a key is set (unless local: bulk scoring stays free), else from Ollama."""
-    global gemini_down
-    if not local and not gemini_down and gemini_key():
+    """JSON reply from the model chosen in Connectors (Gemini or Claude, when it has a key), else from Ollama.
+    local=True keeps bulk scoring on the free local model."""
+    global ai_down
+    who = writer()
+    if not local and not ai_down and who != "local":
         try:
-            return json_in(gemini(prompt, temperature)[0])
+            return json_in(gemini(prompt, temperature)[0] if who == "gemini" else claude(prompt)[0])
         except (RuntimeError, ValueError) as e:
-            gemini_down = str(e)
-            print(f"  Gemini unavailable ({gemini_down}); using the local model for the rest of this run")
+            ai_down = str(e)
+            print(f"  {who.title()} unavailable ({ai_down}); using the local model for the rest of this run")
     r = get_json(BRAND["ollama_url"] + "/api/chat", data=json.dumps({
         "model": BRAND["llm"], "stream": False, "format": "json",
         "options": {"num_ctx": 8192, "temperature": temperature},
@@ -545,6 +585,22 @@ def research_gemini(question):
                 if m.get("urlRetrievalStatus") == "URL_RETRIEVAL_STATUS_SUCCESS"]
         sources = [(urllib.parse.urlsplit(u).netloc.removeprefix("www."), u) for u in read]
         how = f"{len(read)} of {len(urls)} pages read"
+    return researched(question, text, sources, how, "Gemini", linked=how != "Google Search")  # search links are redirects
+
+
+def research_claude(question):
+    """Claude researches with Anthropic's web search; sources are the pages it cites (else the results it saw)."""
+    tool = "web_search_20250305" if "haiku" in (BRAND.get("claude_model") or "") else "web_search_20260209"
+    text, blocks = claude(GEMINI_RESEARCH.format(question=question, how="Search the web for it."),
+                          tools=[{"type": tool, "name": "web_search", "max_uses": 5}])
+    cited = [(c.title or "", c.url) for b in blocks if b.type == "text" for c in (b.citations or []) if getattr(c, "url", None)]
+    seen = [(x.title, x.url) for b in blocks if b.type == "web_search_tool_result" and isinstance(b.content, list) for x in b.content]
+    sources = list(dict.fromkeys((urllib.parse.urlsplit(u).netloc.removeprefix("www."), u) for _, u in (cited or seen)))
+    return researched(question, text, sources, "web search", "Claude", linked=True)
+
+
+def researched(question, text, sources, how, who, linked):
+    """Turn a model's research reply into an Article; refuse notes it didn't source."""
     r = json_in(text)
     notes = str(r.get("notes") or "").strip()
     if len(notes.split()) < 80 or not sources:  # nothing it actually read: don't script from the model's memory
@@ -555,22 +611,22 @@ def research_gemini(question):
         if not p.get("missing") and p["title"] not in titles:
             titles.append(p["title"])
     sites = list(dict.fromkeys(name for name, _ in sources))
-    print(f"  researched with Gemini ({how}): {', '.join(sites[:6])}")
+    print(f"  researched with {who} ({how}): {', '.join(sites[:6])}")
     return dict(origin="question", title=question, description="",
                 text=notes, url=next((u for n, u in sources if "wikipedia.org/wiki/" in u), sources[0][1]), images=[], popularity=None,
-                credit="Researched with Gemini from: " + ("; ".join(sites[:8]) if how == "Google Search"  # search links are redirects
-                                                          else " ".join(u for _, u in sources[:8])),
+                credit=f"Researched with {who} from: " + (" ".join(u for _, u in sources[:8]) if linked else "; ".join(sites[:8])),
                 source_label="Sources: " + ", ".join(sites[:3]), titles=titles)
 
 
 def research(question):
-    """Answer a question: with a Gemini key, Gemini researches the web; otherwise (or if that fails) Wikipedia,
+    """Answer a question: the cloud model chosen in Connectors researches the web; otherwise (or if that fails) Wikipedia,
     by picking the articles that cover it, reading them, and packaging the notes as an Article."""
-    if gemini_key() and not gemini_down:
+    who = writer()
+    if who != "local" and not ai_down:
         try:
-            return research_gemini(question)
+            return (research_gemini if who == "gemini" else research_claude)(question)
         except (RuntimeError, ValueError) as e:
-            print(f"  Gemini research failed ({e}); researching on Wikipedia instead")
+            print(f"  {who.title()} research failed ({e}); researching on Wikipedia instead")
     wanted = [str(t) for t in (llm(RESEARCH_PROMPT.format(question=question), 0.2).get("articles") or [])][:5]
     found = {}  # title -> pageid
     for q in [question] + wanted:  # resolve each suggestion to a real article via search (the question itself too)
@@ -1728,7 +1784,7 @@ def score_video(con, pageid):
 
 
 def make(con, pageid):
-    before = dict(gemini_used)
+    before = dict(ai_used)
     row = con.execute("select * from pages where pageid=?", (pageid,)).fetchone()
     work = WORK / str(pageid)
     work.mkdir(parents=True, exist_ok=True)
@@ -2063,7 +2119,7 @@ def rerender(con, ep, repick_images=False, narration=None):
         m["narration"] = "recording"
     elif narration == "ai":
         m["narration"] = "kokoro"
-    before = dict(gemini_used)
+    before = dict(ai_used)
     if repick_images:
         print("  picking images from the script…")
         m["images"] = pick_visuals(m["article_title"], m["script"], WORK / str(row["pageid"]), own=[],
@@ -2173,12 +2229,226 @@ def unpublish(con, ep, keep_local=False):
         print("  deleted from YouTube and locally")
 
 
-def upload(con, pageid, publish_at=None):
+# ---------- publishing: YouTube, Facebook, Instagram, TikTok ----------
+GRAPH = "https://graph.facebook.com/v27.0/"
+META_FILE = SECRETS / "meta.json"  # {token, page_id, page_name, ig_id, ig_user}: a Page token doesn't expire
+TIKTOK_FILE = SECRETS / "tiktok.json"  # {client_key, client_secret, access_token, expires, refresh_token, user}
+TIKTOK_API = "https://open.tiktokapis.com/v2/"
+TIKTOK_REDIRECT = "http://127.0.0.1:8766/callback/"  # register exactly this in the TikTok app
+PLATFORMS = {"youtube": "YouTube", "facebook": "Facebook", "instagram": "Instagram", "tiktok": "TikTok"}
+
+
+def secret(path, data=None):
+    """Read (or write, owner-only) a JSON file in secrets/."""
+    if data is None:
+        return json.loads(path.read_text()) if path.exists() else {}
+    SECRETS.mkdir(exist_ok=True)
+    path.write_text(json.dumps(data))
+    path.chmod(0o600)
+
+
+def http_json(req, timeout=60):
+    """urlopen -> JSON; API errors become RuntimeError with the service's own message (never the request)."""
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.load(r)
+    except urllib.error.HTTPError as e:
+        try:
+            d = json.load(e)
+            err = d.get("error")
+            msg = (err.get("message") if isinstance(err, dict) else d.get("error_description") or err) or f"HTTP {e.code}"
+        except ValueError:
+            msg = f"HTTP {e.code}"
+        raise RuntimeError(str(msg)[:200]) from None
+
+
+def graph(path, token, data=None):
+    """Meta Graph API: GET without data, POST (form) with it."""
+    if data is None:
+        return http_json(GRAPH + path + ("&" if "?" in path else "?") + urllib.parse.urlencode({"access_token": token}))
+    return http_json(urllib.request.Request(GRAPH + path, urllib.parse.urlencode({**data, "access_token": token}).encode()))
+
+
+def rupload(url, token, path):
+    """Meta's upload host: the whole file in one request."""
+    raw = Path(path).read_bytes()
+    return http_json(urllib.request.Request(url, raw, {"Authorization": f"OAuth {token}", "offset": "0", "file_size": str(len(raw))}), 600)
+
+
+def save_meta(token):
+    """Accept a Page token or a (long-lived) user token; find the Page and the Instagram account linked to it."""
+    token = token.strip()
+    if not re.fullmatch(r"[A-Za-z0-9]{40,600}", token):
+        raise ValueError("that doesn't look like a Meta access token")
+    pages = []
+    try:
+        pages = graph("me/accounts?fields=id,name,access_token,instagram_business_account{id,username}", token).get("data", [])
+    except RuntimeError:
+        pass  # a Page token has no /me/accounts
+    if pages:  # user token: its Page tokens don't expire when the user token is long-lived
+        pg = next((x for x in pages if x.get("instagram_business_account")), pages[0])  # ponytail: first Page; add a picker if people run several
+        token = pg["access_token"]
+    else:
+        try:
+            pg = graph("me?fields=id,name,instagram_business_account{id,username}", token)
+        except RuntimeError as e:
+            raise ValueError(f"Meta rejected the token: {e}") from None
+        if "instagram_business_account" not in pg and "category" not in graph(f"{pg['id']}?fields=category", token):
+            raise ValueError("that token isn't for a Facebook Page: use Get Page Access Token, or a user token with Page permissions")
+    ig = pg.get("instagram_business_account") or {}
+    secret(META_FILE, {"token": token, "page_id": pg["id"], "page_name": pg.get("name", ""), "ig_id": ig.get("id", ""), "ig_user": ig.get("username", "")})
+
+
+def post_facebook(path, m):
+    c = secret(META_FILE)
+    if video_seconds(path) > 90:
+        raise RuntimeError("Facebook Reels must be 90 seconds or shorter")
+    v = graph(f"{c['page_id']}/video_reels", c["token"], {"upload_phase": "start"})["video_id"]
+    rupload(f"https://rupload.facebook.com/video-upload/v27.0/{v}", c["token"], path)
+    graph(f"{c['page_id']}/video_reels", c["token"], {"upload_phase": "finish", "video_id": v, "video_state": "PUBLISHED",
+                                                       "description": caption(m)})
+    return {"id": v, "url": f"https://www.facebook.com/reel/{v}"}
+
+
+def post_instagram(path, m):
+    c = secret(META_FILE)
+    cid = graph(f"{c['ig_id']}/media", c["token"], {"media_type": "REELS", "upload_type": "resumable", "caption": caption(m)})["id"]
+    rupload(f"https://rupload.facebook.com/ig-api-upload/v27.0/{cid}", c["token"], path)
+    for _ in range(30):  # Instagram processes the video before it can be published (Meta: poll for up to 5 minutes)
+        st = graph(f"{cid}?fields=status_code", c["token"]).get("status_code")
+        if st == "FINISHED":
+            break
+        if st in ("ERROR", "EXPIRED"):
+            raise RuntimeError(f"Instagram couldn't process the video ({st})")
+        time.sleep(10)
+    else:
+        raise RuntimeError("Instagram is still processing the video; publishing again later retries it")
+    mid = graph(f"{c['ig_id']}/media_publish", c["token"], {"creation_id": cid})["id"]
+    return {"id": mid, "url": graph(f"{mid}?fields=permalink", c["token"]).get("permalink", "")}
+
+
+def save_tiktok_app(key, secret_):
+    key, secret_ = key.strip(), secret_.strip()
+    if not (re.fullmatch(r"\w{8,64}", key) and re.fullmatch(r"\w{16,128}", secret_)):
+        raise ValueError("paste the Client key and Client secret from your TikTok app")
+    if secret(TIKTOK_FILE).get("client_key") not in (None, key):
+        tiktok_disconnect()
+    secret(TIKTOK_FILE, {"client_key": key, "client_secret": secret_})
+
+
+def tiktok_token(c, **params):
+    t = http_json(urllib.request.Request(TIKTOK_API + "oauth/token/", urllib.parse.urlencode(
+        {"client_key": c["client_key"], "client_secret": c["client_secret"], **params}).encode(),
+        {"Content-Type": "application/x-www-form-urlencoded"}))
+    if "access_token" not in t:
+        raise RuntimeError(t.get("error_description") or t.get("error") or "TikTok refused the sign-in")
+    c.update(access_token=t["access_token"], refresh_token=t["refresh_token"], expires=time.time() + t["expires_in"] - 60)
+    secret(TIKTOK_FILE, c)  # refresh tokens rotate: always keep the newest
+    return c
+
+
+def tiktok_connect():
+    """Sign in to TikTok in the browser (OAuth with PKCE) and keep the tokens in secrets/."""
+    import hashlib, secrets, webbrowser
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+    c = secret(TIKTOK_FILE)
+    if not c.get("client_key"):
+        raise SystemExit("TikTok isn't set up: in the studio, Connectors → TikTok, add your app's client key and secret")
+    verifier, state, got = secrets.token_urlsafe(48), secrets.token_urlsafe(16), {}
+
+    class Back(BaseHTTPRequestHandler):
+        def do_GET(self):
+            u = urllib.parse.urlsplit(self.path)
+            if u.path == "/callback/":
+                got.update({k: v[0] for k, v in urllib.parse.parse_qs(u.query).items()})
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(b"Done. You can close this tab and go back to the studio.")
+
+        def log_message(self, *a):
+            pass
+
+    srv = HTTPServer(("127.0.0.1", 8766), Back)
+    srv.timeout = 5
+    webbrowser.open("https://www.tiktok.com/v2/auth/authorize/?" + urllib.parse.urlencode({
+        "client_key": c["client_key"], "response_type": "code", "scope": "user.info.basic,video.upload",
+        "redirect_uri": TIKTOK_REDIRECT, "state": state, "code_challenge_method": "S256",
+        "code_challenge": hashlib.sha256(verifier.encode()).hexdigest()}))  # TikTok desktop wants hex, not base64url
+    print("  a browser window asks you to allow access on TikTok (waiting up to 5 minutes)")
+    end = time.time() + 300
+    while "state" not in got and time.time() < end:
+        srv.handle_request()
+    srv.server_close()
+    if got.get("state") != state or "code" not in got:
+        raise SystemExit("TikTok sign-in didn't finish" + (f": {got.get('error_description') or got['error']}" if got.get("error") else ""))
+    c = tiktok_token(c, grant_type="authorization_code", code=got["code"], redirect_uri=TIKTOK_REDIRECT, code_verifier=verifier)
+    try:
+        c["user"] = tiktok_api("user/info/?fields=display_name", None)["user"].get("display_name", "")
+        secret(TIKTOK_FILE, c)
+    except (RuntimeError, KeyError):
+        pass
+    print(f"  TikTok connected{' as ' + c['user'] if c.get('user') else ''}")
+
+
+def tiktok_api(path, body):
+    c = secret(TIKTOK_FILE)
+    if time.time() > c.get("expires", 0):
+        c = tiktok_token(c, grant_type="refresh_token", refresh_token=c["refresh_token"])
+    req = urllib.request.Request(TIKTOK_API + path, None if body is None else json.dumps(body).encode(),
+                                 {"Authorization": f"Bearer {c['access_token']}", "Content-Type": "application/json; charset=UTF-8"})
+    d = http_json(req)
+    if (d.get("error") or {}).get("code", "ok") != "ok":
+        raise RuntimeError(d["error"].get("message") or d["error"]["code"])
+    return d.get("data") or {}
+
+
+def post_tiktok(path, m):
+    """Send the video to the creator's TikTok inbox; they add the caption and post it in the app.
+    (Posting directly needs TikTok to audit the app; until then it only allows private posts on a private account.)"""
+    size = Path(path).stat().st_size
+    if size > 64e6:
+        raise RuntimeError("video over 64 MB: TikTok needs it in chunks")  # ponytail: Shorts are ~20 MB; chunk if that changes
+    d = tiktok_api("post/publish/inbox/video/init/", {"source_info": {"source": "FILE_UPLOAD", "video_size": size,
+                                                                     "chunk_size": size, "total_chunk_count": 1}})
+    req = urllib.request.Request(d["upload_url"], Path(path).read_bytes(), {"Content-Type": "video/mp4",
+                                 "Content-Range": f"bytes 0-{size - 1}/{size}"}, method="PUT")
+    with urllib.request.urlopen(req, timeout=600):
+        pass
+    return {"id": d["publish_id"], "url": "", "note": "in your TikTok inbox: open TikTok to post it"}
+
+
+def tiktok_disconnect():
+    c = secret(TIKTOK_FILE)
+    if c.get("access_token"):
+        try:
+            urllib.request.urlopen(urllib.request.Request(TIKTOK_API + "oauth/revoke/", urllib.parse.urlencode(
+                {"client_key": c["client_key"], "client_secret": c["client_secret"], "token": c["access_token"]}).encode()), timeout=20)
+        except OSError:
+            pass
+    secret(TIKTOK_FILE, {k: c[k] for k in ("client_key", "client_secret") if k in c})
+
+
+def publish_status():
+    """What each platform needs: 'none' (set up), 'client' (connect) or 'connected'."""
+    meta, tt = secret(META_FILE), secret(TIKTOK_FILE)
+    return {"youtube": youtube_status(), "facebook": "connected" if meta.get("page_id") else "none",
+            "instagram": "connected" if meta.get("ig_id") else "none",
+            "tiktok": "connected" if tt.get("refresh_token") else "client" if tt.get("client_key") else "none",
+            "meta": {k: meta.get(k, "") for k in ("page_name", "ig_user")}, "tiktok_user": tt.get("user", "")}
+
+
+def caption(m):
+    return f"{m['title']}\n\n{m['yt_description']}"[:2200]
+
+
+def video_seconds(path):
+    import imageio_ffmpeg
+    return imageio_ffmpeg.count_frames_and_secs(str(path))[1]
+
+
+def upload_youtube(row, m, publish_at):
     from googleapiclient.http import MediaFileUpload
-    row = con.execute("select * from pages where pageid=?", (pageid,)).fetchone()
-    if not row or row["status"] != "rendered":
-        raise SystemExit(f"page {pageid} is not in 'rendered' state")
-    m = json.loads((WORK / str(pageid) / "meta.json").read_text())
     status = {"privacyStatus": "private", "selfDeclaredMadeForKids": False}
     if publish_at:
         status["publishAt"] = publish_at
@@ -2189,8 +2459,38 @@ def upload(con, pageid, publish_at=None):
     resp = None
     while resp is None:
         _, resp = req.next_chunk()
-    upsert(con, pageid, status="uploaded", video_id=resp["id"])
-    print(f"  uploaded: https://youtube.com/shorts/{resp['id']} ({status['privacyStatus']})")
+    return resp["id"], f"https://youtube.com/shorts/{resp['id']} ({status['privacyStatus']})"
+
+
+def upload(con, pageid, publish_at=None):
+    """Publish to every platform ticked in Connectors. Each that succeeds is remembered, so a retry only redoes the
+    ones that failed; the video counts as uploaded when all are done. publish_at schedules YouTube only."""
+    row = con.execute("select * from pages where pageid=?", (pageid,)).fetchone()
+    if not row or row["status"] != "rendered":
+        raise SystemExit(f"page {pageid} is not in 'rendered' state")
+    m = json.loads((WORK / str(pageid) / "meta.json").read_text())
+    posts = json.loads(row["posts"] or "{}")
+    targets = [p for p in BRAND.get("publish_to") or ["youtube"] if p in PLATFORMS and p not in posts
+               and not (p == "youtube" and row["video_id"])]
+    failed = []
+    for p in targets:
+        try:
+            if p == "youtube":
+                vid, where = upload_youtube(row, m, publish_at)
+                upsert(con, pageid, video_id=vid)
+            else:
+                posts[p] = {"id": "", "url": "", **{"youtube": None, "facebook": post_facebook, "instagram": post_instagram,
+                                                     "tiktok": post_tiktok}[p](row["video_path"], m)}
+                upsert(con, pageid, posts=json.dumps(posts))
+                where = posts[p].get("note") or posts[p]["url"]
+            print(f"  {PLATFORMS[p]}: {where}")
+        except (Exception, SystemExit) as e:  # keep going with the other platforms
+            failed.append(p)
+            print(f"  {PLATFORMS[p]} failed: {e}")
+    if failed:
+        print(f"  not marked uploaded yet; publishing again retries {', '.join(PLATFORMS[p] for p in failed)}")
+    else:
+        upsert(con, pageid, status="uploaded")
 
 
 def upload_pending(con, publish_at=None, ep=None):
@@ -2205,7 +2505,7 @@ def upload_pending(con, publish_at=None, ep=None):
         try:
             upload(con, r["pageid"], publish_at)
         except Exception as e:  # keep going; it stays 'rendered' and is retried next time
-            print(f"  upload failed: {e}")
+            print(f"  publishing failed: {e}")
 
 
 def selftest():
@@ -2297,7 +2597,8 @@ def main():
     dc.add_argument("--link", help="any link (for --source link): feed, site, subreddit, Wikipedia category/list, ...")
     dl = sub.add_parser("download", help="save videos from almost any site into library/ (references, clips)")
     dl.add_argument("urls", nargs="+"); dl.add_argument("--section", help="only part of it, e.g. 1:20-1:45")
-    sub.add_parser("connect", help="sign in to YouTube (opens Google's consent page)")
+    cn = sub.add_parser("connect", help="sign in to YouTube or TikTok (opens the browser)")
+    cn.add_argument("platform", nargs="?", default="youtube", choices=["youtube", "tiktok"])
     sc = sub.add_parser("score"); sc.add_argument("--all", action="store_true")
     wb = sub.add_parser("web"); wb.add_argument("--port", type=int, default=8765); wb.add_argument("--no-open", action="store_true")
     args = ap.parse_args()
@@ -2309,6 +2610,8 @@ def main():
         return web.serve(args.port, not args.no_open)
     if args.cmd == "selftest":
         return selftest()
+    if args.cmd == "connect" and args.platform == "tiktok":
+        return tiktok_connect()
     if args.cmd == "connect":
         youtube(YT_UPLOAD)
         return print("YouTube connected. Uploads will go to the channel you chose.")

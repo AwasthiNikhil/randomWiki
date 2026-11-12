@@ -64,6 +64,14 @@ def save_brand(new):
     b["llm"] = text("llm", 1, 80)
     if "gemini_model" in new:
         b["gemini_model"] = text("gemini_model", 1, 80)
+    if new.get("claude_model"):
+        b["claude_model"] = text("claude_model", 1, 80)
+    if "publish_to" in new:
+        b["publish_to"] = [x for x in rw.PLATFORMS if x in new["publish_to"]]
+    if "ai" in new:
+        if new["ai"] not in ("gemini", "claude", "local"):
+            raise ValueError("unknown model choice")
+        b["ai"] = new["ai"]
     sch = new.get("schedule") or {}
     times = sorted({str(t) for t in sch.get("times", [])})
     days = sorted({int(d) for d in sch.get("days", []) if 0 <= int(d) <= 6})
@@ -114,7 +122,7 @@ def pages():
         if r["ep"] and meta.exists():
             m = json.loads(meta.read_text())
             r.update(yt_title=m["title"], script=m["script"], yt_description=m["yt_description"], potential_info=m.get("potential"),
-                     narration=m.get("narration", "kokoro"), gemini=m.get("gemini"), has_recording=(rw.WORK / str(r["pageid"]) / "voice_recorded.wav").exists(),
+                     narration=m.get("narration", "kokoro"), ai=m.get("ai") or m.get("gemini"), has_recording=(rw.WORK / str(r["pageid"]) / "voice_recorded.wav").exists(),
                      images=[{k: v for k, v in i.items() if k != "path"} | {"credit": rw.credit(i), "file": Path(i["path"]).name}
                              for i in m["images"]])
         v = Path(r["video_path"] or "")
@@ -252,11 +260,14 @@ class H(BaseHTTPRequestHandler):
                         r"tts|image|robotics|computer|omni|transcribe|customtools|banana", n)), key=lambda n: ("latest" not in n, n))
                 except Exception as e:
                     gemini["error"] = f"couldn't list models ({type(e).__name__})"
+            claude = {"key": "shell" if os.environ.get("ANTHROPIC_API_KEY", "").strip() else "saved" if rw.claude_key() else "",
+                      "models": rw.CLAUDE_MODELS}
             b = brand()
             log = rw.AUTO_LOG.read_text(errors="ignore").splitlines()[-40:] if rw.AUTO_LOG.exists() else []
-            return self.send(200, {"brand": b, "voices": sorted(rw.KOKORO_VOICES), "models": models, "gemini": gemini, "youtube": rw.youtube_status(),
+            return self.send(200, {"brand": b, "voices": sorted(rw.KOKORO_VOICES), "models": models, "gemini": gemini, "claude": claude, "ai": b.get("ai") or "gemini", "publish": rw.publish_status(),
+                                   "publish_to": b.get("publish_to") or ["youtube"], "youtube": rw.youtube_status(),
                                    "schedule": rw.SCHEDULE_DEFAULTS | b.get("schedule", {}), "schedule_loaded": rw.schedule_loaded(),
-                                   "auto_log": [l for l in log if l.startswith(("===", "make:", "queue empty", "  done", "  uploaded", "  upload failed"))][-12:],
+                                   "auto_log": [l for l in log if l.startswith(("===", "make:", "queue empty", "  done", "  uploaded", "  upload failed", "  publishing failed", "  YouTube", "  Facebook", "  Instagram", "  TikTok"))][-12:],
                                    "music": (rw.ROOT / b["music"]).is_file(), "voice_sample": (rw.ROOT / "brand" / "voice_sample.wav").is_file(),
                                    "clone_ready": (rw.ROOT / ".venv-clone" / "bin" / "python").exists(),
                                    "logo": bool(b.get("logo")) and (rw.ROOT / b["logo"]).is_file()})
@@ -384,16 +395,25 @@ class H(BaseHTTPRequestHandler):
                 rw.save_youtube_client(str(body.get("json", "")))
             elif self.path == "/api/youtube_disconnect":
                 rw.youtube_disconnect()
-            elif self.path == "/api/gemini_key":  # body: {"key": "..."}; empty removes the saved key
-                key = str(body.get("key", "")).strip()
+            elif self.path == "/api/meta_token":  # body: {"token": "..."}
+                rw.save_meta(str(body.get("token", "")))
+            elif self.path == "/api/meta_disconnect":
+                rw.META_FILE.unlink(missing_ok=True)
+            elif self.path == "/api/tiktok_app":  # body: {"key": "...", "secret": "..."}
+                rw.save_tiktok_app(str(body.get("key", "")), str(body.get("secret", "")))
+            elif self.path == "/api/tiktok_disconnect":
+                rw.tiktok_disconnect()
+            elif self.path in ("/api/gemini_key", "/api/claude_key"):  # body: {"key": "..."}; empty removes the saved key
+                key, gem = str(body.get("key", "")).strip(), self.path == "/api/gemini_key"
+                f = rw.GEMINI_KEY_FILE if gem else rw.CLAUDE_KEY_FILE
                 if not key:
-                    rw.GEMINI_KEY_FILE.unlink(missing_ok=True)
-                elif not re.fullmatch(r"[\w.\-]{20,200}", key):
-                    raise ValueError("that doesn't look like a Gemini API key")
+                    f.unlink(missing_ok=True)
+                elif not re.fullmatch(r"[\w.\-]{20,200}" if gem else r"sk-ant-[\w\-]{20,200}", key):
+                    raise ValueError(f"that doesn't look like {'a Gemini' if gem else 'an Anthropic'} API key")
                 else:
                     rw.SECRETS.mkdir(exist_ok=True)
-                    rw.GEMINI_KEY_FILE.write_text(key)
-                    rw.GEMINI_KEY_FILE.chmod(0o600)
+                    f.write_text(key)
+                    f.chmod(0o600)
             elif self.path == "/api/fonts/install":
                 family = str(body["family"])
                 if not any(f["family"] == family for f in rw.google_fonts()):

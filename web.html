@@ -32,6 +32,9 @@ main { overflow: auto; padding: 20px 24px 40px; }
 .tabs { display: flex; gap: 4px; margin-bottom: 18px; border-bottom: 1px solid var(--line); }
 .tab { background: none; border: 0; padding: 8px 14px; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; font-weight: 500; }
 .tab.on { color: var(--text); border-color: var(--accent); }
+.tab:hover { text-decoration: none; color: var(--text); }
+.tabs { overflow-x: auto; scrollbar-width: none; }
+.tab { white-space: nowrap; flex: none; }
 
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 18px; }
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; cursor: pointer; transition: border-color .15s, transform .15s; text-align: left; padding: 0; }
@@ -185,7 +188,34 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
 
 
 /* ---- settings ---- */
-.settings { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 24px; align-items: start; }
+.settings { display: grid; grid-template-columns: 170px minmax(0, 1fr) 300px; gap: 24px; align-items: start; }
+.settings.nopreview { grid-template-columns: 170px minmax(0, 1fr); }
+.settings.nopreview .spreview { display: none; }
+.snav { position: sticky; top: 0; display: grid; gap: 2px; }
+.snav a { color: var(--muted); padding: 8px 12px; border-radius: 8px; font-weight: 500; }
+.snav a:hover { text-decoration: none; color: var(--text); background: var(--panel); }
+.snav a.on { color: var(--text); background: var(--panel2); box-shadow: inset 2px 0 0 var(--accent); }
+.snav .snav-out { margin-top: 10px; font-size: 12px; font-weight: 400; }
+.savebar { position: sticky; top: -20px; z-index: 2; display: flex; gap: 12px; align-items: center; background: var(--bg); padding: 8px 0 12px; }
+.savebar .hint { margin: 0; }
+.conn { display: grid; gap: 14px; max-width: 1180px; }
+.ch { font: 22px Anton; letter-spacing: .4px; margin: 10px 0 0; }
+.ch-sub { margin: -8px 0 0; max-width: 760px; }
+.cgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); gap: 14px; align-items: start; }
+.ccard { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; display: grid; gap: 10px; min-width: 0; }
+.ccard.chosen { border-color: var(--accent); }
+.ccard label { display: grid; gap: 5px; font-size: 13px; color: var(--muted); }
+.ccard input:not([type=radio]):not([type=checkbox]):not([type=file]), .ccard select { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; color: var(--text); font: inherit; width: 100%; min-width: 0; }
+.ccard input:focus, .ccard select:focus { outline: none; border-color: var(--accent); }
+.ccard .inline input { width: auto !important; }
+.ccard label.radio, .ccard label.check { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; color: var(--text); font-size: 14px; }
+.ccard .use { padding-top: 8px; border-top: 1px solid var(--line); }
+.ccard label.check.use { padding-top: 0; border-top: 0; }
+.ccard .use input { accent-color: var(--accent); width: 16px; height: 16px; }
+.chead { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 16px; }
+.cstate { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .4px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+.cstate.ok { color: var(--ok); border-color: #2c5e3e; background: #13261b; }
+.cstate.warn { color: var(--accent); border-color: #6b5520; background: #2a2210; }
 .spreview { position: sticky; top: 0; display: grid; gap: 10px; }
 .spreview img { width: 100%; border-radius: 12px; border: 1px solid var(--line); aspect-ratio: 9 / 16; background: var(--panel); object-fit: cover; }
 .sform { min-width: 0; }
@@ -222,7 +252,9 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
 .radio input[type=radio] { accent-color: var(--accent); }
 .radio input[type=time] { color-scheme: dark; width: auto !important; }
 .dirty { color: var(--accent); }
-@media (max-width: 1200px) { .settings { grid-template-columns: 1fr; } .spreview { position: static; max-width: 300px; } }
+@media (max-width: 1200px) { .settings, .settings.nopreview { grid-template-columns: 170px minmax(0, 1fr); } .spreview { position: static; max-width: 300px; grid-column: 2; } }
+@media (max-width: 760px) { .settings, .settings.nopreview { grid-template-columns: minmax(0, 1fr); } .spreview { grid-column: auto; }
+  .snav { position: static; display: flex; overflow-x: auto; gap: 4px; } .snav a { white-space: nowrap; } .snav .snav-out { margin: 0; } }
 @media (max-width: 900px) {
   .app { grid-template-columns: 1fr; grid-template-rows: auto auto auto; height: auto; }
   aside { border-left: 0; border-top: 1px solid var(--line); }
@@ -244,14 +276,15 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
   </header>
 
   <main>
-    <div class="tabs" role="tablist">
-      <button class="tab on" data-tab="episodes" role="tab">Episodes</button>
-      <button class="tab" data-tab="queue" role="tab" id="queueTab">Ideabank</button>
-      <button class="tab" data-tab="publish" role="tab" id="publishTab">Queue</button>
-      <button class="tab" data-tab="library" role="tab" id="libraryTab">Library</button>
-      <button class="tab" data-tab="log" role="tab">Page log</button>
-      <button class="tab" data-tab="settings" role="tab">Settings</button>
-    </div>
+    <nav class="tabs" aria-label="Sections">
+      <a class="tab on" href="#/episodes" data-route="episodes">Episodes</a>
+      <a class="tab" href="#/ideabank" data-route="ideabank" id="queueTab">Ideabank</a>
+      <a class="tab" href="#/queue" data-route="queue" id="publishTab">Queue</a>
+      <a class="tab" href="#/library" data-route="library" id="libraryTab">Library</a>
+      <a class="tab" href="#/log" data-route="log">Page log</a>
+      <a class="tab" href="#/connectors" data-route="connectors">Connectors</a>
+      <a class="tab" href="#/settings" data-route="settings">Settings</a>
+    </nav>
     <section id="episodes">
       <div class="toolbar">
         <span id="epFilters" style="display:contents"></span>
@@ -290,8 +323,16 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
     </section>
     <section id="settings" hidden>
       <div class="settings">
+        <nav class="snav" aria-label="Settings">
+          <a href="#/settings/brand" data-group="brand">Brand</a>
+          <a href="#/settings/voice" data-group="voice">Voice &amp; music</a>
+          <a href="#/settings/content" data-group="content">Videos</a>
+          <a href="#/settings/automation" data-group="automation">Automation</a>
+          <a href="#/connectors" class="snav-out">AI models &amp; publishing →</a>
+        </nav>
         <form class="sform" id="sform" onsubmit="return false" autocomplete="off">
-          <fieldset class="scard"><legend>Channel</legend>
+          <div class="savebar"><button class="btn primary" id="sSave" type="button">Save</button><span class="hint" id="sState"></span></div>
+          <fieldset class="scard" data-group="brand"><legend>Channel</legend>
             <label>Channel name<input name="channel" maxlength="40"></label>
             <label>Tagline <small>appears in every YouTube description</small><input name="tagline" maxlength="120"></label>
             <label>Closing line <small>spoken at the end of every video</small><textarea name="outro_line" maxlength="200" rows="2"></textarea></label>
@@ -303,8 +344,8 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
               <button class="btn sm danger" type="button" id="logoRm">Remove image</button>
             </div>
           </fieldset>
-          <fieldset class="scard"><legend>Colours</legend><div class="colors" id="colorRows"></div></fieldset>
-          <fieldset class="scard"><legend>Typography</legend>
+          <fieldset class="scard" data-group="brand"><legend>Colours</legend><div class="colors" id="colorRows"></div></fieldset>
+          <fieldset class="scard" data-group="brand"><legend>Typography</legend>
             <div id="fontRoles" style="display:grid;gap:8px"></div>
             <label style="max-width:220px">Display weight <small>for variable fonts</small>
               <select name="display_weight"><option>Regular</option><option>Medium</option><option>SemiBold</option><option>Bold</option><option>ExtraBold</option><option>Black</option></select></label>
@@ -316,7 +357,7 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
               <div class="flist" id="flist"></div>
             </div>
           </fieldset>
-          <fieldset class="scard"><legend>Voice</legend>
+          <fieldset class="scard" data-group="voice"><legend>Voice</legend>
             <div style="display:grid;gap:6px">
               <label class="radio"><input type="radio" name="vEngine" value="kokoro"> Preset AI voice (Kokoro): fast</label>
               <label class="radio"><input type="radio" name="vEngine" value="clone"> <b>My voice</b>: cloned from a sample (Chatterbox, a few minutes per video)</label>
@@ -340,26 +381,94 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
             <div class="inline"><button class="btn" type="button" id="hear">Save &amp; hear it</button><audio id="voiceAudio" controls hidden></audio></div>
             <span class="hint" id="hearHint"></span>
           </fieldset>
-          <fieldset class="scard"><legend>Background music</legend>
+          <fieldset class="scard" data-group="voice"><legend>Background music</legend>
             <div class="inline"><span id="musicState" class="hint"></span>
               <label class="btn sm" style="display:inline-block;cursor:pointer">Upload MP3<input type="file" accept=".mp3,audio/mpeg" id="musicFile" hidden></label>
               <button class="btn sm danger" type="button" id="musicRm">Remove</button></div>
             <label style="max-width:320px">Volume under the voice <output id="volOut"></output><input type="range" name="music_volume" min="0" max="0.5" step="0.01"></label>
             <audio id="musicAudio" controls hidden></audio>
           </fieldset>
-          <fieldset class="scard"><legend>Content</legend>
-            <label style="max-width:320px">Local LLM <small>from Ollama</small><select name="llm" id="llmSel"></select></label>
-            <div style="display:grid;gap:6px;max-width:460px">
-              <label>Gemini <small id="gemStatus"></small><select name="gemini_model" id="gemSel"></select></label>
-              <div class="inline"><input type="password" id="gemKey" placeholder="Paste a Gemini API key" autocomplete="off" aria-label="Gemini API key" style="flex:1;min-width:0">
-                <button class="btn sm" type="button" id="gemSave">Save key</button><button class="btn sm danger" type="button" id="gemRm" hidden>Remove</button></div>
-              <span class="hint" id="gemToday"></span>
-              <span class="hint">Optional. With a key, Gemini researches questions on the web, writes scripts and picks visuals; the local LLM scores ideas and takes over if Gemini fails. A <code>GEMINI_API_KEY</code> in your shell is used first. A saved key stays in <code>secrets/</code> on this computer, which scheduled runs need. Get a key at aistudio.google.com/apikey.</span>
-            </div>
+          <fieldset class="scard" data-group="content"><legend>Videos</legend>
             <label style="max-width:320px">Minimum interest score <output id="scoreOut"></output><input type="range" name="min_score" min="1" max="10" step="1"></label>
             <label style="max-width:320px">Maximum video length <small>seconds</small><input type="number" name="max_seconds" min="20" max="175"></label>
           </fieldset>
-          <fieldset class="scard"><legend>YouTube</legend>
+          <fieldset class="scard" data-group="automation"><legend>Automation</legend>
+            <label class="check"><input type="checkbox" id="schOn"> Make videos automatically on a schedule</label>
+            <div id="schBody" style="display:grid;gap:12px">
+              <div><div class="hint" style="margin-bottom:6px">Times · up to 4 a day</div>
+                <div class="inline" id="schTimes"></div></div>
+              <div><div class="hint" style="margin-bottom:6px">Days</div>
+                <div class="seg" id="schDays" role="group" aria-label="Days of the week"></div></div>
+              <div class="inline">
+                <label style="flex:1;min-width:min(220px,100%)">If the ideabank is empty, find an idea from
+                  <input id="schArg" placeholder="A topic or a link. Empty = a random Wikipedia page"></label>
+              </div>
+              <label class="check"><input type="checkbox" id="schUp"> Publish after making <span class="hint" style="margin:0">to the platforms ticked in <a href="#/connectors">Connectors</a></span></label>
+              <div id="schPick" style="display:grid;gap:6px;padding-left:24px">
+                <span class="hint">Each run publishes</span>
+                <label class="radio"><input type="radio" name="schPick" value="order"> the next video in your <b>Queue</b> (top first)</label>
+                <label class="radio"><input type="radio" name="schPick" value="newest"> the video that run just made</label>
+              </div>
+              <div id="schPub" style="display:grid;gap:6px;padding-left:24px">
+                <span class="hint">On YouTube</span>
+                <label class="radio"><input type="radio" name="schPub" value="private"> Keep private (you publish it yourself)</label>
+                <label class="radio"><input type="radio" name="schPub" value="at"> Go public at <input type="time" id="schPubTime" aria-label="Publish time">
+                  <span class="hint">next time at least 2 h after it's made, so you can review it</span></label>
+              </div>
+            </div>
+            <div class="hint" id="schStatus"></div>
+            <div class="inline"><button class="btn sm" type="button" id="schDry">Dry run: what would happen now?</button></div>
+            <pre class="schlog" id="schLog" hidden></pre>
+            <div class="hint">Runs as a macOS launchd job, even when the studio is closed. If the Mac is asleep at that time, it runs when it wakes. Keep Ollama running. You get a notification if a run fails. Saving installs or removes <code>~/Library/LaunchAgents/com.shortsmachine.auto.plist</code>.</div>
+          </fieldset>
+        </form>
+        <div class="spreview">
+          <div class="inline"><button class="btn" id="sPreview">Save &amp; preview</button></div>
+          <img id="previewImg" alt="Preview frame using the saved settings">
+          <div class="hint">Preview draws a real frame from your latest episode. New settings apply to new renders; use <b>Save &amp; re-render</b> on a video to update it.</div>
+        </div>
+      </div>
+    </section>
+    <section id="connectors" hidden>
+      <div class="conn">
+        <h2 class="ch">AI models</h2>
+        <p class="hint ch-sub">Choose the model that researches questions and writes scripts. Scoring ideas always runs on this Mac, so it stays free. If the chosen model fails during a run, the local model takes over.</p>
+        <div class="cgrid">
+          <div class="ccard" data-ai="local">
+            <div class="chead"><b>On this Mac</b><span class="cstate" id="localState"></span></div>
+            <span class="hint">Ollama · free, private, works offline</span>
+            <label>Model<select id="llmSel"></select></label>
+            <label class="radio use"><input type="radio" name="aiPick" value="local"> Use for writing</label>
+          </div>
+          <div class="ccard" data-ai="gemini">
+            <div class="chead"><b>Gemini</b><span class="cstate" id="gemState"></span></div>
+            <span class="hint">Google · researches with Google Search or by reading pages. Free tier with daily limits. <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Get a key ↗</a></span>
+            <span class="hint" id="gemStatus"></span>
+            <div class="inline"><input type="password" id="gemKey" placeholder="Paste a Gemini API key" autocomplete="off" aria-label="Gemini API key" style="flex:1;min-width:0">
+              <button class="btn sm" type="button" id="gemSave">Save key</button><button class="btn sm danger" type="button" id="gemRm" hidden>Remove</button></div>
+            <label>Model<select id="gemSel"></select></label>
+            <span class="hint" id="gemToday"></span>
+            <label class="radio use"><input type="radio" name="aiPick" value="gemini"> Use for writing</label>
+          </div>
+          <div class="ccard" data-ai="claude">
+            <div class="chead"><b>Claude</b><span class="cstate" id="clState"></span></div>
+            <span class="hint">Anthropic · researches with web search and cites its sources. Paid per use. <a href="https://platform.claude.com/settings/keys" target="_blank" rel="noopener">Get a key ↗</a></span>
+            <span class="hint" id="clStatus"></span>
+            <div class="inline"><input type="password" id="clKey" placeholder="Paste an Anthropic API key (sk-ant-…)" autocomplete="off" aria-label="Anthropic API key" style="flex:1;min-width:0">
+              <button class="btn sm" type="button" id="clSave">Save key</button><button class="btn sm danger" type="button" id="clRm" hidden>Remove</button></div>
+            <label>Model<select id="clSel"></select></label>
+            <span class="hint">Opus is the most capable; Sonnet is half the price; Haiku is cheapest.</span>
+            <label class="radio use"><input type="radio" name="aiPick" value="claude"> Use for writing</label>
+          </div>
+        </div>
+        <span class="hint">Keys from your shell (<code>GEMINI_API_KEY</code>, <code>ANTHROPIC_API_KEY</code>) are used first. Saved keys stay in <code>secrets/</code> on this computer, which scheduled runs need.</span>
+
+        <h2 class="ch">Publishing</h2>
+        <p class="hint ch-sub">Tick where your videos go. <b>Publish</b>, <b>Upload pending</b> and scheduled runs post to every ticked platform at once. If one fails, publishing again retries only that one.</p>
+        <div class="cgrid">
+          <div class="ccard">
+            <div class="chead"><b>YouTube</b><span class="cstate" id="ytState"></span></div>
+            <label class="check use"><input type="checkbox" data-pub="youtube"> Publish here <span class="hint" style="margin:0">· uploads private, or public at the time set in Automation</span></label>
             <div class="hint" id="ytStatus"></div>
             <details id="ytHelp"><summary class="hint" style="cursor:pointer">How to get the client file (about 5 minutes, once)</summary>
               <ol class="hint" style="margin:8px 0 0;padding-left:18px;display:grid;gap:4px">
@@ -375,42 +484,43 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
               <button class="btn sm danger" type="button" id="ytOff" hidden>Disconnect</button>
             </div>
             <span class="hint">Saved in <code>secrets/</code> on this computer only. Disconnect revokes the app's access at Google.</span>
-          </fieldset>
-          <fieldset class="scard"><legend>Automation</legend>
-            <label class="check"><input type="checkbox" id="schOn"> Make videos automatically on a schedule</label>
-            <div id="schBody" style="display:grid;gap:12px">
-              <div><div class="hint" style="margin-bottom:6px">Times · up to 4 a day</div>
-                <div class="inline" id="schTimes"></div></div>
-              <div><div class="hint" style="margin-bottom:6px">Days</div>
-                <div class="seg" id="schDays" role="group" aria-label="Days of the week"></div></div>
-              <div class="inline">
-                <label style="flex:1;min-width:min(220px,100%)">If the ideabank is empty, find an idea from
-                  <input id="schArg" placeholder="A topic or a link. Empty = a random Wikipedia page"></label>
-              </div>
-              <label class="check"><input type="checkbox" id="schUp"> Upload to YouTube after making</label>
-              <div id="schPick" style="display:grid;gap:6px;padding-left:24px">
-                <span class="hint">Each run publishes</span>
-                <label class="radio"><input type="radio" name="schPick" value="order"> the next video in your <b>Queue</b> (top first)</label>
-                <label class="radio"><input type="radio" name="schPick" value="newest"> the video that run just made</label>
-              </div>
-              <div id="schPub" style="display:grid;gap:6px;padding-left:24px">
-                <label class="radio"><input type="radio" name="schPub" value="private"> Keep private (you publish it yourself)</label>
-                <label class="radio"><input type="radio" name="schPub" value="at"> Go public at <input type="time" id="schPubTime" aria-label="Publish time">
-                  <span class="hint">next time at least 2 h after it's made, so you can review it</span></label>
-              </div>
-            </div>
-            <div class="hint" id="schStatus"></div>
-            <div class="inline"><button class="btn sm" type="button" id="schDry">Dry run: what would happen now?</button></div>
-            <pre class="schlog" id="schLog" hidden></pre>
-            <div class="hint">Runs as a macOS launchd job, even when the studio is closed. If the Mac is asleep at that time, it runs when it wakes. Keep Ollama running. You get a notification if a run fails. Saving installs or removes <code>~/Library/LaunchAgents/com.shortsmachine.auto.plist</code>.</div>
-          </fieldset>
-        </form>
-        <div class="spreview">
-          <div class="inline"><button class="btn primary" id="sSave">Save</button><button class="btn" id="sPreview">Save &amp; preview</button></div>
-          <div class="hint" id="sState"></div>
-          <img id="previewImg" alt="Preview frame using the saved settings">
-          <div class="hint">Preview draws a real frame from your latest episode. New settings apply to new renders; use <b>Save &amp; re-render</b> on a video to update it.</div>
+          </div>
+          <div class="ccard">
+            <div class="chead"><b>Facebook &amp; Instagram</b><span class="cstate" id="metaState"></span></div>
+            <label class="check use"><input type="checkbox" data-pub="facebook"> Publish to the Facebook Page <span class="hint" style="margin:0">· as a public Reel (90 s max)</span></label>
+            <label class="check use"><input type="checkbox" data-pub="instagram"> Publish to Instagram <span class="hint" style="margin:0">· as a public Reel</span></label>
+            <div class="hint" id="metaStatus"></div>
+            <details id="metaHelp"><summary class="hint" style="cursor:pointer">How to connect (about 10 minutes, once)</summary>
+              <ol class="hint" style="margin:8px 0 0;padding-left:18px;display:grid;gap:4px">
+                <li>For Instagram: make it a <b>professional</b> account (Business or Creator) and link it to your Facebook Page.</li>
+                <li><a href="https://developers.facebook.com/apps/creation/" target="_blank" rel="noopener">Create a Meta app ↗</a> (type <b>Business</b>). As its admin you can use it with your own Page in development mode.</li>
+                <li>In the <a href="https://developers.facebook.com/tools/explorer/" target="_blank" rel="noopener">Graph API Explorer ↗</a>, pick your app and add the permissions <code>pages_show_list</code>, <code>pages_read_engagement</code>, <code>pages_manage_posts</code>, <code>instagram_basic</code>, <code>instagram_content_publish</code>. Click <b>Generate Access Token</b> and allow your Page.</li>
+                <li>Paste that token into the <a href="https://developers.facebook.com/tools/debug/accesstoken/" target="_blank" rel="noopener">Access Token Debugger ↗</a>, click <b>Extend Access Token</b>, and copy the long-lived token.</li>
+                <li>Paste it below. The studio finds your Page and its Instagram account and keeps a Page token that doesn't expire.</li>
+              </ol></details>
+            <div class="inline"><input type="password" id="metaKey" placeholder="Paste the long-lived token" autocomplete="off" aria-label="Meta access token" style="flex:1;min-width:0">
+              <button class="btn sm primary" type="button" id="metaSave">Connect</button><button class="btn sm danger" type="button" id="metaOff" hidden>Disconnect</button></div>
+          </div>
+          <div class="ccard">
+            <div class="chead"><b>TikTok</b><span class="cstate" id="ttState"></span></div>
+            <label class="check use"><input type="checkbox" data-pub="tiktok"> Send to my TikTok <span class="hint" style="margin:0">· lands in your TikTok inbox; you add the caption and post it in the app</span></label>
+            <div class="hint" id="ttStatus"></div>
+            <details id="ttHelp"><summary class="hint" style="cursor:pointer">How to connect (about 10 minutes, once)</summary>
+              <ol class="hint" style="margin:8px 0 0;padding-left:18px;display:grid;gap:4px">
+                <li>On <a href="https://developers.tiktok.com/apps/" target="_blank" rel="noopener">TikTok for Developers ↗</a>, create an app with the <b>Desktop</b> platform.</li>
+                <li>Add the products <b>Login Kit</b> and <b>Content Posting API</b>, with the scopes <code>user.info.basic</code> and <code>video.upload</code>.</li>
+                <li>Under Login Kit, add the redirect URI <code>http://127.0.0.1:8766/callback/</code> exactly.</li>
+                <li>Use the app's <b>Sandbox</b> and add your TikTok account as a target user, or submit the app for review.</li>
+                <li>Paste the Client key and Client secret below, then click <b>Connect TikTok</b>.</li>
+              </ol>
+              <p class="hint">Posting straight to your profile needs TikTok to audit the app; until then TikTok only allows private posts on a private account, so the studio sends videos to your inbox instead.</p></details>
+            <div class="inline"><input id="ttKey" placeholder="Client key" autocomplete="off" aria-label="TikTok client key" style="flex:1;min-width:120px">
+              <input type="password" id="ttSecret" placeholder="Client secret" autocomplete="off" aria-label="TikTok client secret" style="flex:1;min-width:120px">
+              <button class="btn sm" type="button" id="ttSave">Save app</button></div>
+            <div class="inline"><button class="btn sm primary" type="button" id="ttConnect" hidden>Connect TikTok</button><button class="btn sm danger" type="button" id="ttOff" hidden>Disconnect</button></div>
+          </div>
         </div>
+        <span class="hint">Everything here is saved in <code>secrets/</code> on this computer only. Disconnect removes it (and revokes access where the platform allows).</span>
       </div>
     </section>
     <section id="library" hidden>
@@ -497,12 +607,13 @@ function termLine(text, cls) {
   if (atBottom) out.scrollTop = out.scrollHeight;
 }
 
+let channelName = "Shorts Machine";
 async function loadPages() {
   const j = await (await fetch("/api/pages")).json();
   pages = j.pages;
   $("#brand").innerHTML = esc(j.brand.channel.toUpperCase()) + "<small>studio</small>";
   brandOutro = j.brand.outro_line || "";
-  document.title = `${j.brand.channel} studio · Shorts Machine`;
+  channelName = j.brand.channel;
   $(".logo").innerHTML = j.brand.logo ? `<img src="/brand/logo.png?t=${Date.now()}" alt="" style="width:26px;height:26px;object-fit:contain">` : esc(j.brand.logo_text || "?");
   document.documentElement.style.setProperty("--accent", j.brand.colors.accent);
   const n = s => pages.filter(p => p.status === s).length;
@@ -574,7 +685,7 @@ function renderPublish() {
         </div>
         <div class="qbtns">
           <button class="btn" data-id="${p.pageid}">Open</button>
-          <button class="btn primary" data-upload="${p.ep}">Upload now</button>
+          <button class="btn primary" data-upload="${p.ep}">Publish now</button>
         </div>
       </div>`).join("")}</div>`;
   document.querySelectorAll("#pList video[data-src]").forEach(v => lazy.observe(v));
@@ -715,6 +826,11 @@ function renderLog() {
   renderSelbar();
 }
 
+const PLATFORM_NAMES = {facebook: "Facebook", instagram: "Instagram", tiktok: "TikTok"};
+function postLinks(p) {
+  let posts = {}; try { posts = JSON.parse(p.posts || "{}"); } catch (e) {}
+  return Object.entries(posts).map(([k, v]) => v.url ? ` · <a href="${esc(v.url)}" target="_blank" rel="noopener">${PLATFORM_NAMES[k] || k} ↗</a>` : ` · ${PLATFORM_NAMES[k] || k}: ${esc(v.note || "sent")}`).join("");
+}
 function openDetail(id) {
   const p = pages.find(x => x.pageid == id);
   const yt = p.video_id ? `https://youtube.com/shorts/${p.video_id}` : null;
@@ -723,9 +839,9 @@ function openDetail(id) {
     <div class="info">
       <div class="ep">${p.ep ? "EP " + String(p.ep).padStart(3, "0") : ""} &nbsp;<span class="chip s-${p.status}">${statusLabel(p.status)}</span></div>
       <h2>${esc(p.yt_title || p.title)}</h2>
-      <div class="sub">${esc(p.title)} · <a href="${esc(p.url)}" target="_blank" rel="noopener">${originName(p)} ↗</a>${yt ? ` · <a href="${yt}" target="_blank" rel="noopener">YouTube ↗</a>` : ""}${p.gemini ? ` · Gemini: ${p.gemini.requests} requests, ${kTokens(p.gemini.tokens)} tokens` : ""}</div>
+      <div class="sub">${esc(p.title)} · <a href="${esc(p.url)}" target="_blank" rel="noopener">${originName(p)} ↗</a>${yt ? ` · <a href="${yt}" target="_blank" rel="noopener">YouTube ↗</a>` : ""}${postLinks(p)}${p.ai ? ` · AI: ${p.ai.requests} requests, ${kTokens(p.ai.tokens)} tokens` : ""}</div>
       <div class="btns">
-        ${p.status === "rendered" ? `<button class="btn primary" data-upload="${p.ep}">Upload this video</button>` : ""}
+        ${p.status === "rendered" ? `<button class="btn primary" data-upload="${p.ep}">Publish</button>` : ""}
         ${p.status !== "uploaded" ? `<button class="btn" data-remake="${esc(makeArg(p))}">Remake</button>` : ""}
         ${["rendered", "queued", "failed"].includes(p.status) ? `<button class="btn danger" data-skip="${p.pageid}">Skip (don't upload)</button>` : ""}
         ${p.ep && p.status !== "uploaded" ? `<span id="delVidBox"><button class="btn danger" data-delvid="${p.pageid}">Delete video</button></span>` : ""}
@@ -791,7 +907,7 @@ async function poll() {
     $("#stop").disabled = !running;
     if (was && !running) {
       loadPages(); if (!$("#library").hidden) loadLibrary();
-      if (S && !$("#settings").hidden) { const keep = collect(); loadSettings().then(() => Object.assign(S, keep)); }  // e.g. YouTube just connected
+      if (S && (!$("#settings").hidden || !$("#connectors").hidden)) reloadSettings();  // e.g. YouTube just connected
     }
   } catch (e) {
     $("#jobLabel").textContent = "server not reachable";
@@ -848,12 +964,7 @@ $("#libList").addEventListener("click", async e => {
 });
 document.addEventListener("click", async e => {
   const t = e.target.closest("button"); if (!t) return;
-  if (t.dataset.tab) {
-    document.querySelectorAll(".tab").forEach(b => b.classList.toggle("on", b === t));
-    ["episodes", "queue", "publish", "library", "log", "settings"].forEach(id => $("#" + id).hidden = t.dataset.tab !== id);
-    if (t.dataset.tab === "settings" && !S) loadSettings();
-    if (t.dataset.tab === "library") loadLibrary();
-  } else if (t.dataset.f) { statusFilter = t.dataset.f; renderLog(); }
+  if (t.dataset.f) { statusFilter = t.dataset.f; renderLog(); }
   else if (t.id === "delSel") { confirming = true; renderSelbar(); }
   else if (t.id === "delNo") { confirming = false; renderSelbar(); }
   else if (t.id === "clrSel") { selected.clear(); confirming = false; renderLog(); }
@@ -869,7 +980,7 @@ document.addEventListener("click", async e => {
     renderLog();
   }
   else if (t.dataset.ef) { epFilter = t.dataset.ef; renderEpisodes(); }
-  else if (t.dataset.id) openDetail(t.dataset.id);
+  else if (t.dataset.id) location.hash = "#/video/" + t.dataset.id;
   else if (t.dataset.cmd) exec(t.dataset.cmd);
   else if (t.dataset.upload) { dlg.close(); exec(`upload --ep ${+t.dataset.upload}` + publishArg()); }
   else if (t.dataset.make) exec(`run ${quote(t.dataset.make)}`);
@@ -961,7 +1072,36 @@ $("#clearTerm").onclick = async () => {
 };
 $("#stop").onclick = () => post("/api/stop");
 $("#prompt").onsubmit = e => { e.preventDefault(); const c = $("#cmd").value.trim(); if (c) exec(c.replace(/^(\.\/)?rw\s+/, "")).then(ok => ok && ($("#cmd").value = "")); };
-dlg.addEventListener("close", () => { const v = dlg.querySelector("video"); if (v) v.pause(); });
+dlg.addEventListener("close", () => {
+  const v = dlg.querySelector("video"); if (v) v.pause();
+  if (location.hash.startsWith("#/video/")) history.replaceState(null, "", tabHash);  // closing a video goes back to its tab
+});
+
+// ---------------- routes: #/episodes, #/ideabank, #/queue, #/library, #/log, #/connectors, #/settings/<group>, #/video/<pageid> ----------------
+const ROUTES = {episodes: "episodes", ideabank: "queue", queue: "publish", library: "library", log: "log", connectors: "connectors", settings: "settings"};
+let tabHash = "#/episodes";
+function route() {
+  const [name, arg] = location.hash.replace(/^#\/?/, "").split("/");
+  if (name === "video") {
+    if (pages.some(p => p.pageid == arg)) openDetail(arg); else history.replaceState(null, "", tabHash);
+    return;
+  }
+  if (dlg.open) dlg.close();
+  const r = ROUTES[name] ? name : "episodes";
+  tabHash = location.hash && ROUTES[name] ? location.hash : "#/episodes";
+  document.querySelectorAll(".tab").forEach(a => { a.classList.toggle("on", a.dataset.route === r); a.toggleAttribute("aria-current", a.dataset.route === r); });
+  Object.entries(ROUTES).forEach(([k, id]) => $("#" + id).hidden = k !== r);
+  if ((r === "settings" || r === "connectors") && !S) loadSettings();
+  if (r === "settings") {
+    const g = ["brand", "voice", "content", "automation"].includes(arg) ? arg : "brand";
+    document.querySelectorAll("#sform [data-group]").forEach(f => f.hidden = f.dataset.group !== g);
+    document.querySelectorAll(".snav [data-group]").forEach(a => { a.classList.toggle("on", a.dataset.group === g); a.toggleAttribute("aria-current", a.dataset.group === g); });
+    $(".settings").classList.toggle("nopreview", g !== "brand");
+  }
+  if (r === "library") loadLibrary();
+  document.title = `${$(".tab.on").textContent.replace(/ \(\d+\)$/, "")} · ${channelName} studio`;
+}
+window.addEventListener("hashchange", route);
 
 
 // ---------------- microphone recording (narration and voice samples) ----------------
@@ -1017,24 +1157,7 @@ async function loadSettings() {
   sampleState(j.voice_sample);
   if (!j.clone_ready) document.querySelector("[name=vEngine][value=clone]").disabled = true;
   syncEngine();
-  $("#llmSel").innerHTML = [...new Set([S.llm, ...j.models])].map(m => `<option>${esc(m)}</option>`).join("");
-  F("llm").value = S.llm;
-  $("#ytStatus").innerHTML = {none: "Not set up: add your OAuth client file (steps below).",
-    client: "Client file added. Click <b>Connect YouTube</b> and sign in with the account that owns your channel.",
-    connected: `<b style="color:var(--ok)">Connected.</b> Uploads go to the channel you chose when signing in.`}[j.youtube];
-  $("#ytHelp").open = j.youtube === "none";
-  $("#ytConnect").hidden = j.youtube === "none"; $("#ytConnect").textContent = j.youtube === "connected" ? "Reconnect" : "Connect YouTube";
-  $("#ytOff").hidden = j.youtube !== "connected";
-  $("#ytFile").parentElement.firstChild.textContent = j.youtube === "none" ? "Add client file" : "Replace client file";
-  const g = j.gemini, gm = S.gemini_model || "gemini-flash-latest";
-  $("#gemSel").innerHTML = [...new Set([gm, ...g.models])].map(m => `<option>${esc(m)}</option>`).join("");
-  F("gemini_model").value = gm; $("#gemSel").disabled = !g.key;
-  $("#gemStatus").textContent = g.key === "shell" ? "· using GEMINI_API_KEY from your shell" : g.key === "saved" ? "· using your saved key" : "· off (no key)";
-  if (g.error) $("#gemStatus").textContent += ` · ${g.error}`;
-  $("#gemRm").hidden = g.key !== "saved";
-  const today = Object.entries(g.today || {});
-  $("#gemToday").innerHTML = (today.length ? "Used today: " + today.map(([m, u]) => `${esc(m)} ${u.requests} requests, ${kTokens(u.tokens)} tokens`).join(" · ")
-    : "Nothing used today.") + ` Days follow Pacific time, when Google resets the free quota. The API doesn't report what's left: see <a href="https://ai.dev/rate-limit" target="_blank" rel="noopener">your limits ↗</a>.`;
+  renderConnectors(j);
   $("#colorRows").innerHTML = Object.entries(COLOR_LABELS).map(([k, label]) => `<label>${label}<span class="crow">
       <input type="color" data-color="${k}" value="${S.colors[k]}" aria-label="${label} colour picker"><input data-hex="${k}" value="${S.colors[k]}" maxlength="7" aria-label="${label} hex"></span></label>`).join("");
   $("#musicState").textContent = j.music ? "Music track uploaded" : "No music (voice only)";
@@ -1079,7 +1202,8 @@ function collect() {
   S = {...S, channel: F("channel").value, tagline: F("tagline").value, outro_line: F("outro_line").value, logo_text: F("logo_text").value,
     hashtags: F("hashtags").value.split(",").map(x => x.trim()).filter(Boolean), voice: F("voice").value, voice_speed: +F("voice_speed").value,
     music_volume: +F("music_volume").value, voice_engine: document.querySelector("[name=vEngine]:checked")?.value || "kokoro",
-    clone_consent: $("#cloneConsent").checked, min_score: +F("min_score").value, max_seconds: +F("max_seconds").value, llm: F("llm").value, gemini_model: F("gemini_model").value,
+    clone_consent: $("#cloneConsent").checked, min_score: +F("min_score").value, max_seconds: +F("max_seconds").value, llm: $("#llmSel").value, gemini_model: $("#gemSel").value, claude_model: $("#clSel").value,
+    ai: document.querySelector("[name=aiPick]:checked")?.value || "local", publish_to: [...document.querySelectorAll("[data-pub]:checked")].map(c => c.dataset.pub),
     fonts: {...S.fonts, display_weight: F("display_weight").value}};
   readSchedule();
   return S;
@@ -1118,20 +1242,90 @@ $("#sform").addEventListener("click", async e => {
     $("#fontPick").hidden = true; renderFontRoles(); setDirty(true);
   }
   else if (t.id === "hear") { if (await saveSettings() && await exec("voicetest")) { await waitJob(); const a = $("#voiceAudio"); a.hidden = false; a.src = "/data/voice_preview.wav?t=" + Date.now(); a.play(); } }
-  else if (t.id === "gemSave" || t.id === "gemRm") {
-    if (t.id === "gemSave" && !$("#gemKey").value.trim()) return termLine("! paste a key first", "err");
-    if (await post("/api/gemini_key", {key: t.id === "gemSave" ? $("#gemKey").value : ""})) { $("#gemKey").value = ""; const keep = collect(); await loadSettings(); Object.assign(S, keep); }
-  }
   else if (t.id === "musicRm" || t.id === "logoRm") { await post("/api/remove_brand", {kind: t.id === "musicRm" ? "music" : "logo"}); const keep = collect(); await loadSettings(); Object.assign(S, keep); }
 });
 let fqTimer; $("#fq").oninput = () => { clearTimeout(fqTimer); fqTimer = setTimeout(searchFonts, 250); };
 $("#fcat").onchange = searchFonts;
+
+// ---- connectors: AI models and publishing (saved as soon as you change them) ----
+async function reloadSettings() { const keep = collect(); await loadSettings(); Object.assign(S, keep); renderConnectors(lastSettings); }
+let lastSettings = null;
+const STATE = (el, text, cls) => { el.textContent = text; el.className = "cstate" + (cls ? " " + cls : ""); };
+function renderConnectors(j) {
+  lastSettings = j;
+  const ai = S.ai || j.ai, keyed = {local: j.models.length > 0, gemini: !!j.gemini.key, claude: !!j.claude.key};
+  $("#llmSel").innerHTML = [...new Set([S.llm, ...j.models])].map(m => `<option>${esc(m)}</option>`).join(""); $("#llmSel").value = S.llm;
+  STATE($("#localState"), j.models.length ? "Ready" : "Ollama not running", j.models.length ? "ok" : "warn");
+  const g = j.gemini, gm = S.gemini_model || "gemini-flash-latest";
+  $("#gemSel").innerHTML = [...new Set([gm, ...g.models])].map(m => `<option>${esc(m)}</option>`).join(""); $("#gemSel").value = gm; $("#gemSel").disabled = !g.key;
+  STATE($("#gemState"), g.key ? "Key added" : "No key", g.key ? "ok" : "");
+  $("#gemStatus").textContent = g.key === "shell" ? "Using GEMINI_API_KEY from your shell." : g.key === "saved" ? "Using your saved key." : "";
+  if (g.error) $("#gemStatus").textContent += ` ${g.error}`;
+  $("#gemRm").hidden = g.key !== "saved";
+  const today = Object.entries(g.today || {});
+  $("#gemToday").innerHTML = (today.length ? "Used today: " + today.map(([m, u]) => `${esc(m)} ${u.requests} requests, ${kTokens(u.tokens)} tokens`).join(" · ") + "."
+    : "Nothing used today.") + ` Days follow Pacific time, when Google resets the free quota. <a href="https://ai.dev/rate-limit" target="_blank" rel="noopener">Your limits ↗</a>`;
+  const c = j.claude, cm = S.claude_model || c.models[0];
+  $("#clSel").innerHTML = [...new Set([cm, ...c.models])].map(m => `<option>${esc(m)}</option>`).join(""); $("#clSel").value = cm; $("#clSel").disabled = !c.key;
+  STATE($("#clState"), c.key ? "Key added" : "No key", c.key ? "ok" : "");
+  $("#clStatus").textContent = c.key === "shell" ? "Using ANTHROPIC_API_KEY from your shell." : c.key === "saved" ? "Using your saved key." : "";
+  $("#clRm").hidden = c.key !== "saved";
+  document.querySelectorAll("[name=aiPick]").forEach(r => { r.disabled = !keyed[r.value] && r.value !== "local"; r.checked = r.value === (keyed[ai] ? ai : "local"); });
+  document.querySelectorAll("[data-ai]").forEach(card => card.classList.toggle("chosen", card.dataset.ai === (keyed[ai] ? ai : "local")));
+
+  const pub = j.publish, on = S.publish_to || j.publish_to;
+  document.querySelectorAll("[data-pub]").forEach(cb => { cb.checked = on.includes(cb.dataset.pub); cb.disabled = pub[cb.dataset.pub] !== "connected" && !cb.checked; });
+  STATE($("#ytState"), {none: "Not set up", client: "Not connected", connected: "Connected"}[pub.youtube], {client: "warn", connected: "ok"}[pub.youtube]);
+  $("#ytStatus").innerHTML = {none: "Add your OAuth client file (steps below).",
+    client: "Client file added. Click <b>Connect YouTube</b> and sign in with the account that owns your channel.",
+    connected: "Uploads go to the channel you chose when signing in."}[pub.youtube];
+  $("#ytHelp").open = pub.youtube === "none";
+  $("#ytConnect").hidden = pub.youtube === "none"; $("#ytConnect").textContent = pub.youtube === "connected" ? "Reconnect" : "Connect YouTube";
+  $("#ytOff").hidden = pub.youtube !== "connected";
+  $("#ytFile").parentElement.firstChild.textContent = pub.youtube === "none" ? "Add client file" : "Replace client file";
+  const meta = pub.facebook === "connected";
+  STATE($("#metaState"), meta ? "Connected" : "Not set up", meta ? "ok" : "");
+  $("#metaStatus").innerHTML = meta ? `Page <b>${esc(pub.meta.page_name)}</b>` + (pub.instagram === "connected" ? ` · Instagram <b>@${esc(pub.meta.ig_user)}</b>`
+    : ". No Instagram account is linked to this Page: link a professional Instagram account to it, then connect again.") : "";
+  $("#metaHelp").open = !meta; $("#metaOff").hidden = !meta; $("#metaSave").textContent = meta ? "Replace token" : "Connect";
+  STATE($("#ttState"), {none: "Not set up", client: "Not connected", connected: "Connected"}[pub.tiktok], {client: "warn", connected: "ok"}[pub.tiktok]);
+  $("#ttStatus").innerHTML = {none: "", client: "App saved. Click <b>Connect TikTok</b> and allow access.", connected: `Connected${pub.tiktok_user ? ` as <b>${esc(pub.tiktok_user)}</b>` : ""}.`}[pub.tiktok];
+  $("#ttHelp").open = pub.tiktok === "none"; $("#ttConnect").hidden = pub.tiktok === "none"; $("#ttOff").hidden = pub.tiktok !== "connected";
+  $("#ttConnect").textContent = pub.tiktok === "connected" ? "Reconnect" : "Connect TikTok";
+}
+$("#connectors").addEventListener("change", async e => {
+  if (!e.target.matches("[name=aiPick], [data-pub], #llmSel, #gemSel, #clSel")) return;
+  if (await saveSettings()) { renderConnectors(lastSettings); termLine("saved", "good"); }
+});
+$("#connectors").addEventListener("click", async e => {
+  const t = e.target.closest("button"); if (!t) return;
+  const ok = async (url, body, msg) => { if (await post(url, body)) { if (msg) termLine(msg, "good"); await reloadSettings(); return true; } };
+  if (t.id === "gemSave" || t.id === "clSave") {
+    const box = $(t.id === "gemSave" ? "#gemKey" : "#clKey");
+    if (!box.value.trim()) return termLine("! paste a key first", "err");
+    if (await ok(t.id === "gemSave" ? "/api/gemini_key" : "/api/claude_key", {key: box.value}, "key saved")) box.value = "";
+  }
+  else if (t.id === "gemRm") ok("/api/gemini_key", {key: ""}, "Gemini key removed");
+  else if (t.id === "clRm") ok("/api/claude_key", {key: ""}, "Claude key removed");
+  else if (t.id === "ytConnect") exec("connect").then(r => r && termLine("a browser window opens for Google sign-in; come back here when it says you can close it"));
+  else if (t.id === "ytOff") ok("/api/youtube_disconnect", {}, "YouTube disconnected");
+  else if (t.id === "metaSave") {
+    if (!$("#metaKey").value.trim()) return termLine("! paste the token first", "err");
+    t.disabled = true; t.textContent = "Checking…";
+    if (await ok("/api/meta_token", {token: $("#metaKey").value}, "Facebook connected")) $("#metaKey").value = "";
+    t.disabled = false; renderConnectors(lastSettings);
+  }
+  else if (t.id === "metaOff") { document.querySelectorAll("[data-pub=facebook], [data-pub=instagram]").forEach(c => c.checked = false); await saveSettings(); ok("/api/meta_disconnect", {}, "Facebook & Instagram disconnected"); }
+  else if (t.id === "ttSave") {
+    if (await ok("/api/tiktok_app", {key: $("#ttKey").value, secret: $("#ttSecret").value}, "TikTok app saved")) { $("#ttKey").value = $("#ttSecret").value = ""; }
+  }
+  else if (t.id === "ttConnect") exec("connect tiktok").then(r => r && termLine("a browser window opens for TikTok; come back here when it says you can close the tab"));
+  else if (t.id === "ttOff") { $("[data-pub=tiktok]").checked = false; await saveSettings(); ok("/api/tiktok_disconnect", {}, "TikTok disconnected"); }
+});
 $("#ytFile").onchange = async e => {
   const f = e.target.files[0]; e.target.value = ""; if (!f) return;
-  if (await post("/api/youtube_client", {json: await f.text()})) { termLine("YouTube client file saved", "good"); const keep = collect(); await loadSettings(); Object.assign(S, keep); }
+  if (await post("/api/youtube_client", {json: await f.text()})) { termLine("YouTube client file saved", "good"); reloadSettings(); }
 };
-$("#ytConnect").onclick = () => exec("connect").then(ok => ok && termLine("a browser window opens for Google sign-in; come back here when it says you can close it"));
-$("#ytOff").onclick = async () => { if (await post("/api/youtube_disconnect")) { termLine("YouTube disconnected", "good"); const keep = collect(); await loadSettings(); Object.assign(S, keep); } };
 $("#musicFile").onchange = e => e.target.files[0] && uploadBrand("music", e.target.files[0]);
 $("#logoFile").onchange = e => e.target.files[0] && uploadBrand("logo", e.target.files[0]);
 
@@ -1217,7 +1411,7 @@ async function refreshScheduleStatus() {
 $("#sSave").onclick = saveSettings;
 $("#sPreview").onclick = async () => { if (await saveSettings() && await exec("preview")) { await waitJob(); $("#previewImg").src = "/data/preview.png?t=" + Date.now(); } };
 
-loadPages(); poll();
+loadPages().then(route); poll();
 </script>
 </body>
 </html>

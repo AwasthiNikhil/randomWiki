@@ -12,15 +12,15 @@ In the studio's **Make a video** box, or `./rw run "…"` (`./rw add "…"` save
 | a link to a list: a feed, a site, a subreddit, a Wikipedia category or list | its most interesting items go into the ideabank |
 | nothing | the next idea in the ideabank, else a random interesting Wikipedia page |
 
-## Gemini (optional)
-Everything runs locally by default. With a Gemini API key (free at [aistudio.google.com/apikey](https://aistudio.google.com/apikey)), Gemini does the thinking instead:
-- **Research goes beyond Wikipedia.** Gemini uses Google Search if your key's plan includes it. Otherwise it picks reliable pages on any site (encyclopedias, official docs, universities), reads them itself, and writes notes from what it read. Every page it read is credited. If it can't read enough, research falls back to Wikipedia rather than script from the model's memory.
-- **Visuals:** Gemini names the concrete things to show, and their Wikipedia articles supply the images.
-- **Writing:** scripts, fact-checks and image picks use Gemini. Scoring ideas in bulk stays on the local LLM to save quota. If Gemini fails (quota, busy), the local LLM takes over for the rest of that run.
+## AI models: local, Gemini or Claude
+Everything runs locally by default (Ollama). In the studio's **Connectors** tab you can add a Gemini key (free at [aistudio.google.com/apikey](https://aistudio.google.com/apikey)) or an Anthropic key for Claude ([platform.claude.com](https://platform.claude.com/settings/keys)), and choose which model writes:
+- **Research goes beyond Wikipedia.** Gemini uses Google Search if your key's plan includes it; otherwise it picks reliable pages on any site, reads them itself and writes notes from what it read. Claude uses Anthropic's web search and cites the pages it used. Every source is credited. If the model can't read enough, research falls back to Wikipedia rather than script from the model's memory.
+- **Visuals:** the model names the concrete things to show, and their Wikipedia articles supply the images.
+- **Writing:** scripts, fact-checks and image picks use the chosen model. Scoring ideas in bulk stays on the local LLM, which is free. If the cloud model fails (quota, busy), the local LLM takes over for the rest of that run.
 
-The key is yours, not the project's: `GEMINI_API_KEY` in your shell is used first. You can also paste one in **Settings → Content**, which saves it to `secrets/gemini_api_key` (git-ignored). Scheduled runs need the saved key, since they don't load your shell profile. The model is chosen there too; `gemini-flash-latest` follows Google's current Flash model.
+Keys are yours, not the project's: `GEMINI_API_KEY` / `ANTHROPIC_API_KEY` in your shell are used first. Keys pasted in Connectors are saved to `secrets/` (git-ignored); scheduled runs need those, since they don't load your shell profile. Pick the model there too: `gemini-flash-latest` follows Google's current Flash model; for Claude, Opus 5.5 (default), Sonnet 5.5 or Haiku 5.5. Claude requests let Anthropic answer with another model if one declines (server-side fallback).
 
-**Usage:** each video shows the Gemini requests and tokens it used (Episodes → open a video), and Settings shows today's totals per model. Days follow Pacific time, when Google resets the free quota. The API doesn't report how much quota is left; see [ai.dev/rate-limit](https://ai.dev/rate-limit).
+**Usage:** each video shows the AI requests and tokens it used (Episodes → open a video), and Connectors shows today's totals per model. Days follow Pacific time, when Google resets the free quota. The API doesn't report how much quota is left; see [ai.dev/rate-limit](https://ai.dev/rate-limit).
 
 
 1. **Pick:** random Wikipedia articles (stubs, lists and disambiguation pages are dropped, and a local LLM scores the rest out of 10), or ideas around a topic: the local LLM brainstorms questions and subjects, closer or further from the topic (degree 1–3). Each idea must name a real Wikipedia article and is checked against its intro, so ideas with a false premise are reworded or dropped. Ideas are researched properly when the video is made.
@@ -87,11 +87,14 @@ The voice model (about 300 MB) downloads on the first render.
 
 ## Studio (`./rw web`)
 A local web UI. It's bound to 127.0.0.1 and runs the same commands as the CLI, streaming their output into a terminal panel.
-- **Episodes:** previews you can search, filter and sort by potential. Open one to watch it, edit its title, narration and visuals, then **Save & re-render**. You can also upload it, skip it, delete it, or delete it from YouTube.
+- **Episodes:** previews you can search, filter and sort by potential. Open one to watch it, edit its title, narration and visuals, then **Save & re-render**. You can also publish it, skip it, delete it, or delete it from YouTube.
 - **Queue:** videos ready to upload, in the order they'll go out. Drag to reorder; videos you haven't placed are sorted by potential score. **Upload pending** and scheduled runs take from the top.
 - **Ideabank:** what gets made next. Drag to reorder, or **Find ideas** randomly, around a topic (with a degree-of-relation control), or in a link. Add your own with the sidebar's **Save idea**; several links, one per line, become one idea each.
 - **Page log:** every page seen, with reasons. Sortable and searchable, with multi-select delete. Uploaded pages are always kept.
-- **Settings:** channel, colours, Google Fonts, voice, music, LLM and thresholds, with a real-frame preview.
+- **Connectors:** the AI model that writes (local, Gemini, Claude) and where videos are published (YouTube, Facebook, Instagram, TikTok).
+- **Settings:** Brand (channel, colours, Google Fonts, with a real-frame preview), Voice & music, Videos (thresholds) and Automation.
+
+Every view has its own address, so refreshing or bookmarking keeps your place: `#/ideabank`, `#/settings/voice`, `#/video/<id>` and so on.
 
 ## CLI
 ```
@@ -120,12 +123,15 @@ Everything is editable in the studio's **Settings** tab and stored in `brand.jso
 - **Typography:** any Google Fonts family (searchable, with live samples). The font is downloaded into `brand/fonts/` and fetched again automatically on a fresh clone.
 - **Voice:** 25 Kokoro English voices and the speed
 - **Music:** upload an MP3 (`brand/music.mp3`) and set its volume under the voice
-- **Content:** local LLM, Gemini model and key, minimum interest score, maximum length
+- **Videos:** minimum interest score, maximum length
 
 New settings apply to new renders. Use **Save & re-render** on a video to update it.
 
-## YouTube upload (one-time)
-In the studio go to **Settings → YouTube**. It links each step straight to the right Google Cloud page:
+## Publishing: YouTube, Facebook, Instagram, TikTok
+In **Connectors**, tick every platform a video should go to. **Publish** on a video, **Upload pending** and scheduled runs post to all ticked platforms at once. Each platform that succeeds is remembered; if one fails, the video stays in the Queue and publishing again retries only that one. A video counts as uploaded once every ticked platform has it.
+
+### YouTube
+In **Connectors → YouTube**. It links each step straight to the right Google Cloud page:
 1. Create a Google Cloud project and enable the **YouTube Data API v3**.
 2. Set up **Google Auth Platform** (app name, your email, audience *External*), and under **Audience** click **Publish app**. In *Testing* mode the sign-in expires every 7 days.
 3. Create an OAuth client of type **Desktop app** and download its JSON.
@@ -137,8 +143,19 @@ Each user needs their own client: Google's quota (about 6 uploads a day) and its
 
 Videos upload **private**, or scheduled with `--publish-at`. Until the project passes YouTube's API audit, YouTube keeps API uploads private. Quota allows about 6 uploads a day (deleting costs 50 units). The first `unpublish` asks Google once for the extra "manage videos" permission.
 
+### Facebook & Instagram
+One Meta connection covers both. Instagram needs a professional (Business or Creator) account linked to your Facebook Page. In **Connectors → Facebook & Instagram**:
+1. Create a Meta app (type *Business*). As its admin you can use it with your own Page in development mode.
+2. In the Graph API Explorer, add `pages_show_list`, `pages_read_engagement`, `pages_manage_posts`, `instagram_basic`, `instagram_content_publish` and generate a token for your Page.
+3. Extend it in the Access Token Debugger and paste the long-lived token. The studio finds your Page and its Instagram account and keeps a Page token that doesn't expire.
+
+Videos post right away as public Reels with the title and description as the caption. Facebook Reels must be 90 s or shorter; longer videos skip Facebook with a message.
+
+### TikTok
+Create an app on TikTok for Developers (*Desktop* platform) with **Login Kit** and **Content Posting API** (`user.info.basic`, `video.upload`) and the redirect URI `http://127.0.0.1:8766/callback/`. Paste its client key and secret in **Connectors → TikTok** and **Connect TikTok** (or `./rw connect tiktok`). Videos are sent to your TikTok inbox; open TikTok to add the caption and post. Posting straight to a profile needs TikTok to audit the app; until then TikTok allows only private posts on a private account.
+
 ## Automation
-In the studio go to **Settings → Automation**: turn it on, pick up to 4 times a day and the weekdays, set a topic or link to find ideas in when the ideabank is empty (empty: random Wikipedia), and choose whether to upload. Each run publishes either the top of your **Queue** or the video it just made, kept private or public at a set time at least 2 hours later, so you can review it. **Save** installs a macOS launchd job (`~/Library/LaunchAgents/com.shortsmachine.auto.plist`); turning it off removes the job.
+In the studio go to **Settings → Automation**: turn it on, pick up to 4 times a day and the weekdays, set a topic or link to find ideas in when the ideabank is empty (empty: random Wikipedia), and choose whether to publish. Each run publishes either the top of your **Queue** or the video it just made, kept private or public at a set time at least 2 hours later, so you can review it. **Save** installs a macOS launchd job (`~/Library/LaunchAgents/com.shortsmachine.auto.plist`); turning it off removes the job.
 - It runs `./rw auto` even when the studio is closed. If the Mac is asleep at that time, it runs when it wakes. Keep Ollama running.
 - Output goes to `data/auto.log`, and the last runs are shown in Settings. A failed run shows a macOS notification. Overlapping runs are skipped.
 - `./rw auto --dry-run` shows what the next run would do. `./rw schedule` applies the `brand.json` schedule from the command line.
@@ -158,7 +175,7 @@ In the studio go to **Settings → Automation**: turn it on, pick up to 4 times 
 | `work/<pageid>/` | images, voice, `meta.json` with script, title, description and credits (git-ignored) |
 | `out/NNN-slug.mp4` | finished videos (git-ignored) |
 | `library/` | videos you downloaded as references or clips, each with a `.json` of its source (git-ignored) |
-| `secrets/` | OAuth files (git-ignored) |
+| `secrets/` | API keys, OAuth files and platform tokens (git-ignored) |
 
 ## Licences of what gets used
 Wikipedia text is CC BY-SA 4.0. Images come from Wikimedia Commons and Openverse (CC/public domain), NASA (public domain) and The Met (CC0), and each one is credited in the YouTube description, along with the text sources. Fonts come from Google Fonts (SIL OFL or Apache, with the licence saved next to each font). The Kokoro voice model is Apache-2.0.

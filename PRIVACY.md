@@ -12,6 +12,10 @@ Shorts Machine is a personal, self-hosted tool that turns Wikipedia articles int
 
 **Optional Gemini API.** If the owner adds their own Gemini API key, the app sends Google's Gemini API the topic or text being made into a video, research notes and draft narration, to research and write the video. This uses the owner's own key under Google's Gemini API terms. Without a key, nothing is sent to Gemini.
 
+**Optional Claude API.** If the owner adds their own Anthropic API key and chooses Claude, the same material is sent to Anthropic's Claude API instead, which may search the web to research it. This uses the owner's own key under Anthropic's API terms.
+
+**Optional Facebook, Instagram and TikTok publishing.** If the owner connects them, finished videos with their title and description are uploaded to the owner's own Facebook Page and Instagram account (Meta Graph API) or sent to the owner's TikTok inbox (TikTok Content Posting API). Their access tokens are stored only in `secrets/` on the owner's computer and are sent only to Meta or TikTok. Disconnecting deletes them.
+
 **Revoking access.** You can remove the app's access at any time at https://myaccount.google.com/permissions, and delete `secrets/token.json`.
 
 **Contact.** Open an issue at https://github.com/AwasthiNikhil/shorts-machine/issues.

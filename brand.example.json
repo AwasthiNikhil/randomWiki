@@ -54,5 +54,10 @@
     "fallback": "wikipedia",
     "fallback_arg": "",
     "pick": "order"
-  }
+  },
+  "ai": "gemini",
+  "claude_model": "claude-opus-5-5",
+  "publish_to": [
+    "youtube"
+  ]
 }
