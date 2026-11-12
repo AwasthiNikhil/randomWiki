@@ -13,7 +13,7 @@ In the studio's **Make a video** box, or `./rw run "…"` (`./rw add "…"` save
 | nothing | the next idea in the ideabank, else a random interesting Wikipedia page |
 
 **Questions get answered, or no video.** Two checks on the local model:
-1. Before writing, it must quote the sentence in the research that answers the question; the quote is checked against the notes and judged on its own. If there isn't one, the video fails with "the research didn't find an answer" rather than circle the topic.
+1. Before writing, it must quote the sentence in the research that answers the question; the quote is checked against the notes and judged on its own. If web research (Gemini or Claude) has none, Wikipedia research by the local model is tried next. If neither has one, the video fails with "the research didn't find an answer" rather than circle the topic.
 2. After writing, it must quote the narration sentence that gives the answer, judged the same way. If none does, the script is rewritten around the answer (twice at most), else the video fails with the reason.
 
 ## AI models: local, Gemini or Claude

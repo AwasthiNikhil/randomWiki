@@ -702,6 +702,11 @@ def research(question):
             return (research_gemini if who == "gemini" else research_claude)(question)
         except (RuntimeError, ValueError) as e:
             print(f"  {who.title()} research failed ({e}); researching on Wikipedia instead")
+    return research_wikipedia(question)
+
+
+def research_wikipedia(question):
+    """The local LLM picks the Wikipedia articles that cover the question; their text becomes the notes."""
     wanted = [str(t) for t in (llm(RESEARCH_PROMPT.format(question=question), 0.2).get("articles") or [])][:5]
     found = {}  # title -> pageid
     for q in [question] + wanted:  # resolve each suggestion to a real article via search (the question itself too)
@@ -1875,6 +1880,11 @@ def make(con, pageid):
             a = research(row["ref"])
             title, desc, text, pageimage, prompt = a["title"], a["description"], a["text"], None, QUESTION_PROMPT
             answer = find_answer(title, text)
+            if not answer and not a["credit"].startswith("Researched from the Wikipedia"):  # web research missed it: try Wikipedia
+                print("  the web research has no clear answer; trying Wikipedia")
+                a = research_wikipedia(row["ref"])
+                text = a["text"]
+                answer = find_answer(title, text)
             if not answer:  # don't make a video that circles the topic without answering
                 raise RuntimeError(f"the research didn't find an answer to \"{title}\"; try rewording the question")
             print(f"  answer found: {answer[:160]}")
