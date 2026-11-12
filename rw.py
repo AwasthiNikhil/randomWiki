@@ -167,7 +167,7 @@ def gemini(prompt, temperature=0.7, tools=None):
                 break  # bad key or request: another model won't help
             if e.code == 429 and model == models[-1]:
                 break  # out of quota on the fallback too: waiting won't help this run
-        except (urllib.error.URLError, TimeoutError, KeyError, IndexError, ValueError) as e:
+        except (OSError, KeyError, IndexError, ValueError) as e:  # OSError: dropped connections, timeouts, DNS
             why = f"{model}: {type(e).__name__}"
     raise RuntimeError(why)
 
@@ -620,6 +620,8 @@ def add_input(con, text, force=False, make_now=False):
     t = text.strip()
     if not t:
         raise SystemExit("type something: a question, a topic, a paragraph or a link")
+    if m := re.match(r"https?://\w+\.wikipedia\.org/w/index\.php\?search=([^&]+)$", t):  # a question idea's search link
+        return add_question(con, urllib.parse.unquote_plus(m[1]), force)
     if "\n" not in t and sources.looks_like_link(t):
         url = t if "://" in t else "https://" + t
         origin, _ = sources.detect(url)

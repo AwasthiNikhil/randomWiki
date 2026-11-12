@@ -506,6 +506,7 @@ function potDetail(p) {
 const ORIGIN_NAMES = {wikipedia: "Wikipedia", web: "Article", hackernews: "Hacker News", arxiv: "arXiv", apod: "NASA APOD", question: "Researched", text: "Your text"};
 const STATUS_LABEL = {queued: "idea", rendered: "in queue"};
 const statusLabel = st => STATUS_LABEL[st] || st;
+const makeArg = p => ["question", "text"].includes(p.origin) ? p.ref : p.url;  // what `run` needs to make it again
 const kTokens = n => n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1) + "k" : String(n);
 const originName = p => ORIGIN_NAMES[p.origin || "wikipedia"] || p.origin;
 
@@ -563,7 +564,7 @@ function renderQueue() {
             : `<div class="via">from <a href="${esc(p.via)}" target="_blank" rel="noopener">${esc(p.via.replace(/^https?:\/\/(www\.)?/, "").slice(0, 70))}</a></div>`}
         </div>
         <div class="qbtns">
-          <button class="btn primary" data-make="${esc(["question", "text"].includes(p.origin) ? p.ref : p.url)}">Make now</button>
+          <button class="btn primary" data-make="${esc(makeArg(p))}">Make now</button>
           <button class="btn danger" data-skip="${p.pageid}">Remove</button>
         </div>
       </div>`).join("")}</div>`;
@@ -683,7 +684,7 @@ function openDetail(id) {
       <div class="sub">${esc(p.title)} · <a href="${esc(p.url)}" target="_blank" rel="noopener">${originName(p)} ↗</a>${yt ? ` · <a href="${yt}" target="_blank" rel="noopener">YouTube ↗</a>` : ""}${p.gemini ? ` · Gemini: ${p.gemini.requests} requests, ${kTokens(p.gemini.tokens)} tokens` : ""}</div>
       <div class="btns">
         ${p.status === "rendered" ? `<button class="btn primary" data-upload="${p.ep}">Upload this video</button>` : ""}
-        ${p.status !== "uploaded" ? `<button class="btn" data-remake="${esc(p.url)}">Remake</button>` : ""}
+        ${p.status !== "uploaded" ? `<button class="btn" data-remake="${esc(makeArg(p))}">Remake</button>` : ""}
         ${["rendered", "queued", "failed"].includes(p.status) ? `<button class="btn danger" data-skip="${p.pageid}">Skip (don't upload)</button>` : ""}
         ${p.ep && p.status !== "uploaded" ? `<span id="delVidBox"><button class="btn danger" data-delvid="${p.pageid}">Delete video</button></span>` : ""}
         ${p.status === "uploaded" ? `<span id="unpubBox"><button class="btn danger" data-unpub="${p.ep}">Delete from YouTube…</button></span>` : ""}
@@ -804,7 +805,7 @@ document.addEventListener("click", async e => {
       && await post("/api/images", {pageid: pid, images: edImages});
     if (ok) { dlg.close(); exec(`rerender --ep ${+t.dataset.ep}`); } else { t.disabled = false; t.textContent = "Save & re-render"; }
   }
-  else if (t.dataset.remake) { dlg.close(); exec(`run --force --url ${quote(t.dataset.remake)}`); }
+  else if (t.dataset.remake) { dlg.close(); exec(`run --force ${quote(t.dataset.remake)}`); }
   else if (t.dataset.skip) { if (await post("/api/skip", {pageid: +t.dataset.skip})) { if (dlg.open) dlg.close(); termLine("removed/skipped page " + t.dataset.skip); loadPages(); } }
 });
 $("#makeNow").onclick = () => { const v = $("#input").value.trim(); exec("run" + (v ? " " + quote(v) : "")).then(ok => ok && ($("#input").value = "")); };
