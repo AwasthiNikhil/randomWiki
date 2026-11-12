@@ -94,6 +94,42 @@ def upsert(con, pageid, **f):
 GEMINI_API = "https://generativelanguage.googleapis.com/v1beta/models/"
 GEMINI_KEY_FILE = SECRETS / "gemini_api_key"
 gemini_down = None  # why Gemini failed this run; the rest of the run then uses the local model
+gemini_used = {"requests": 0, "tokens": 0}  # this run, for the per-video count
+USAGE_FILE = ROOT / "data" / "gemini_usage.json"  # {pacific date: {model: {requests, tokens}}}
+
+
+def usage_day():
+    """Google resets the free daily quota at midnight Pacific time, so days are counted in that zone."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    return datetime.now(ZoneInfo("America/Los_Angeles")).date().isoformat()
+
+
+def count_gemini(model, usage):
+    tokens = int(usage.get("totalTokenCount") or 0)
+    gemini_used["requests"] += 1
+    gemini_used["tokens"] += tokens
+    try:
+        log = json.loads(USAGE_FILE.read_text())
+    except (OSError, ValueError):
+        log = {}
+    day = log.setdefault(usage_day(), {}).setdefault(model, {"requests": 0, "tokens": 0})
+    day["requests"] += 1
+    day["tokens"] += tokens
+    USAGE_FILE.write_text(json.dumps(dict(sorted(log.items())[-30:]), indent=1))  # ponytail: last 30 days is plenty
+
+
+def record_usage(pageid, before):
+    """Add the Gemini requests/tokens used since `before` to the video's meta."""
+    used = {k: gemini_used[k] - before[k] for k in gemini_used}
+    mpath = WORK / str(pageid) / "meta.json"
+    if not used["requests"] or not mpath.exists():
+        return
+    m = json.loads(mpath.read_text())
+    g = m.get("gemini") or {"requests": 0, "tokens": 0}
+    m["gemini"] = {k: g.get(k, 0) + used[k] for k in used}
+    mpath.write_text(json.dumps(m, indent=2))
+    print(f"  Gemini: {used['requests']} requests, {used['tokens']:,} tokens")
 
 
 def gemini_key():
@@ -118,7 +154,9 @@ def gemini(prompt, temperature=0.7, tools=None):
                                      {"x-goog-api-key": gemini_key(), "Content-Type": "application/json"})
         try:
             with urllib.request.urlopen(req, timeout=90) as r:
-                c = json.load(r)["candidates"][0]
+                d = json.load(r)
+            count_gemini(d.get("modelVersion") or model, d.get("usageMetadata") or {})
+            c = d["candidates"][0]
             return "".join(p.get("text", "") for p in c["content"]["parts"]), c
         except urllib.error.HTTPError as e:
             try:  # Google's own message only; never the request (it carries the key)
@@ -1611,6 +1649,7 @@ def score_video(con, pageid):
 
 
 def make(con, pageid):
+    before = dict(gemini_used)
     row = con.execute("select * from pages where pageid=?", (pageid,)).fetchone()
     work = WORK / str(pageid)
     work.mkdir(parents=True, exist_ok=True)
@@ -1662,6 +1701,7 @@ def make(con, pageid):
         score_video(con, pageid)
     except Exception as e:  # a failed score never costs us the video
         print(f"  could not score: {e}")
+    record_usage(pageid, before)
     return out
 
 
@@ -1824,12 +1864,14 @@ def rerender(con, ep, repick_images=False, narration=None):
         m["narration"] = "recording"
     elif narration == "ai":
         m["narration"] = "kokoro"
+    before = dict(gemini_used)
     if repick_images:
         print("  picking images from the script…")
         m["images"] = pick_visuals(m["article_title"], m["script"], WORK / str(row["pageid"]), own=[],
                                    topics=m.get("topics", ())) or m["images"]
     produce(con, m, Path(row["video_path"]) if row["video_path"] else OUT / f"{ep:03d}-rerender.mp4")
     score_video(con, row["pageid"])
+    record_usage(row["pageid"], before)
 
 
 

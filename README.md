@@ -20,6 +20,8 @@ Everything runs locally by default. With a Gemini API key (free at [aistudio.goo
 
 The key is yours, not the project's: `GEMINI_API_KEY` in your shell is used first. You can also paste one in **Settings → Content**, which saves it to `secrets/gemini_api_key` (git-ignored). Scheduled runs need the saved key, since they don't load your shell profile. The model is chosen there too; `gemini-flash-latest` follows Google's current Flash model.
 
+**Usage:** each video shows the Gemini requests and tokens it used (Episodes → open a video), and Settings shows today's totals per model. Days follow Pacific time, when Google resets the free quota. The API doesn't report how much quota is left; see [ai.dev/rate-limit](https://ai.dev/rate-limit).
+
 
 1. **Pick:** random articles, or ideas found around a topic through its Wikipedia link network (1–3 hops). Stubs, lists and disambiguation pages are dropped, and a local LLM scores the rest out of 10.
 2. **Log:** every page that comes up is stored in SQLite with a status and the reason, so nothing is ever processed twice.

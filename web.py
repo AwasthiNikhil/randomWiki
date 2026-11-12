@@ -114,7 +114,7 @@ def pages():
         if r["ep"] and meta.exists():
             m = json.loads(meta.read_text())
             r.update(yt_title=m["title"], script=m["script"], yt_description=m["yt_description"], potential_info=m.get("potential"),
-                     narration=m.get("narration", "kokoro"), has_recording=(rw.WORK / str(r["pageid"]) / "voice_recorded.wav").exists(),
+                     narration=m.get("narration", "kokoro"), gemini=m.get("gemini"), has_recording=(rw.WORK / str(r["pageid"]) / "voice_recorded.wav").exists(),
                      images=[{k: v for k, v in i.items() if k != "path"} | {"credit": rw.credit(i), "file": Path(i["path"]).name}
                              for i in m["images"]])
         v = Path(r["video_path"] or "")
@@ -239,6 +239,10 @@ class H(BaseHTTPRequestHandler):
             except Exception:
                 models = []
             gemini = {"key": "shell" if os.environ.get("GEMINI_API_KEY", "").strip() else "saved" if rw.gemini_key() else "", "models": []}
+            try:
+                gemini["today"] = json.loads(rw.USAGE_FILE.read_text()).get(rw.usage_day(), {})
+            except (OSError, ValueError):
+                gemini["today"] = {}
             if gemini["key"]:
                 try:  # text models this key can use; aliases first so "latest" follows Google's current model
                     req = urllib.request.Request(rw.GEMINI_API + "?pageSize=200", headers={"x-goog-api-key": rw.gemini_key()})
