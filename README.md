@@ -41,6 +41,14 @@ Keys are yours, not the project's: `GEMINI_API_KEY` / `ANTHROPIC_API_KEY` in you
 7. **Score:** each video gets a 0–100 potential score from topic demand, hook, appeal, reach, visuals and length.
 8. **Publish:** YouTube Data API upload, private or scheduled, best potential first. Credits go into the description automatically.
 
+## Auto or manual
+**Settings → Videos → When a video is made.** *Auto* researches, writes, picks visuals, voices and renders in one go. *Manual* stops at a **draft** once the script and visuals are ready, so you can shape it before anything is voiced or rendered (`./rw run --auto "…"` skips the stop for one video). Open the draft (Episodes) and:
+- **Script:** edit the title and narration, or record it in your own voice.
+- **Visuals:** search Commons, Openverse, NASA, the Met or your library, upload your own, drag to reorder. Click a visual to set **when it appears** (which sentence), its **motion** (zoom in, zoom out, pan left, pan right, still) and a **sound effect** that plays as it appears.
+- **Sound:** the channel music, no music, or a track just for this video, with its own volume.
+
+Then click **Render video**. The same controls stay available on rendered videos with **Save & re-render**.
+
 ## Library: download videos
 Keep reference videos and clips from other creators' work in `library/`, separate from what you make (git-ignored). In the studio's **Library** tab, paste links (one per line) and optionally a part to keep (`1:20-1:45`); or run `./rw download URL [URL ...] [--section 1:20-1:45]`.
 - Works with YouTube, Vimeo, X, Reddit, TikTok, Instagram, Internet Archive and [many more sites](https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md) through yt-dlp, and with Wikimedia Commons pages through Commons' own API.

@@ -55,6 +55,7 @@ main { overflow: auto; padding: 20px 24px 40px; }
 .chip { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .4px; border: 1px solid; }
 .s-uploaded { color: var(--ok); border-color: #2c5e3e; background: #13261b; }
 .s-rendered { color: var(--accent); border-color: #6b5520; background: #2a2210; }
+.s-draft { color: #C084FC; border-color: #5b3a7a; background: #1f1430; }
 .s-queued { color: var(--info); border-color: #284a75; background: #111f33; }
 .s-failed { color: var(--bad); border-color: #6b2c2c; background: #2a1313; }
 .s-rejected, .s-skipped { color: var(--muted); border-color: var(--line); background: var(--panel2); }
@@ -136,6 +137,13 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
 .vtile .x { position: absolute; top: 4px; right: 4px; width: 22px; height: 22px; border-radius: 50%; border: 0; background: #000c; color: #fff; cursor: pointer; font-size: 11px; }
 .vtile .n { position: absolute; left: 4px; bottom: 4px; font: 600 11px var(--mono); background: #000c; padding: 0 5px; border-radius: 4px; }
 .vtile.new { border-color: var(--ok); }
+.vtile.sel { outline: 2px solid var(--accent); outline-offset: 1px; }
+.vtile .fx { position: absolute; right: 4px; bottom: 4px; font: 600 10px var(--mono); background: #000c; color: var(--accent); padding: 0 4px; border-radius: 4px; }
+.vedit { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; margin-top: 10px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); align-items: end; }
+.vedit label { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
+.vedit select { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 7px 8px; color: var(--text); min-width: 0; }
+.vedit input[type=range] { accent-color: var(--accent); }
+.vedit .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .vtile.dragging { opacity: .35; }
 .vsearch { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
 .vsearch input, .vsearch select { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; color: var(--text); }
@@ -391,6 +399,10 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
           <fieldset class="scard" data-group="content"><legend>Videos</legend>
             <label style="max-width:320px">Minimum interest score <output id="scoreOut"></output><input type="range" name="min_score" min="1" max="10" step="1"></label>
             <label style="max-width:320px">Maximum video length <small>seconds</small><input type="number" name="max_seconds" min="20" max="175"></label>
+            <div style="display:grid;gap:6px"><span class="hint" style="margin:0">When a video is made</span>
+              <label class="radio"><input type="radio" name="mode" value="auto"> <b>Auto</b>: research, script, visuals, voice and render in one go</label>
+              <label class="radio"><input type="radio" name="mode" value="manual"> <b>Manual</b>: stop at a draft so you can edit the script, visuals, motion and sound, then click Render</label>
+            </div>
           </fieldset>
           <fieldset class="scard" data-group="automation"><legend>Automation</legend>
             <label class="check"><input type="checkbox" id="schOn"> Make videos automatically on a schedule</label>
@@ -607,12 +619,12 @@ function termLine(text, cls) {
   if (atBottom) out.scrollTop = out.scrollHeight;
 }
 
-let channelName = "Shorts Machine";
+let channelName = "Shorts Machine", brandMusicVolume = 0.08;
 async function loadPages() {
   const j = await (await fetch("/api/pages")).json();
   pages = j.pages;
   $("#brand").innerHTML = esc(j.brand.channel.toUpperCase()) + "<small>studio</small>";
-  brandOutro = j.brand.outro_line || "";
+  brandOutro = j.brand.outro_line || ""; brandMusicVolume = j.brand.music_volume ?? 0.08;
   channelName = j.brand.channel;
   $(".logo").innerHTML = j.brand.logo ? `<img src="/brand/logo.png?t=${Date.now()}" alt="" style="width:26px;height:26px;object-fit:contain">` : esc(j.brand.logo_text || "?");
   document.documentElement.style.setProperty("--accent", j.brand.colors.accent);
@@ -638,7 +650,8 @@ function renderEpisodes() {
   $("#epGrid").innerHTML = !eps.length ? `<div class="empty">No videos yet. Click <b>Make next video</b>.</div>`
     : !shown.length ? `<div class="empty">No videos match.</div>` : `<div class="grid">${shown.map(p => `
     <button class="card" data-id="${p.pageid}">
-      <div class="thumb">${p.video ? `<video data-src="/video/${encodeURIComponent(p.video)}#t=1.5" preload="metadata" muted></video>` : "?"}</div>
+      <div class="thumb">${p.video ? `<video data-src="/video/${encodeURIComponent(p.video)}#t=1.5" preload="metadata" muted></video>`
+        : p.images?.[0]?.file ? `<img src="/work/${p.pageid}/${encodeURIComponent(p.images[0].file)}" alt="" style="width:100%;height:100%;object-fit:cover">` : "?"}</div>
       <div class="body"><div class="top"><span class="ep">${p.ep ? "EP " + String(p.ep).padStart(3, "0") : "—"}</span>${potBadge(p)}</div>
       <h3>${esc(p.yt_title || p.title)}</h3><span class="chip s-${p.status}">${statusLabel(p.status)}</span></div>
     </button>`).join("")}</div>`;
@@ -658,7 +671,7 @@ function potDetail(p) {
 }
 
 const ORIGIN_NAMES = {wikipedia: "Wikipedia", web: "Article", hackernews: "Hacker News", arxiv: "arXiv", apod: "NASA APOD", question: "Researched", text: "Your text"};
-const STATUS_LABEL = {queued: "idea", rendered: "in queue"};
+const STATUS_LABEL = {queued: "idea", rendered: "in queue", draft: "draft"};
 const statusLabel = st => STATUS_LABEL[st] || st;
 const makeArg = p => ["question", "text"].includes(p.origin) ? p.ref : p.url;  // what `run` needs to make it again
 const kTokens = n => n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1) + "k" : String(n);
@@ -733,10 +746,37 @@ function wireVisuals(p) {
     $("#vStrip").innerHTML = edImages.map((i, n) => `
       <div class="vtile ${i.file ? "" : "new"}" draggable="true" tabindex="0" data-i="${n}"
            title="${esc((i.name || "") + (i.credit || i.license ? " · " + (i.credit || i.license) : ""))}" aria-label="Image ${n + 1}: ${esc(i.name)}. Arrow keys to move.">
-        <img src="${esc(imgSrc(i))}" alt=""><span class="n">${n + 1}${i.kind === "video" ? " ▶" : ""}</span>
+        <img src="${esc(imgSrc(i))}" alt=""><span class="n">${n + 1}${i.kind === "video" ? " ▶" : ""}</span>${i.sfx || (i.motion && i.motion !== "auto") ? `<span class="fx">${i.sfx ? "♪" : ""}${i.motion && i.motion !== "auto" ? "↔" : ""}</span>` : ""}
         <button class="x" data-rm="${n}" aria-label="Remove image ${n + 1}">✕</button>
       </div>`).join("") || `<span class="hint">No images: the video will use a title card.</span>`;
     document.querySelectorAll(".vres").forEach(b => b.classList.toggle("added", edImages.some(i => same(i, results[+b.dataset.r]))));
+    if (sel >= edImages.length) sel = -1;
+    document.querySelectorAll(".vtile").forEach(t => t.classList.toggle("sel", +t.dataset.i === sel));
+    panel();
+  };
+  let sel = -1;
+  const sentences = () => $("#edScript").value.trim().split(/(?<=[.!?])\s+/).filter(Boolean);
+  const panel = () => {  // timing, motion and sound of the selected visual
+    const box = $("#vEdit"), i = edImages[sel];
+    box.hidden = !i; if (!i) return;
+    box.innerHTML = `
+      <label>Visual ${sel + 1} appears at<select id="veAt"><option value="">Automatic</option>${sentences().map((t, k) =>
+        `<option value="${k}" ${i.sentence === k ? "selected" : ""}>Sentence ${k + 1}: ${esc(t.split(/\s+/).slice(0, 6).join(" "))}…</option>`).join("")}</select></label>
+      <label>Motion<select id="veMo">${[["auto", "Automatic"], ["in", "Zoom in"], ["out", "Zoom out"], ["left", "Pan left"], ["right", "Pan right"], ["still", "Still"]]
+        .map(([v, l]) => `<option value="${v}" ${(i.motion || "auto") === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+      <div style="display:grid;gap:4px"><span class="hint" style="margin:0">Sound effect when it appears</span><div class="row">
+        ${i.sfx ? `<audio src="/work/${p.pageid}/${encodeURIComponent(i.sfx)}" controls style="height:32px;max-width:180px"></audio><button class="btn sm danger" type="button" id="veSfxRm">Remove</button>`
+          : `<label class="btn sm" style="cursor:pointer">Add sound…<input type="file" accept="audio/*" id="veSfx" hidden></label>`}</div></div>
+      ${i.kind === "video" ? `<span class="hint" style="margin:0">Video clips play as they are; motion applies to images.</span>` : ""}`;
+    $("#veAt").onchange = e => { i.sentence = e.target.value === "" ? null : +e.target.value; };
+    $("#veMo").onchange = e => { i.motion = e.target.value === "auto" ? null : e.target.value; strip(); };
+    if ($("#veSfxRm")) $("#veSfxRm").onclick = () => { i.sfx = null; strip(); };
+    if ($("#veSfx")) $("#veSfx").onchange = async e => {
+      const f = e.target.files[0]; if (!f) return;
+      const r = await fetch(`/api/upload_audio?kind=sfx&pageid=${p.pageid}`, {method: "POST", headers: {"X-RW": "1"}, body: f});
+      const j = await r.json();
+      if (r.ok) { i.sfx = j.file; strip(); } else termLine("! " + j.error, "err");
+    };
   };
   const same = (a, b) => !!b && (a.url === b.url || (a.name && a.name === b.name));
   const move = (from, to) => { if (to < 0 || to >= edImages.length) return; edImages.splice(to, 0, edImages.splice(from, 1)[0]); strip(); };
@@ -752,7 +792,23 @@ function wireVisuals(p) {
     const i = +tile.dataset.i, to = i + (e.key === "ArrowLeft" ? -1 : 1); move(i, to);
     document.querySelector(`.vtile[data-i="${Math.max(0, Math.min(to, edImages.length - 1))}"]`)?.focus();
   };
-  $("#vStrip").onclick = e => { const rm = e.target.closest("[data-rm]"); if (rm) { edImages.splice(+rm.dataset.rm, 1); strip(); } };
+  $("#vStrip").onclick = e => {
+    const rm = e.target.closest("[data-rm]"); if (rm) { edImages.splice(+rm.dataset.rm, 1); strip(); return; }
+    const tile = e.target.closest(".vtile"); if (tile) { sel = sel === +tile.dataset.i ? -1 : +tile.dataset.i; strip(); }
+  };
+  // sound: this video's music
+  const music = () => { $("#sndVolOut").textContent = `${Math.round($("#sndVol").value * 100)}%`;
+    const a = $("#sndAudio"), src = {own: p.own_music ? `/work/${p.pageid}/music.m4a` : "", brand: "/brand/music.mp3"}[$("#sndMusic").value] || "";
+    a.hidden = !src; if (src && !a.src.endsWith(src)) a.src = src + "?t=" + Date.now(); };
+  $("#sndMusic").value = p.music || "brand"; $("#sndVol").value = p.music_volume ?? brandMusicVolume; music();
+  $("#sndMusic").onchange = $("#sndVol").oninput = music;
+  $("#sndFile").onchange = async e => {
+    const f = e.target.files[0]; if (!f) return;
+    const r = await fetch(`/api/upload_audio?kind=music&pageid=${p.pageid}`, {method: "POST", headers: {"X-RW": "1"}, body: f});
+    const j = await r.json();
+    if (r.ok) { p.own_music = true; $("#sndMusic").value = "own"; music(); termLine(`music track saved (${j.seconds}s); it loops under the voice`, "good"); }
+    else termLine("! " + j.error, "err");
+  };
   const search = async () => {
     $("#vResults").innerHTML = `<span class="hint">Searching…</span>`;
     const r = await fetch(`/api/images/search?source=${$("#vSource").value}&q=${encodeURIComponent($("#vQuery").value)}`);
@@ -836,7 +892,9 @@ function openDetail(id) {
   const p = pages.find(x => x.pageid == id);
   const yt = p.video_id ? `https://youtube.com/shorts/${p.video_id}` : null;
   $("#dlgBody").innerHTML = `<div class="detail">
-    ${p.video ? `<video src="/video/${encodeURIComponent(p.video)}" controls autoplay playsinline></video>` : `<div class="thumb">?</div>`}
+    ${p.video ? `<video src="/video/${encodeURIComponent(p.video)}" controls autoplay playsinline></video>`
+      : p.images?.[0]?.file ? `<div class="thumb" style="position:relative"><img src="/work/${p.pageid}/${encodeURIComponent(p.images[0].file)}" alt="" style="width:100%;height:100%;object-fit:cover">
+          <span class="chip s-draft" style="position:absolute;left:12px;top:12px;background:#1f1430">${p.status === "draft" ? "draft · not rendered yet" : "not rendered"}</span></div>` : `<div class="thumb">?</div>`}
     <div class="info">
       <div class="ep">${p.ep ? "EP " + String(p.ep).padStart(3, "0") : ""} &nbsp;<span class="chip s-${p.status}">${statusLabel(p.status)}</span></div>
       <h2>${esc(p.yt_title || p.title)}</h2>
@@ -854,8 +912,9 @@ function openDetail(id) {
         <h5>YouTube title</h5><input class="edit" id="edTitle" maxlength="100" value="${esc(p.yt_title)}">
         <h5>Narration <span id="edCount" style="text-transform:none;letter-spacing:0"></span></h5>
         <textarea id="edScript">${esc(p.script)}</textarea>
-        <h5>Visuals <span style="text-transform:none;letter-spacing:0">· drag to reorder, × to remove, click a result to add</span></h5>
+        <h5>Visuals <span style="text-transform:none;letter-spacing:0">· drag to reorder, × to remove, click one to set its timing, motion and sound</span></h5>
         <div class="vstrip" id="vStrip"></div>
+        <div class="vedit" id="vEdit" hidden></div>
         <div class="vsearch">
           <select id="vSource" aria-label="Image source">
             <option value="article">This article</option><option value="commons" selected>Wikimedia Commons</option>
@@ -868,7 +927,14 @@ function openDetail(id) {
           <button class="btn" id="vAuto" title="Pick an image for each thing the narration mentions (Wikipedia, Commons, Openverse), timed to when it's said">Auto-pick from script</button>
         </div>
         <div class="vresults" id="vResults"></div>
-        <div class="btns" style="margin-top:12px"><button class="btn primary" data-rerender="${p.pageid}" data-ep="${p.ep}">Save &amp; re-render</button>
+        <h5>Sound</h5>
+        <div class="vedit" id="sndBox">
+          <label>Music <select id="sndMusic"><option value="brand">Channel music (Settings)</option><option value="own">This video's own track</option><option value="none">No music</option></select></label>
+          <label>Volume <output id="sndVolOut"></output><input type="range" id="sndVol" min="0" max="0.5" step="0.01"></label>
+          <label class="btn sm" style="cursor:pointer;align-self:end">Upload a track for this video<input type="file" accept="audio/*" id="sndFile" hidden></label>
+          <audio id="sndAudio" controls hidden style="grid-column:1/-1;width:100%"></audio>
+        </div>
+        <div class="btns" style="margin-top:12px"><button class="btn primary" data-rerender="${p.pageid}" data-ep="${p.ep}">${p.status === "draft" ? "Render video" : "Save &amp; re-render"}</button>
         <span class="hint" style="align-self:center">Applies your text and visuals, re-voices and re-renders (about 1–2 min). No AI rewrite.</span></div>
         <h5>Narration · <span style="text-transform:none;letter-spacing:0">${{recording: "your recording", clone: "your cloned voice", kokoro: "AI preset voice"}[p.narration] || "AI preset voice"}</span></h5>
         <div class="btns">
@@ -1007,8 +1073,8 @@ document.addEventListener("click", async e => {
     const pid = +t.dataset.rerender;
     t.disabled = true; t.textContent = "Saving…";
     const ok = await post("/api/script", {pageid: pid, title: $("#edTitle").value, script: $("#edScript").value})
-      && await post("/api/images", {pageid: pid, images: edImages});
-    if (ok) { dlg.close(); exec(`rerender --ep ${+t.dataset.ep}`); } else { t.disabled = false; t.textContent = "Save & re-render"; }
+      && await post("/api/images", {pageid: pid, images: edImages, audio: {music: $("#sndMusic").value, music_volume: +$("#sndVol").value}});
+    if (ok) { dlg.close(); exec(`rerender --ep ${+t.dataset.ep}`); } else { t.disabled = false; t.textContent = "Try again"; }
   }
   else if (t.dataset.remake) { dlg.close(); exec(`run --force ${quote(t.dataset.remake)}`); }
   else if (t.dataset.skip) { if (await post("/api/skip", {pageid: +t.dataset.skip})) { if (dlg.open) dlg.close(); termLine("removed/skipped page " + t.dataset.skip); loadPages(); } }
@@ -1155,6 +1221,7 @@ async function loadSettings() {
   S.voice_engine = S.voice_engine || "kokoro";
   document.querySelectorAll("[name=vEngine]").forEach(r => r.checked = r.value === S.voice_engine);
   $("#cloneConsent").checked = !!S.clone_consent;
+  document.querySelectorAll("[name=mode]").forEach(r => r.checked = r.value === (S.mode || "auto"));
   sampleState(j.voice_sample);
   if (!j.clone_ready) document.querySelector("[name=vEngine][value=clone]").disabled = true;
   syncEngine();
@@ -1203,7 +1270,7 @@ function collect() {
   S = {...S, channel: F("channel").value, tagline: F("tagline").value, outro_line: F("outro_line").value, logo_text: F("logo_text").value,
     hashtags: F("hashtags").value.split(",").map(x => x.trim()).filter(Boolean), voice: F("voice").value, voice_speed: +F("voice_speed").value,
     music_volume: +F("music_volume").value, voice_engine: document.querySelector("[name=vEngine]:checked")?.value || "kokoro",
-    clone_consent: $("#cloneConsent").checked, min_score: +F("min_score").value, max_seconds: +F("max_seconds").value, llm: $("#llmSel").value, gemini_model: $("#gemSel").value, claude_model: $("#clSel").value,
+    clone_consent: $("#cloneConsent").checked, mode: document.querySelector("[name=mode]:checked")?.value || "auto", min_score: +F("min_score").value, max_seconds: +F("max_seconds").value, llm: $("#llmSel").value, gemini_model: $("#gemSel").value, claude_model: $("#clSel").value,
     ai: document.querySelector("[name=aiPick]:checked")?.value || "local", publish_to: [...document.querySelectorAll("[data-pub]:checked")].map(c => c.dataset.pub),
     fonts: {...S.fonts, display_weight: F("display_weight").value}};
   readSchedule();

@@ -66,6 +66,8 @@ def save_brand(new):
         b["gemini_model"] = text("gemini_model", 1, 80)
     if new.get("claude_model"):
         b["claude_model"] = text("claude_model", 1, 80)
+    if new.get("mode") in ("auto", "manual"):
+        b["mode"] = new["mode"]
     if "publish_to" in new:
         b["publish_to"] = [x for x in rw.PLATFORMS if x in new["publish_to"]]
     if "ai" in new:
@@ -122,7 +124,8 @@ def pages():
         if r["ep"] and meta.exists():
             m = json.loads(meta.read_text())
             r.update(yt_title=m["title"], script=m["script"], yt_description=m["yt_description"], potential_info=m.get("potential"),
-                     narration=m.get("narration", "kokoro"), ai=m.get("ai") or m.get("gemini"), has_recording=(rw.WORK / str(r["pageid"]) / "voice_recorded.wav").exists(),
+                     narration=m.get("narration", "kokoro"), music=m.get("music", "brand"), music_volume=m.get("music_volume"),
+                     own_music=(rw.WORK / str(r["pageid"]) / "music.m4a").is_file(), ai=m.get("ai") or m.get("gemini"), has_recording=(rw.WORK / str(r["pageid"]) / "voice_recorded.wav").exists(),
                      images=[{k: v for k, v in i.items() if k != "path"} | {"credit": rw.credit(i), "file": Path(i["path"]).name}
                              for i in m["images"]])
         v = Path(r["video_path"] or "")
@@ -189,28 +192,33 @@ class H(BaseHTTPRequestHandler):
                                   "file": name, "credit": ""}})
 
     def upload_audio(self, raw):
-        """POST /api/upload_audio?kind=sample|narration[&pageid=N] with recorded/uploaded audio (webm, ogg, m4a, mp3, wav)."""
-        import imageio_ffmpeg, soundfile as sf, tempfile
-        kind = (re.search(r"kind=(sample|narration)", self.path) or [None, None])[1]
+        """POST /api/upload_audio?kind=sample|narration|music|sfx[&pageid=N] with recorded/uploaded audio (webm, ogg, m4a, mp3, wav).
+        music: this video's own track; sfx: a sound effect for one visual (the reply names its file)."""
+        import imageio_ffmpeg, tempfile, uuid
+        kind = (re.search(r"kind=(sample|narration|music|sfx)", self.path) or [None, None])[1]
         pid = (re.search(r"pageid=(\d+)", self.path) or [None, None])[1]
-        if not kind or not 0 < len(raw) <= 60_000_000 or (kind == "narration" and not (pid and (rw.WORK / pid).is_dir())):
+        if not kind or not 0 < len(raw) <= 60_000_000 or (kind != "sample" and not (pid and (rw.WORK / pid).is_dir())):
             return self.send(400, {"error": "bad upload"})
-        dest = rw.ROOT / "brand" / "voice_sample.wav" if kind == "sample" else rw.WORK / pid / "voice_recorded.wav"
-        staged = dest.with_suffix(".new.wav")  # convert and check first, so a bad upload never replaces a good file
+        dest = {"sample": rw.ROOT / "brand" / "voice_sample.wav", "narration": rw.WORK / str(pid) / "voice_recorded.wav",
+                "music": rw.WORK / str(pid) / "music.m4a", "sfx": rw.WORK / str(pid) / f"sfx-{uuid.uuid4().hex[:8]}.m4a"}[kind]
+        staged = dest.with_suffix(".new" + dest.suffix)  # convert and check first, so a bad upload never replaces a good file
+        enc = ["-ac", "1", "-ar", "24000"] if kind in ("sample", "narration") else ["-vn", "-ac", "2", "-ar", "48000", "-c:a", "aac", "-b:a", "160k", "-f", "mp4"]
         with tempfile.NamedTemporaryFile(suffix=".audio", dir=rw.DB.parent) as tmp:
             tmp.write(raw)
             tmp.flush()
-            r = subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(), "-y", "-loglevel", "error", "-i", tmp.name,
-                                "-ac", "1", "-ar", "24000", str(staged)], capture_output=True, text=True)
+            r = subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(), "-y", "-loglevel", "error", "-i", tmp.name, *enc, str(staged)],
+                               capture_output=True, text=True)
         if r.returncode:
             staged.unlink(missing_ok=True)
             return self.send(400, {"error": "couldn't read that audio file"})
-        secs = sf.info(str(staged)).duration
-        if (kind == "sample" and not 5 <= secs <= 90) or secs < 1:
+        secs = rw.video_seconds(staged)
+        bad = ("record 10-30 seconds" if kind == "sample" and not 5 <= secs <= 90 else
+               "keep sound effects under 20 seconds" if kind == "sfx" and secs > 20 else "it looks empty" if secs < 0.2 else "")
+        if bad:
             staged.unlink()
-            return self.send(400, {"error": f"that recording is {secs:.0f}s; " + ("record 10-30 seconds" if kind == "sample" else "it looks empty")})
+            return self.send(400, {"error": f"that audio is {secs:.1f}s; {bad}"})
         staged.replace(dest)
-        return self.send(200, {"ok": True, "seconds": round(secs, 1)})
+        return self.send(200, {"ok": True, "seconds": round(secs, 1), "file": dest.name})
 
     def upload_brand(self, raw):
         """POST /api/upload_brand?kind=music|logo with the file as the body."""
@@ -307,9 +315,9 @@ class H(BaseHTTPRequestHandler):
                 return self.send(200, {"results": fn(qs["q"])})
             except Exception as e:
                 return self.send(502, {"error": f"{qs['source']} search failed: {e}"})
-        m = re.fullmatch(r"/work/(\d+)/([\w.\-]+\.(jpg|png))", path)  # episode images (thumbnails in the editor)
+        m = re.fullmatch(r"/work/(\d+)/([\w.\-]+\.(jpg|png|m4a))", path)  # episode images and sounds (for the editor)
         if m and (rw.WORK / m[1] / m[2]).is_file():
-            return self.send_file(rw.WORK / m[1] / m[2], "image/png" if m[3] == "png" else "image/jpeg")
+            return self.send_file(rw.WORK / m[1] / m[2], {"png": "image/png", "jpg": "image/jpeg", "m4a": "audio/mp4"}[m[3]])
         m = re.fullmatch(r"/(video|fonts)/([\w.\-\[\],]+)", path)
         if m:  # basename only: no path traversal
             base = rw.OUT if m[1] == "video" else rw.ROOT / "brand" / "fonts"
@@ -365,9 +373,26 @@ class H(BaseHTTPRequestHandler):
                                    | {"path": str(work / Path(img["file"]).name)})
                     elif str(img.get("url", "")).startswith(("https://", "library:")):
                         out.append(rw.download_image(img, work))
+                    else:
+                        continue
+                    edit = {k: img.get(k) for k in ("motion", "sfx", "sentence")}  # your choices in the editor
+                    if edit["motion"] not in ("in", "out", "left", "right", "still"):
+                        edit["motion"] = None
+                    if not (re.fullmatch(r"sfx-[0-9a-f]{8}\.m4a", str(edit["sfx"])) and (work / edit["sfx"]).is_file()):
+                        edit["sfx"] = None
+                    if not (isinstance(edit["sentence"], int) and 0 <= edit["sentence"] < 40):
+                        edit["sentence"] = None
+                    out[-1].update(edit)
                 if not out:
                     raise ValueError("keep at least one image")
                 m["images"] = out
+                a = body.get("audio") or {}
+                if a.get("music") in ("brand", "none", "own"):
+                    if a["music"] == "own" and not (work / "music.m4a").is_file():
+                        raise ValueError("upload this video's music track first")
+                    m["music"] = a["music"]
+                if a.get("music_volume") is not None:
+                    m["music_volume"] = max(0.0, min(0.5, float(a["music_volume"])))
                 meta.write_text(json.dumps(m, indent=2))
             elif self.path == "/api/settings":
                 return self.send(200, {"ok": True, "brand": save_brand(body["brand"])})
@@ -461,7 +486,7 @@ class H(BaseHTTPRequestHandler):
                 con.commit()
             elif self.path == "/api/skip":
                 con = rw.db()
-                con.execute("update pages set status='skipped' where pageid=? and status in ('rendered','queued','failed')",
+                con.execute("update pages set status='skipped' where pageid=? and status in ('rendered','queued','failed','draft')",
                             (int(body["pageid"]),))
                 con.commit()
             else:

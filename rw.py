@@ -560,18 +560,18 @@ Reply as JSON: {{"quote": "<the sentence from the notes that answers it, copied 
 IS_ANSWER_PROMPT = """Question: "{question}"
 Sentence: "{quote}"
 
-Does this sentence answer the question (give the reason, mechanism or definition it asks for)? Background facts,
-history, or saying it is studied, debated or unknown do not count.
+Does this sentence give an answer to the question: a reason, cause, purpose, mechanism or definition, even a partial
+one? Background facts, history, or saying it is studied, debated or unknown do not count.
 Reply as JSON: {{"answers": true or false}}"""
 
-ANSWERED_PROMPT = """Question: "{question}"
+SAME_PROMPT = """Expected answer: "{answer}"
 
-Narration:
-{script}
+Numbered sentences:
+{numbered}
 
-Copy the one sentence of the narration that best answers the question (the reason, mechanism or definition it asks
-for). The opening question itself does not count.
-Reply as JSON: {{"quote": "<that sentence, copied exactly>"}}"""
+Which sentences say the same thing as the expected answer, or part of it, in any words? Sentences that only describe
+the topic in general do not count.
+Reply as JSON: {{"sentences": [<numbers>]}}"""
 
 ANSWER_FIX_PROMPT = """This narration for a YouTube Short doesn't answer the question "{question}".
 Rewrite it so that, right after the opening question, it clearly says: {answer}
@@ -603,11 +603,14 @@ def answers(question, quote, text):
 
 
 def ensure_answered(s, question, answer, text):
-    """Step 2 (local model): does a sentence of the narration answer the question? If not, rewrite with the answer
-    spelled out; twice at most."""
+    """Step 2 (local model): which narration sentences match the answer, and does one of them, judged on its own,
+    answer the question? If not, rewrite with the answer spelled out; twice at most."""
     for attempt in range(3):
-        quote = str(llm(ANSWERED_PROMPT.format(question=question, script=s["script"]), 0.1, local=True).get("quote") or "").strip()
-        if answers(question, quote, s["script"]):
+        sents = re.split(r"(?<=[.!?])\s+", s["script"].strip())
+        picked = llm(SAME_PROMPT.format(answer=answer, numbered="\n".join(f"{k + 1}. {x}" for k, x in enumerate(sents))),
+                     0.1, local=True).get("sentences") or []
+        cands = [sents[int(k) - 1] for k in picked if str(k).isdigit() and 1 <= int(k) <= len(sents)]
+        if any(answers(question, c, s["script"]) for c in cands):  # it matches the answer AND, on its own, answers
             return s
         if attempt == 2:
             raise RuntimeError(f"the script still doesn't answer the question; the research says: {answer[:150]}")
@@ -1661,7 +1664,7 @@ def render(meta, words, audio_path, duration, out_path, frame_at=None):
     for img in meta["images"]:
         try:
             if img.get("kind") == "video":
-                srcs.append((Clip(img["path"]), None))  # credits go in the YouTube description, not on screen
+                srcs.append((Clip(img["path"]), img))  # credits go in the YouTube description, not on screen
                 cues.append(img.get("sentence"))
                 continue
             im = Image.open(img["path"])
@@ -1672,7 +1675,7 @@ def render(meta, words, audio_path, duration, out_path, frame_at=None):
                 im.thumbnail((int(card.width * scale), int(card.height * scale)), Image.LANCZOS)
                 card.paste(im, ((card.width - im.width) // 2, (card.height - im.height) // 2), im)
                 still.add(len(srcs))
-                srcs.append((card, None))
+                srcs.append((card, img))
                 cues.append(img.get("sentence"))
                 continue
             if im.mode in ("RGBA", "LA", "P"):
@@ -1682,7 +1685,7 @@ def render(meta, words, audio_path, duration, out_path, frame_at=None):
                 im = flat
             im = im.convert("RGB")
             s = max(PW * 1.15 / im.width, PH * 1.15 / im.height)
-            srcs.append((im.resize((round(im.width * s), round(im.height * s)), Image.LANCZOS), None))
+            srcs.append((im.resize((round(im.width * s), round(im.height * s)), Image.LANCZOS), img))
             cues.append(img.get("sentence"))
         except Exception as e:
             print(f"  skip image {img['path']}: {e}")
@@ -1694,21 +1697,23 @@ def render(meta, words, audio_path, duration, out_path, frame_at=None):
         for line in cl:
             cd.text((card.width // 2, cy), line, font=cf, fill=C["accent"], anchor="mt")
             cy += cf.size * 1.2
-        srcs.append((card, None))
+        srcs.append((card, {}))
         cues.append(None)
         # ponytail: one text card when no free images exist; add AI image gen (mflux) if this happens often
 
     def kb(i, p, start=False):  # Ken Burns crop of source i at progress p in [0,1]; clips play instead
         if isinstance(srcs[i][0], Clip):
             return srcs[i][0].first if start else srcs[i][0].next()
-        im = srcs[i][0]
-        z = 1 + (0.04 if i in still else 0.12) * (p if i % 2 == 0 else 1 - p)
+        im, motion = srcs[i][0], srcs[i][1].get("motion") or "auto"
+        amount = 0.04 if i in still else 0.12
+        z = {"in": 1 + amount * p, "out": 1 + amount * (1 - p), "left": 1 + amount, "right": 1 + amount, "still": 1}.get(
+            motion, 1 + amount * (p if i % 2 == 0 else 1 - p))
         bw0 = min(im.width, im.height * PW / PH)
         bw, bh = bw0 / z, bw0 / z * PH / PW
-        dx = 1 if i % 2 == 0 else -1
+        dx = {"left": -1, "right": 1, "in": 0, "out": 0, "still": 0}.get(motion, 1 if i % 2 == 0 else -1)
         f = 0.5 + dx * (p - 0.5) * 0.6
         cx = bw / 2 + (im.width - bw) * f
-        cy = bh / 2 + (im.height - bh) * (1 - f if i % 3 == 2 else 0.5)
+        cy = bh / 2 + (im.height - bh) * (1 - f if i % 3 == 2 and motion == "auto" else 0.5)
         return im.resize((PW, PH), Image.BILINEAR, box=(cx - bw / 2, cy - bh / 2, cx + bw / 2, cy + bh / 2))
 
     groups = group_words(words)
@@ -1753,10 +1758,6 @@ def render(meta, words, audio_path, duration, out_path, frame_at=None):
         im = bg.copy()
         im.paste(panel, (PX, PY), mask)
         fd = ImageDraw.Draw(im)
-        if srcs[i][1]:
-            cf, cl = srcs[i][1]
-            for k, line in enumerate(cl):
-                fd.text((PX, PY + PH + 14 + k * cf.size * 1.25), line, font=cf, fill=C["muted"])
         gi = max([k for k, g in enumerate(groups) if g[0] <= t] or [0])
         if groups and groups[gi][0] <= t < groups[gi][1]:
             active = max([j for j, w in enumerate(groups[gi][2]) if w[1] <= t] or [0])
@@ -1771,15 +1772,12 @@ def render(meta, words, audio_path, duration, out_path, frame_at=None):
         return
 
     ff = imageio_ffmpeg.get_ffmpeg_exe()
-    music = ROOT / BRAND["music"]
+    work = WORK / str(meta.get("pageid", ""))
+    music = {"none": None, "own": work / "music.m4a"}.get(meta.get("music"), ROOT / BRAND["music"])
+    sfx = [(work / srcs[k][1]["sfx"], starts[k]) for k in range(n) if srcs[k][1].get("sfx") and (work / srcs[k][1]["sfx"]).is_file()]
     cmd = [ff, "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}",
            "-r", str(FPS), "-i", "-", "-i", str(audio_path)]
-    if music.exists():
-        cmd += ["-stream_loop", "-1", "-i", str(music), "-filter_complex",
-                f"[2:a]volume={BRAND['music_volume']}[m];[1:a][m]amix=inputs=2:duration=first:normalize=0[a]",
-                "-map", "0:v", "-map", "[a]"]
-    else:
-        cmd += ["-map", "0:v", "-map", "1:a"]
+    cmd += audio_mix(music if music and music.exists() else None, meta.get("music_volume", BRAND["music_volume"]), sfx)
     cmd += ["-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p",
             "-c:a", "aac", "-ar", "48000", "-b:a", "192k", "-movflags", "+faststart", "-shortest", str(out_path)]
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
@@ -1789,6 +1787,25 @@ def render(meta, words, audio_path, duration, out_path, frame_at=None):
     proc.stdin.close()
     if proc.wait():
         raise RuntimeError("ffmpeg failed")
+
+
+def audio_mix(music, music_volume, sfx, sfx_volume=0.8):
+    """ffmpeg input and mapping args after the video (input 0) and voice (input 1): music looped under the voice,
+    and each sound effect [(path, start seconds)] placed at its moment."""
+    args, parts, mix = [], [], ["[1:a]"]
+    if music:
+        args += ["-stream_loop", "-1", "-i", str(music)]
+        parts.append(f"[2:a]volume={music_volume}[m]")
+        mix.append("[m]")
+    for k, (path, start) in enumerate(sfx):
+        j = 2 + bool(music) + k
+        args += ["-i", str(path)]
+        parts.append(f"[{j}:a]adelay={round(start * 1000)}:all=1,volume={sfx_volume}[s{k}]")
+        mix.append(f"[s{k}]")
+    if len(mix) == 1:
+        return args + ["-map", "0:v", "-map", "1:a"]
+    parts.append(f"{''.join(mix)}amix=inputs={len(mix)}:duration=first:normalize=0[a]")
+    return args + ["-filter_complex", ";".join(parts), "-map", "0:v", "-map", "[a]"]
 
 
 # ---------- orchestration ----------
@@ -1863,7 +1880,8 @@ def score_video(con, pageid):
     return score
 
 
-def make(con, pageid):
+def make(con, pageid, auto=False):
+    """Research, script, visuals, voice, render. In manual mode (unless auto) it stops at an editable draft."""
     before = dict(ai_used)
     row = con.execute("select * from pages where pageid=?", (pageid,)).fetchone()
     work = WORK / str(pageid)
@@ -1916,7 +1934,14 @@ def make(con, pageid):
         print(f"  {len(images)} images")
         m = dict(ep=ep, pageid=pageid, origin=origin, article_title=title, description=desc,
                  title=s["title"], script=s["script"], tags=s["tags"], images=images, **src)
-        out = OUT / f"{ep:03d}-{re.sub(r'[^a-z0-9]+', '-', title.lower()).strip('-')[:50]}.mp4"
+        out = video_out(ep, title)
+        if BRAND.get("mode") == "manual" and not auto:  # stop here: you edit script, visuals and sound, then render
+            m["yt_description"] = description(m)
+            (work / "meta.json").write_text(json.dumps(m, indent=2))
+            upsert(con, pageid, status="draft", reason="")
+            print(f"  draft ready: open EP {ep:03d} in the studio to edit it, then click Render")
+            record_usage(pageid, before)
+            return None
         produce(con, m, out)
     except BaseException as e:
         upsert(con, pageid, status="failed", reason=f"{type(e).__name__}: {e}"[:300])
@@ -1927,6 +1952,10 @@ def make(con, pageid):
         print(f"  could not score: {e}")
     record_usage(pageid, before)
     return out
+
+
+def video_out(ep, title):
+    return OUT / f"{ep:03d}-{re.sub(r'[^a-z0-9]+', '-', title.lower()).strip('-')[:50]}.mp4"
 
 
 def produce(con, m, out):
@@ -2213,7 +2242,7 @@ def rerender(con, ep, repick_images=False, narration=None):
         print("  picking images from the script…")
         m["images"] = pick_visuals(m["article_title"], m["script"], WORK / str(row["pageid"]), own=[],
                                    topics=m.get("topics", ())) or m["images"]
-    produce(con, m, Path(row["video_path"]) if row["video_path"] else OUT / f"{ep:03d}-rerender.mp4")
+    produce(con, m, Path(row["video_path"]) if row["video_path"] else video_out(ep, m["article_title"]))
     score_video(con, row["pageid"])
     record_usage(row["pageid"], before)
 
@@ -2532,8 +2561,11 @@ def caption(m):
 
 
 def video_seconds(path):
-    import imageio_ffmpeg
-    return imageio_ffmpeg.count_frames_and_secs(str(path))[1]
+    """Duration of any audio or video file, as ffmpeg reports it (0 if it can't tell)."""
+    import subprocess, imageio_ffmpeg
+    err = subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(), "-hide_banner", "-i", str(path)], capture_output=True, text=True).stderr
+    m = re.search(r"Duration: (\d+):(\d+):([\d.]+)", err)
+    return int(m[1]) * 3600 + int(m[2]) * 60 + float(m[3]) if m else 0.0
 
 
 def upload_youtube(row, m, publish_at):
@@ -2608,6 +2640,10 @@ def selftest():
     assert credit({"artist": "", "license": ""}) == ""  # own upload: no credit line
     assert json_in('Here you go:\n```json\n{"notes": "a {b}", "visuals": []}\n```') == {"notes": "a {b}", "visuals": []}
     assert json_in("no json") == {}
+    assert audio_mix(None, 0.1, []) == ["-map", "0:v", "-map", "1:a"]
+    mx = audio_mix(Path("m.mp3"), 0.1, [(Path("a.wav"), 2.5)])
+    assert mx[-5] == "[2:a]volume=0.1[m];[3:a]adelay=2500:all=1,volume=0.8[s0];[1:a][m][s0]amix=inputs=3:duration=first:normalize=0[a]", mx
+    assert audio_mix(None, 0.1, [(Path("a.wav"), 1)])[3].startswith("[2:a]adelay=1000"), "sfx is input 2 without music"
     assert seconds("1:20") == 80 and seconds("01:02:03") == 3723 and seconds("95") == 95
     assert precheck({"title": "List of moths", "length": 9e9}) == "list page"
     assert precheck({"title": "X", "length": 9000, "pageviews": {"a": 100, "b": None}}).startswith("low views")
@@ -2663,6 +2699,7 @@ def main():
     r = sub.add_parser("run", help="make a video from anything: a question, topic, paragraph or link (none = next idea)")
     r.add_argument("input", nargs="?"); r.add_argument("--url", dest="input", help=argparse.SUPPRESS)
     r.add_argument("--force", action="store_true")
+    r.add_argument("--auto", action="store_true", help="render right away even in manual mode")
     r.add_argument("--upload", action="store_true"); r.add_argument("--publish-at")
     a = sub.add_parser("add", help="save ideas: questions, topics, paragraphs or links")
     a.add_argument("items", nargs="+"); a.add_argument("--force", action="store_true")
@@ -2769,7 +2806,7 @@ def main():
             if pageid is None:
                 print("discovering…")
                 pageid = discover(con)[0]
-        make(con, pageid)
+        make(con, pageid, auto=args.auto)
         if args.upload:
             upload_pending(con, args.publish_at)
 
