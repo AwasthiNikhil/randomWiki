@@ -517,7 +517,7 @@ def research_gemini(question):
             titles.append(p["title"])
     sites = list(dict.fromkeys(name for name, _ in sources))
     print(f"  researched with Gemini ({how}): {', '.join(sites[:6])}")
-    return dict(origin="question", title=question, description=f"Explained · from {len(sites)} sources",
+    return dict(origin="question", title=question, description="",
                 text=notes, url=next((u for n, u in sources if "wikipedia.org/wiki/" in u), sources[0][1]), images=[], popularity=None,
                 credit="Researched with Gemini from: " + ("; ".join(sites[:8]) if how == "Google Search"  # search links are redirects
                                                           else " ".join(u for _, u in sources[:8])),
@@ -554,7 +554,7 @@ def research(question):
         _, _, text, _ = fetch_article(found[t])
         notes.append(f"## {t}\n{text[:2600]}")
     urls = [page_url(t) for t in titles]
-    return dict(origin="question", title=question, description=f"Explained · from {len(titles)} Wikipedia articles",
+    return dict(origin="question", title=question, description="",
                 text="\n\n".join(notes), url=urls[0], images=[], popularity=None,
                 credit="Researched from the Wikipedia articles " + ", ".join(f'"{t}"' for t in titles)
                        + " (CC BY-SA 4.0): " + " ".join(urls),
@@ -1367,7 +1367,8 @@ def render(meta, words, audio_path, duration, out_path, frame_at=None):
     d.text((176, 111), BRAND["channel"].upper(), font=font("display", 62), fill=C["text"], anchor="lm")
     d.text((W - 60, 111), f"EP {meta['ep']:03d}", font=font("body", 38, "Bold"), fill=C["accent"], anchor="rm")
     # title (<=3 lines) + description (<=2 lines) scaled together to fit the header block
-    desc, room, tw = meta.get("description") or "", PY - 24 - 190, W - 120
+    desc = "" if meta.get("origin") == "question" else meta.get("description") or ""  # older explainers stored a source count here
+    room, tw = PY - 24 - 190, W - 120
     for pct in range(100, 30, -4):
         tf, df = font("display", 84 * pct // 100), font("body", max(22, 36 * pct // 100), "Medium")
         tl, dl = wrap(meta["article_title"], tf, tw), wrap(desc, df, tw)
@@ -1382,7 +1383,6 @@ def render(meta, words, audio_path, duration, out_path, frame_at=None):
     for line in dl:
         d.text((60, y), line, font=df, fill=C["muted"])
         y += df.size * 1.3
-    d.text((W // 2, 1878), meta.get("source_label") or "Source: Wikipedia · CC BY-SA 4.0", font=font("body", 28, "Medium"), fill=C["muted"], anchor="mm")
 
     mask = Image.new("L", (PW, PH), 0)
     ImageDraw.Draw(mask).rounded_rectangle((0, 0, PW, PH), 36, fill=255)
@@ -1409,7 +1409,7 @@ def render(meta, words, audio_path, duration, out_path, frame_at=None):
     for img in meta["images"]:
         try:
             if img.get("kind") == "video":
-                srcs.append((Clip(img["path"]), fit_lines("Video: " + credit(img), "body", 26, PW, 2, min_size=18) if credit(img) else None))
+                srcs.append((Clip(img["path"]), None))  # credits go in the YouTube description, not on screen
                 cues.append(img.get("sentence"))
                 continue
             im = Image.open(img["path"])
@@ -1420,7 +1420,7 @@ def render(meta, words, audio_path, duration, out_path, frame_at=None):
                 im.thumbnail((int(card.width * scale), int(card.height * scale)), Image.LANCZOS)
                 card.paste(im, ((card.width - im.width) // 2, (card.height - im.height) // 2), im)
                 still.add(len(srcs))
-                srcs.append((card, fit_lines("Image: " + credit(img), "body", 26, PW, 2, min_size=18) if credit(img) else None))
+                srcs.append((card, None))
                 cues.append(img.get("sentence"))
                 continue
             if im.mode in ("RGBA", "LA", "P"):
@@ -1430,8 +1430,7 @@ def render(meta, words, audio_path, duration, out_path, frame_at=None):
                 im = flat
             im = im.convert("RGB")
             s = max(PW * 1.15 / im.width, PH * 1.15 / im.height)
-            srcs.append((im.resize((round(im.width * s), round(im.height * s)), Image.LANCZOS),
-                         fit_lines("Image: " + credit(img), "body", 26, PW, 2, min_size=18) if credit(img) else None))
+            srcs.append((im.resize((round(im.width * s), round(im.height * s)), Image.LANCZOS), None))
             cues.append(img.get("sentence"))
         except Exception as e:
             print(f"  skip image {img['path']}: {e}")
