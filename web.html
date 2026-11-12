@@ -344,6 +344,12 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
           </fieldset>
           <fieldset class="scard"><legend>Content</legend>
             <label style="max-width:320px">Local LLM <small>from Ollama</small><select name="llm" id="llmSel"></select></label>
+            <div style="display:grid;gap:6px;max-width:460px">
+              <label>Gemini <small id="gemStatus"></small><select name="gemini_model" id="gemSel"></select></label>
+              <div class="inline"><input type="password" id="gemKey" placeholder="Paste a Gemini API key" autocomplete="off" aria-label="Gemini API key" style="flex:1;min-width:0">
+                <button class="btn sm" type="button" id="gemSave">Save key</button><button class="btn sm danger" type="button" id="gemRm" hidden>Remove</button></div>
+              <span class="hint">Optional. With a key, Gemini researches questions on the web, writes scripts and picks visuals; the local LLM scores ideas and takes over if Gemini fails. A <code>GEMINI_API_KEY</code> in your shell is used first. A saved key stays in <code>secrets/</code> on this computer, which scheduled runs need. Get a key at aistudio.google.com/apikey.</span>
+            </div>
             <label style="max-width:320px">Minimum interest score <output id="scoreOut"></output><input type="range" name="min_score" min="1" max="10" step="1"></label>
             <label style="max-width:320px">Maximum video length <small>seconds</small><input type="number" name="max_seconds" min="20" max="175"></label>
           </fieldset>
@@ -923,6 +929,12 @@ async function loadSettings() {
   syncEngine();
   $("#llmSel").innerHTML = [...new Set([S.llm, ...j.models])].map(m => `<option>${esc(m)}</option>`).join("");
   F("llm").value = S.llm;
+  const g = j.gemini, gm = S.gemini_model || "gemini-flash-latest";
+  $("#gemSel").innerHTML = [...new Set([gm, ...g.models])].map(m => `<option>${esc(m)}</option>`).join("");
+  F("gemini_model").value = gm; $("#gemSel").disabled = !g.key;
+  $("#gemStatus").textContent = g.key === "shell" ? "· using GEMINI_API_KEY from your shell" : g.key === "saved" ? "· using your saved key" : "· off (no key)";
+  if (g.error) $("#gemStatus").textContent += ` · ${g.error}`;
+  $("#gemRm").hidden = g.key !== "saved";
   $("#colorRows").innerHTML = Object.entries(COLOR_LABELS).map(([k, label]) => `<label>${label}<span class="crow">
       <input type="color" data-color="${k}" value="${S.colors[k]}" aria-label="${label} colour picker"><input data-hex="${k}" value="${S.colors[k]}" maxlength="7" aria-label="${label} hex"></span></label>`).join("");
   $("#musicState").textContent = j.music ? "Music track uploaded" : "No music (voice only)";
@@ -967,7 +979,7 @@ function collect() {
   S = {...S, channel: F("channel").value, tagline: F("tagline").value, outro_line: F("outro_line").value, logo_text: F("logo_text").value,
     hashtags: F("hashtags").value.split(",").map(x => x.trim()).filter(Boolean), voice: F("voice").value, voice_speed: +F("voice_speed").value,
     music_volume: +F("music_volume").value, voice_engine: document.querySelector("[name=vEngine]:checked")?.value || "kokoro",
-    clone_consent: $("#cloneConsent").checked, min_score: +F("min_score").value, max_seconds: +F("max_seconds").value, llm: F("llm").value,
+    clone_consent: $("#cloneConsent").checked, min_score: +F("min_score").value, max_seconds: +F("max_seconds").value, llm: F("llm").value, gemini_model: F("gemini_model").value,
     fonts: {...S.fonts, display_weight: F("display_weight").value}};
   readSchedule();
   return S;
@@ -1006,6 +1018,10 @@ $("#sform").addEventListener("click", async e => {
     $("#fontPick").hidden = true; renderFontRoles(); setDirty(true);
   }
   else if (t.id === "hear") { if (await saveSettings() && await exec("voicetest")) { await waitJob(); const a = $("#voiceAudio"); a.hidden = false; a.src = "/data/voice_preview.wav?t=" + Date.now(); a.play(); } }
+  else if (t.id === "gemSave" || t.id === "gemRm") {
+    if (t.id === "gemSave" && !$("#gemKey").value.trim()) return termLine("! paste a key first", "err");
+    if (await post("/api/gemini_key", {key: t.id === "gemSave" ? $("#gemKey").value : ""})) { $("#gemKey").value = ""; const keep = collect(); await loadSettings(); Object.assign(S, keep); }
+  }
   else if (t.id === "musicRm" || t.id === "logoRm") { await post("/api/remove_brand", {kind: t.id === "musicRm" ? "music" : "logo"}); const keep = collect(); await loadSettings(); Object.assign(S, keep); }
 });
 let fqTimer; $("#fq").oninput = () => { clearTimeout(fqTimer); fqTimer = setTimeout(searchFonts, 250); };

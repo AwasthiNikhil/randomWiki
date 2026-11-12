@@ -3,7 +3,7 @@
 Runs the same rw.py commands as the CLI in a subprocess and streams their output.
 Bound to localhost only; POSTs require an X-RW header so other websites can't trigger jobs.
 """
-import json, re, shlex, shutil, signal, subprocess, sys, threading, webbrowser
+import json, os, re, shlex, shutil, signal, subprocess, sys, threading, urllib.request, webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -62,6 +62,8 @@ def save_brand(new):
     b["voice_sample"] = "brand/voice_sample.wav"
     b["music_volume"], b["min_score"], b["max_seconds"] = num("music_volume", 0, 0.5), num("min_score", 1, 10, int), num("max_seconds", 20, 175, int)
     b["llm"] = text("llm", 1, 80)
+    if "gemini_model" in new:
+        b["gemini_model"] = text("gemini_model", 1, 80)
     sch = new.get("schedule") or {}
     times = sorted({str(t) for t in sch.get("times", [])})
     days = sorted({int(d) for d in sch.get("days", []) if 0 <= int(d) <= 6})
@@ -236,9 +238,19 @@ class H(BaseHTTPRequestHandler):
                 models = sorted(m["name"] for m in rw.get_json(brand()["ollama_url"] + "/api/tags")["models"])
             except Exception:
                 models = []
+            gemini = {"key": "shell" if os.environ.get("GEMINI_API_KEY", "").strip() else "saved" if rw.gemini_key() else "", "models": []}
+            if gemini["key"]:
+                try:  # text models this key can use; aliases first so "latest" follows Google's current model
+                    req = urllib.request.Request(rw.GEMINI_API + "?pageSize=200", headers={"x-goog-api-key": rw.gemini_key()})
+                    names = [m["name"].removeprefix("models/") for m in json.load(urllib.request.urlopen(req, timeout=8))["models"]
+                             if "generateContent" in m.get("supportedGenerationMethods", [])]
+                    gemini["models"] = sorted((n for n in names if n.startswith("gemini") and not re.search(
+                        r"tts|image|robotics|computer|omni|transcribe|customtools|banana", n)), key=lambda n: ("latest" not in n, n))
+                except Exception as e:
+                    gemini["error"] = f"couldn't list models ({type(e).__name__})"
             b = brand()
             log = rw.AUTO_LOG.read_text(errors="ignore").splitlines()[-40:] if rw.AUTO_LOG.exists() else []
-            return self.send(200, {"brand": b, "voices": sorted(rw.KOKORO_VOICES), "models": models,
+            return self.send(200, {"brand": b, "voices": sorted(rw.KOKORO_VOICES), "models": models, "gemini": gemini,
                                    "schedule": rw.SCHEDULE_DEFAULTS | b.get("schedule", {}), "schedule_loaded": rw.schedule_loaded(),
                                    "auto_log": [l for l in log if l.startswith(("===", "make:", "queue empty", "  done", "  uploaded", "  upload failed"))][-12:],
                                    "music": (rw.ROOT / b["music"]).is_file(), "voice_sample": (rw.ROOT / "brand" / "voice_sample.wav").is_file(),
@@ -339,6 +351,16 @@ class H(BaseHTTPRequestHandler):
                 meta.write_text(json.dumps(m, indent=2))
             elif self.path == "/api/settings":
                 return self.send(200, {"ok": True, "brand": save_brand(body["brand"])})
+            elif self.path == "/api/gemini_key":  # body: {"key": "..."}; empty removes the saved key
+                key = str(body.get("key", "")).strip()
+                if not key:
+                    rw.GEMINI_KEY_FILE.unlink(missing_ok=True)
+                elif not re.fullmatch(r"[\w.\-]{20,200}", key):
+                    raise ValueError("that doesn't look like a Gemini API key")
+                else:
+                    rw.SECRETS.mkdir(exist_ok=True)
+                    rw.GEMINI_KEY_FILE.write_text(key)
+                    rw.GEMINI_KEY_FILE.chmod(0o600)
             elif self.path == "/api/fonts/install":
                 family = str(body["family"])
                 if not any(f["family"] == family for f in rw.google_fonts()):

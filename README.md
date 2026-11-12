@@ -12,6 +12,14 @@ In the studio's **Make a video** box, or `./rw run "…"` (`./rw add "…"` save
 | a link to a list: a feed, a site, a subreddit, a Wikipedia category or list | its most interesting items go into the ideabank |
 | nothing | the next idea in the ideabank, else a random interesting Wikipedia page |
 
+## Gemini (optional)
+Everything runs locally by default. With a Gemini API key (free at [aistudio.google.com/apikey](https://aistudio.google.com/apikey)), Gemini does the thinking instead:
+- **Research goes beyond Wikipedia.** Gemini uses Google Search if your key's plan includes it. Otherwise it picks reliable pages on any site (encyclopedias, official docs, universities), reads them itself, and writes notes from what it read. Every page it read is credited. If it can't read enough, research falls back to Wikipedia rather than script from the model's memory.
+- **Visuals:** Gemini names the concrete things to show, and their Wikipedia articles supply the images.
+- **Writing:** scripts, fact-checks and image picks use Gemini. Scoring ideas in bulk stays on the local LLM to save quota. If Gemini fails (quota, busy), the local LLM takes over for the rest of that run.
+
+The key is yours, not the project's: `GEMINI_API_KEY` in your shell is used first. You can also paste one in **Settings → Content**, which saves it to `secrets/gemini_api_key` (git-ignored). Scheduled runs need the saved key, since they don't load your shell profile. The model is chosen there too; `gemini-flash-latest` follows Google's current Flash model.
+
 
 1. **Pick:** random articles, or ideas found around a topic through its Wikipedia link network (1–3 hops). Stubs, lists and disambiguation pages are dropped, and a local LLM scores the rest out of 10.
 2. **Log:** every page that comes up is stored in SQLite with a status and the reason, so nothing is ever processed twice.
@@ -102,7 +110,7 @@ Everything is editable in the studio's **Settings** tab and stored in `brand.jso
 - **Typography:** any Google Fonts family (searchable, with live samples). The font is downloaded into `brand/fonts/` and fetched again automatically on a fresh clone.
 - **Voice:** 25 Kokoro English voices and the speed
 - **Music:** upload an MP3 (`brand/music.mp3`) and set its volume under the voice
-- **Content:** local LLM, minimum interest score, maximum length
+- **Content:** local LLM, Gemini model and key, minimum interest score, maximum length
 
 New settings apply to new renders. Use **Save & re-render** on a video to update it.
 

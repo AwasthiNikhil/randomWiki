@@ -13,7 +13,7 @@
   ./rw web [--port 8765]                              local studio UI in the browser
   ./rw selftest
 """
-import argparse, json, os, re, sqlite3, sys, time, urllib.parse, urllib.request
+import argparse, json, os, re, sqlite3, sys, time, urllib.error, urllib.parse, urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -91,7 +91,64 @@ def upsert(con, pageid, **f):
 
 
 # ---------- llm ----------
-def llm(prompt, temperature=0.7):
+GEMINI_API = "https://generativelanguage.googleapis.com/v1beta/models/"
+GEMINI_KEY_FILE = SECRETS / "gemini_api_key"
+gemini_down = None  # why Gemini failed this run; the rest of the run then uses the local model
+
+
+def gemini_key():
+    """GEMINI_API_KEY from the shell, else the key saved in Settings (secrets/, git-ignored). Each user brings their own."""
+    k = os.environ.get("GEMINI_API_KEY", "").strip()
+    return k or (GEMINI_KEY_FILE.read_text().strip() if GEMINI_KEY_FILE.exists() else "")
+
+
+def gemini(prompt, temperature=0.7, tools=None):
+    """One Gemini call -> (text, candidate). Tries the chosen model, then Flash-Lite (busy or out of quota)."""
+    body = {"contents": [{"role": "user", "parts": [{"text": prompt}]}], "generationConfig": {"temperature": temperature}}
+    if tools:
+        body["tools"] = tools
+    else:
+        body["generationConfig"]["responseMimeType"] = "application/json"
+    why = ""
+    models = [BRAND.get("gemini_model") or "gemini-flash-latest", "gemini-flash-lite-latest"]
+    for model in models + models:  # second round: busy (503) and timeouts are usually over in seconds
+        if why:
+            time.sleep(3 if model != models[0] else 10)
+        req = urllib.request.Request(GEMINI_API + model + ":generateContent", json.dumps(body).encode(),
+                                     {"x-goog-api-key": gemini_key(), "Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=90) as r:
+                c = json.load(r)["candidates"][0]
+            return "".join(p.get("text", "") for p in c["content"]["parts"]), c
+        except urllib.error.HTTPError as e:
+            try:  # Google's own message only; never the request (it carries the key)
+                why = f"{model}: {json.load(e)['error']['message'].split('. ')[0]}"
+            except Exception:
+                why = f"{model}: HTTP {e.code}"
+            if e.code in (400, 401, 403):
+                break  # bad key or request: another model won't help
+            if e.code == 429 and model == models[-1]:
+                break  # out of quota on the fallback too: waiting won't help this run
+        except (urllib.error.URLError, TimeoutError, KeyError, IndexError, ValueError) as e:
+            why = f"{model}: {type(e).__name__}"
+    raise RuntimeError(why)
+
+
+def json_in(text):
+    """The JSON object in a reply that may wrap it in prose or a code fence."""
+    m = re.search(r"\{.*\}", text, re.S)
+    return json.loads(m[0]) if m else {}
+
+
+def llm(prompt, temperature=0.7, local=False):
+    """JSON reply from Gemini when a key is set (unless local: bulk scoring stays free), else from Ollama."""
+    global gemini_down
+    if not local and not gemini_down and gemini_key():
+        try:
+            return json_in(gemini(prompt, temperature)[0])
+        except (RuntimeError, ValueError) as e:
+            gemini_down = str(e)
+            print(f"  Gemini unavailable ({gemini_down}); using the local model for the rest of this run")
     r = get_json(BRAND["ollama_url"] + "/api/chat", data=json.dumps({
         "model": BRAND["llm"], "stream": False, "format": "json",
         "options": {"num_ctx": 8192, "temperature": temperature},
@@ -183,7 +240,7 @@ def evaluate(con, p, source, via=None, seed=None):
         return False
     context = (f"\nThe channel is currently exploring topics connected to {seed}. "
                f"The article must still be fascinating on its own, not just related.\n") if seed else ""
-    s = llm(SCORE_PROMPT.format(title=p["title"], text=p.get("extract", "")[:3000], context=context), 0.2)
+    s = llm(SCORE_PROMPT.format(title=p["title"], text=p.get("extract", "")[:3000], context=context), 0.2, local=True)
     score = int(s.get("score", 0) or 0)
     ok = score >= BRAND["min_score"]
     upsert(con, p["pageid"], status="queued" if ok else "rejected", score=score,
@@ -243,7 +300,7 @@ def discover_source(con, origin, want=5, arg=None, cands=None):
             continue
         base = dict(title=a["title"], url=a["url"], source=origin if origin in ("rss", "link") else "random",
                     origin=a["origin"], ref=c["ref"], via=arg if origin == "link" else None)
-        s = llm(SCORE_PROMPT.format(title=a["title"], text=a["text"][:3000], context=""), 0.2)
+        s = llm(SCORE_PROMPT.format(title=a["title"], text=a["text"][:3000], context=""), 0.2, local=True)
         score = int(s.get("score", 0) or 0)
         ok = score >= BRAND["min_score"]
         upsert(con, pid, status="queued" if ok else "rejected", score=score,
@@ -413,8 +470,68 @@ parts, steps or mechanisms involved. Use real, existing article titles.
 Reply as JSON: {{"articles": ["<title>", ...]}}"""
 
 
+GEMINI_RESEARCH = """Research this for a 50-second explainer video: "{question}"
+{how}
+Write factual research notes of 300 to 500 words for a scriptwriter: the key facts, numbers and names, and for "how"
+questions the steps in the order they happen. Use only facts from the sources you read; skip anything uncertain.
+Also list up to 6 concrete things worth showing on screen (objects, places, people, machines, diagrams), each as the
+exact title of an existing English Wikipedia article.
+Reply with only this JSON: {{"notes": "<notes>", "visuals": ["<Wikipedia title>", ...]}}"""
+
+GEMINI_SOURCES = """We are researching a 50-second explainer video about: "{question}"
+List 4 to 6 web pages that explain it reliably and in detail: encyclopedias, universities, museums, official
+documentation, standards bodies, reputable science or news sites. Give exact, real URLs of specific pages
+(not home pages). Include the most relevant English Wikipedia article.
+Reply as JSON: {{"urls": ["<url>", ...]}}"""
+
+
+def research_gemini(question):
+    """Gemini researches the web: Google Search if the key's plan allows it, else it picks pages and reads them itself."""
+    sources = []
+    try:
+        text, c = gemini(GEMINI_RESEARCH.format(question=question, how="Search the web for it."), 0.2,
+                         tools=[{"google_search": {}}])
+        sources = [(ch["web"].get("title", ""), ch["web"].get("uri", "")) for ch in
+                   (c.get("groundingMetadata") or {}).get("groundingChunks", []) if "web" in ch]
+        how = "Google Search"
+    except RuntimeError as e:
+        print(f"  Google Search via Gemini unavailable ({e}); Gemini will choose and read pages instead")
+        urls = [u for u in (json_in(gemini(GEMINI_SOURCES.format(question=question), 0.2)[0]).get("urls") or [])
+                if isinstance(u, str) and u.startswith("https://")][:6]
+        if not urls:
+            raise RuntimeError("Gemini suggested no pages")
+        text, c = gemini(GEMINI_RESEARCH.format(question=question, how="Read these pages:\n" + "\n".join(urls)), 0.2,
+                         tools=[{"url_context": {}}])
+        read = [m["retrievedUrl"] for m in (c.get("urlContextMetadata") or {}).get("urlMetadata", [])
+                if m.get("urlRetrievalStatus") == "URL_RETRIEVAL_STATUS_SUCCESS"]
+        sources = [(urllib.parse.urlsplit(u).netloc.removeprefix("www."), u) for u in read]
+        how = f"{len(read)} of {len(urls)} pages read"
+    r = json_in(text)
+    notes = str(r.get("notes") or "").strip()
+    if len(notes.split()) < 80 or not sources:  # nothing it actually read: don't script from the model's memory
+        raise RuntimeError(f"too little sourced research ({how})")
+    titles = []
+    for t in [str(v) for v in (r.get("visuals") or [])][:6]:  # visual subjects -> real Wikipedia articles (their lead images)
+        p = wiki(titles=t, redirects=1)["query"]["pages"][0]
+        if not p.get("missing") and p["title"] not in titles:
+            titles.append(p["title"])
+    sites = list(dict.fromkeys(name for name, _ in sources))
+    print(f"  researched with Gemini ({how}): {', '.join(sites[:6])}")
+    return dict(origin="question", title=question, description=f"Explained · from {len(sites)} sources",
+                text=notes, url=next((u for n, u in sources if "wikipedia.org/wiki/" in u), sources[0][1]), images=[], popularity=None,
+                credit="Researched with Gemini from: " + ("; ".join(sites[:8]) if how == "Google Search"  # search links are redirects
+                                                          else " ".join(u for _, u in sources[:8])),
+                source_label="Sources: " + ", ".join(sites[:3]), titles=titles)
+
+
 def research(question):
-    """Answer a question from Wikipedia: pick the articles that cover it, read them, and package the notes as an Article."""
+    """Answer a question: with a Gemini key, Gemini researches the web; otherwise (or if that fails) Wikipedia,
+    by picking the articles that cover it, reading them, and packaging the notes as an Article."""
+    if gemini_key() and not gemini_down:
+        try:
+            return research_gemini(question)
+        except (RuntimeError, ValueError) as e:
+            print(f"  Gemini research failed ({e}); researching on Wikipedia instead")
     wanted = [str(t) for t in (llm(RESEARCH_PROMPT.format(question=question), 0.2).get("articles") or [])][:5]
     found = {}  # title -> pageid
     for q in [question] + wanted:  # resolve each suggestion to a real article via search (the question itself too)
@@ -1519,8 +1636,8 @@ def make(con, pageid):
                 try:
                     a = research(text[:300])
                     text = f"Creator's text:\n{text}\n\nBackground notes:\n{a['text']}"
-                    src.update(url=a["url"], credit=f"Written by {BRAND['channel']}, with background from " + a["credit"][16:],
-                               source_label=f"Written by {BRAND['channel']} · Wikipedia CC BY-SA")
+                    src.update(url=a["url"], credit=f"Written by {BRAND['channel']}. Background: {a['credit']}",
+                               source_label=f"Written by {BRAND['channel']} · " + a["source_label"].removeprefix("Sources: "))
                     # no topic images: research matches the subject loosely, and a personal story shouldn't show a stranger's tower
                 except SystemExit as e:
                     print(f"  no background found ({e}); using your text only")
@@ -1823,6 +1940,8 @@ def selftest():
     assert credit({"artist": "Unknown author", "license": "Public domain"}) == "Public domain"
     assert credit({"artist": "Fairfax", "license": "Public domain"}) == "Fairfax · Public domain"
     assert credit({"artist": "", "license": ""}) == ""  # own upload: no credit line
+    assert json_in('Here you go:\n```json\n{"notes": "a {b}", "visuals": []}\n```') == {"notes": "a {b}", "visuals": []}
+    assert json_in("no json") == {}
     assert precheck({"title": "List of moths", "length": 9e9}) == "list page"
     assert precheck({"title": "X", "length": 9000, "pageviews": {"a": 100, "b": None}}).startswith("low views")
     assert precheck({"title": "X", "length": 9000, "pageviews": {"a": 500}}) is None

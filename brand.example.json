@@ -22,6 +22,7 @@
   "music": "brand/music.mp3",
   "music_volume": 0.08,
   "llm": "llama3.1:8b",
+  "gemini_model": "gemini-flash-latest",
   "ollama_url": "http://localhost:11434",
   "min_score": 7,
   "max_seconds": 58,
