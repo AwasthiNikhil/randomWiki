@@ -38,14 +38,20 @@ def fetch(url, params=None, data=None):
     if params:
         url += "?" + urllib.parse.urlencode(params)
     req = urllib.request.Request(url, data=data, headers={"User-Agent": BRAND["user_agent"], "Content-Type": "application/json"})
-    for attempt in range(4):
+    for attempt in range(5):
         try:
             with urllib.request.urlopen(req, timeout=300) as r:
                 return r.read()
         except (urllib.error.URLError, TimeoutError, ConnectionError) as e:  # timeouts too: a slow LLM call is retried
-            if attempt == 3 or getattr(e, "code", 0) in (400, 403, 404):
+            code = getattr(e, "code", 0)
+            if attempt == 4 or code in (400, 403, 404):
                 raise
-            time.sleep(5 * (attempt + 1))  # Wikimedia rate-limits bursts (429)
+            wait = 5 * (attempt + 1)
+            if code == 429:  # rate-limited: wait as long as the server asks, else back off harder (15, 30, 45, 60 s)
+                ra = e.headers.get("Retry-After", "") if getattr(e, "headers", None) else ""
+                wait = min(int(ra), 120) if ra.isdigit() else 15 * (attempt + 1)
+                print(f"  {urllib.parse.urlsplit(url).netloc} is rate-limiting; waiting {wait}s")
+            time.sleep(wait)
 
 
 def get_json(url, params=None, data=None):
@@ -410,14 +416,16 @@ Reply as JSON: {{"articles": ["<title>", ...]}}"""
 def research(question):
     """Answer a question from Wikipedia: pick the articles that cover it, read them, and package the notes as an Article."""
     wanted = [str(t) for t in (llm(RESEARCH_PROMPT.format(question=question), 0.2).get("articles") or [])][:5]
-    titles = []
+    found = {}  # title -> pageid
     for q in [question] + wanted:  # resolve each suggestion to a real article via search (the question itself too)
-        hits = wiki(list="search", srsearch=q, srlimit=1, srnamespace=0)["query"]["search"]
-        if hits and hits[0]["title"] not in titles and not JUNK_TITLE.search(hits[0]["title"]):
-            titles.append(hits[0]["title"])
-    if not titles:
+        if len(found) == 5:
+            break
+        hits = wiki(list="search", srsearch=q, srlimit=1, srnamespace=0, srprop="")["query"]["search"]
+        if hits and not JUNK_TITLE.search(hits[0]["title"]):
+            found.setdefault(hits[0]["title"], hits[0]["pageid"])
+    if not found:
         raise SystemExit(f"couldn't find Wikipedia articles about: {question}")
-    titles = titles[:5]
+    titles = list(found)
     print(f"  researching: {', '.join(titles)}")
     notes = []
     simple = get_json("https://simple.wikipedia.org/w/api.php", {"action": "query", "format": "json", "formatversion": 2,
@@ -426,7 +434,7 @@ def research(question):
     if plain:  # Simple English Wikipedia: written for plain explanations
         notes.append(f"## {titles[0]} (in simple words)\n{plain[:1500]}")
     for t in titles:
-        _, _, text, _ = fetch_article(wiki(titles=t, redirects=1)["query"]["pages"][0]["pageid"])
+        _, _, text, _ = fetch_article(found[t])
         notes.append(f"## {t}\n{text[:2600]}")
     urls = [page_url(t) for t in titles]
     return dict(origin="question", title=question, description=f"Explained · from {len(titles)} Wikipedia articles",
