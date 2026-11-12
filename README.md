@@ -23,7 +23,7 @@ The key is yours, not the project's: `GEMINI_API_KEY` in your shell is used firs
 **Usage:** each video shows the Gemini requests and tokens it used (Episodes → open a video), and Settings shows today's totals per model. Days follow Pacific time, when Google resets the free quota. The API doesn't report how much quota is left; see [ai.dev/rate-limit](https://ai.dev/rate-limit).
 
 
-1. **Pick:** random articles, or ideas found around a topic through its Wikipedia link network (1–3 hops). Stubs, lists and disambiguation pages are dropped, and a local LLM scores the rest out of 10.
+1. **Pick:** random Wikipedia articles (stubs, lists and disambiguation pages are dropped, and a local LLM scores the rest out of 10), or ideas around a topic: the local LLM brainstorms questions and subjects, closer or further from the topic (degree 1–3). Each idea must name a real Wikipedia article and is checked against its intro, so ideas with a false premise are reworded or dropped. Ideas are researched properly when the video is made.
 2. **Log:** every page that comes up is stored in SQLite with a status and the reason, so nothing is ever processed twice.
 3. **Script:** Ollama writes a 45–55s narration from the full article, then fact-checks it against the article. You can edit it before rendering again.
 4. **Visuals:** chosen from what the narration mentions, sentence by sentence. Each named thing (a person, place, organisation, product or logo) gets the lead image of its own Wikipedia article. Named things without one are searched in Commons and Openverse, needing all the words to match plus an LLM meaning check. Vague phrases keep the previous image rather than show a wrong one. Each image appears when its sentence is spoken; logos and screenshots are shown whole on a light card. Falls back to the article's own images. In the visuals editor you can **Auto-pick from script**, search NASA and The Met, or upload your own.
@@ -50,7 +50,7 @@ Visuals can also be **video clips**: free-licensed Wikimedia Commons clips (usin
 | arXiv | papers matching a topic | the abstract (arXiv metadata is CC0) | Commons search, else a title card |
 | NASA APOD | the latest pictures (via NASA's RSS feed) | the explanation | search; APOD photos are often copyrighted, so they're not reused automatically |
 
-**Find ideas** in the Ideabank takes a topic (explored through Wikipedia's links), a link, or nothing (random). A link (`./rw discover --topic URL`) is worked out what you pasted: an RSS/Atom feed, a site or blog (its feed is found automatically), a subreddit (link posts are read from the article they point to), a Wikipedia `Category:` or `List of…` page (its articles), a Wikipedia article (explores around it), a Hacker News list, an arXiv listing, a single article, or any page that lists articles (news sections, blog indexes). Automation can use a link as its source when the ideabank is empty.
+**Find ideas** in the Ideabank takes a topic (the local LLM brainstorms ideas around it), a link, or nothing (random). A link (`./rw discover --topic URL`) is worked out what you pasted: an RSS/Atom feed, a site or blog (its feed is found automatically), a subreddit (link posts are read from the article they point to), a Wikipedia `Category:` or `List of…` page (its articles), a Wikipedia article (explores around it), a Hacker News list, an arXiv listing, a single article, or any page that lists articles (news sections, blog indexes). Automation can use a link as its source when the ideabank is empty.
 
 Credits name the source and link back. Non-Wikipedia text is copyrighted by its authors: the narration is a short summary in new words, so review it before publishing.
 
@@ -89,7 +89,7 @@ A local web UI. It's bound to 127.0.0.1 and runs the same commands as the CLI, s
 ```
 ./rw run ["anything"]         # a question, topic, paragraph or link; nothing = the next idea, else a random page
 ./rw add "anything" [...]     # save ideas for later runs
-./rw discover [--count 5] [--topic nepal|URL --degree 1|2|3|any]   # find ideas: random, a topic's link network, or a link
+./rw discover [--count 5] [--topic nepal|URL --degree 1|2|3|any]   # find ideas: random, brainstormed around a topic, or in a link
 ./rw run --upload [--publish-at 2026-11-12T15:00:00Z]
 ./rw upload [--ep N]          # upload every rendered video not yet uploaded (best first), or just episode N
 ./rw unpublish --ep N [--keep-local]   # delete an uploaded episode from YouTube (and locally unless --keep-local)

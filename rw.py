@@ -652,14 +652,84 @@ def add_text(con, text, force=False):
     return pid
 
 
-def add_question(con, question, force=False):
-    """Queue a question as an idea; it is researched when the video is made."""
+def question_id(question):
+    """'how do vaccines work' -> ('How do vaccines work?', its stable id)."""
     import sources
     q = re.sub(r"\s+", " ", question).strip()
     q = q[0].upper() + q[1:]
     if QUESTION_WORDS.match(q):
         q = q.rstrip("?") + "?"
-    pid = sources.synthetic_id("question:" + q.lower())
+    return q, sources.synthetic_id("question:" + q.lower())
+
+
+BRAINSTORM_PROMPT = """You find ideas for a YouTube Shorts channel of 50-second explainers and surprising true stories.
+Topic: "{topic}"
+{closeness}
+Suggest {n} video ideas. Each is one specific question or subject a curious viewer would click on: concrete, surprising,
+with a clear payoff. Mix "how", "why" and "what happened" ideas. Only well-documented subjects. Phrase them as open
+questions or subjects, never as claims, so nothing rests on a false premise.
+Already covered (suggest different ones): {seen}
+Each idea must be about one real subject that has its own English Wikipedia article.
+Reply as JSON: {{"ideas": [{{"idea": "<question or subject, max 70 characters>", "article": "<exact Wikipedia article title>",
+"hook": "<why it's interesting, one sentence>", "score": <1-10, how likely it makes a viewer think "wait, what?">}}]}}"""
+
+IDEA_CHECK_PROMPT = """Check video ideas against the Wikipedia text about their subject.
+For each idea: if the text supports what the idea assumes, keep it as it is. If the idea assumes something false, doubtful
+or not in the text, rewrite it into a true, still-intriguing question or subject based on the text, or drop it.
+{items}
+Reply as JSON: {{"ideas": [{{"n": <number>, "idea": "<kept or rewritten idea, max 70 characters>"}}]}} (leave out dropped ones)"""
+
+CLOSENESS = {"1": "Stay directly on the topic: its parts, history, people, places, and how it works.",
+             "2": "Go one step out: subjects closely connected to the topic, but not the topic itself.",
+             "3": "Go far: surprising, distant connections that still genuinely link back to the topic.",
+             "any": "Mix ideas directly about the topic with a few surprising, more distant connections."}
+
+
+def brainstorm(con, topic, degree="any", want=5):
+    """The local model suggests ideas around a topic. Each is queued like a typed question, so its facts come from
+    research when the video is made, never from the model's memory."""
+    seen = [r["title"] for r in con.execute("select title from pages where via like ? order by updated desc limit 40", (topic + "%",))]
+    print(f"brainstorming ideas around '{topic}' with the local model…")
+    r = llm(BRAINSTORM_PROMPT.format(topic=topic, closeness=CLOSENESS.get(degree, CLOSENESS["any"]), n=want * 2,
+                                     seen="; ".join(seen) or "nothing yet"), 0.9, local=True)
+    score = lambda i: int(m[0]) if (m := re.match(r"\d+", str(i.get("score", "")))) else 0
+    ideas = sorted((i for i in r.get("ideas") or [] if isinstance(i, dict) and str(i.get("idea", "")).strip()
+                    and str(i.get("article", "")).strip()), key=lambda i: -score(i))[:20]
+    # ground each idea in its real Wikipedia article: drop invented subjects, then check the premise against the intro
+    res = wiki(titles="|".join({str(i["article"]) for i in ideas}), redirects=1, prop="extracts", exintro=1,
+               explaintext=1, exlimit=20)["query"] if ideas else {}
+    alias = {x["from"]: x["to"] for x in res.get("normalized", []) + res.get("redirects", [])}
+    intro = {p["title"]: p.get("extract", "") for p in res.get("pages", []) if not p.get("missing") and p.get("extract")}
+    resolve = lambda t: alias.get(alias.get(t, t), alias.get(t, t))  # normalised, then redirected
+    real = [(i, intro[resolve(i["article"])]) for i in ideas if resolve(i["article"]) in intro]
+    if len(real) < len(ideas):
+        print(f"  dropped {len(ideas) - len(real)} with no real Wikipedia article")
+    items = "\n\n".join(f"{n}. Idea: {i['idea']}\nText: {t[:700]}" for n, (i, t) in enumerate(real, 1))
+    checked = llm(IDEA_CHECK_PROMPT.format(items=items), 0.2, local=True).get("ideas") or [] if real else []
+    kept = []
+    for c in checked:
+        n = int(c["n"]) if isinstance(c, dict) and str(c.get("n", "")).isdigit() else 0
+        if 1 <= n <= len(real) and str(c.get("idea", "")).strip():
+            kept.append({**real[n - 1][0], "idea": str(c["idea"])})
+    if len(kept) < len(real):
+        print(f"  dropped {len(real) - len(kept)} the article doesn't support")
+    found = []
+    for i in kept:
+        q, pid = question_id(str(i["idea"])[:120])
+        if len(found) >= want or con.execute("select 1 from pages where pageid=?", (pid,)).fetchone():
+            continue
+        upsert(con, pid, title=q, url="https://en.wikipedia.org/w/index.php?search=" + urllib.parse.quote(q), source="seed",
+               status="queued", score=min(score(i), 10), reason=f"llm: {i.get('hook', '')}"[:300], origin="question", ref=q,
+               via=f"{topic} (degree {degree})")
+        print(f"  {score(i):>2}/10  {q}  -> queued")
+        found.append(pid)
+    print(f"found {len(found)} of {want}" + ("" if found else "; try again, or another degree"))
+    return found
+
+
+def add_question(con, question, force=False):
+    """Queue a question as an idea; it is researched when the video is made."""
+    q, pid = question_id(question)
     row = con.execute("select status from pages where pageid=?", (pid,)).fetchone()
     if row and row["status"] in ("rendered", "uploaded") and not force:
         print(f"skip: already made ({row['status']}); use --force to make it again")
@@ -1813,7 +1883,7 @@ def auto(con, dry_run=False):
         if row:
             pid = row["pageid"]
         elif sch["fallback"] == "wikipedia":
-            pid = (explore(con, sch["fallback_arg"], "any", 1) if sch["fallback_arg"] else discover(con, 1))[0]
+            pid = (brainstorm(con, sch["fallback_arg"], "any", 1) if sch["fallback_arg"] else discover(con, 1))[0]
         else:
             pid = discover_source(con, sch["fallback"], 1, sch["fallback_arg"] or None)[0]
         make(con, pid)
@@ -2095,7 +2165,7 @@ def main():
         if args.topic and sources.looks_like_link(args.topic):
             discover_source(con, "link", args.count, args.topic)
         elif args.topic:
-            explore(con, args.topic, args.degree, args.count)
+            brainstorm(con, args.topic, args.degree, args.count)
         else:
             print(f"finding {args.count} interesting random pages…")
             discover(con, args.count)
