@@ -869,6 +869,101 @@ def brainstorm(con, topic, degree="any", want=5):
     return found
 
 
+TREND_PROMPT = """You find ideas for a YouTube Shorts channel of 50-second explainers about: {topics}.
+Below are headlines people are reading this week. For the most promising ones, write one open question a curious viewer
+would click, about the lasting science, history or "how does that work" behind the news (e.g. "How do tornado warnings
+work?"), not the news event itself. Never assume claims from the headline are true.
+For each, also say what kind of story the HEADLINE is, and how well the question fits the channel's topics.
+
+Headlines:
+{headlines}
+
+Reply as JSON: {{"ideas": [{{"n": <headline number>, "question": "<max 70 characters>",
+"kind": "<one of: science, technology, nature, space, history, how-it-works, health, sports, disaster, crime, war,
+politics, celebrity, business, other>", "fit": <1-10, how squarely it belongs to {topics}>}}]}}"""
+
+TREND_SKIP = {"sports", "disaster", "crime", "war", "politics", "celebrity", "business", "other"}  # not explainer material, or tragedies
+
+DEFAULT_TOPICS = ["science", "history", "technology", "nature"]
+
+
+def channel_topics():
+    return [t for t in (BRAND.get("topics") or []) if str(t).strip()] or DEFAULT_TOPICS
+
+
+def headlines(topics, per_topic=12):
+    """This week's news on each topic (Google News RSS), plus today's top searches (Google Trends RSS). No key needed."""
+    import random, xml.etree.ElementTree as ET
+    out = []
+    for t in random.sample(topics, min(3, len(topics))):
+        try:
+            root = ET.fromstring(fetch("https://news.google.com/rss/search", {"q": f"{t} when:7d", "hl": "en-US", "gl": "US", "ceid": "US:en"}))
+            out += [(re.sub(r"\s+-\s+[^-]+$", "", i.findtext("title") or ""), i.findtext("link") or "") for i in root.iter("item")][:per_topic]
+        except Exception as e:
+            print(f"  news for '{t}' unavailable ({type(e).__name__})")
+    try:
+        ns = {"ht": "https://trends.google.com/trending/rss"}
+        root = ET.fromstring(fetch("https://trends.google.com/trending/rss", {"geo": "US"}))
+        for i in root.iter("item"):
+            news = i.find("ht:news_item", ns)
+            out.append((f"{i.findtext('title')}: {news.findtext('ht:news_item_title', '', ns) if news is not None else ''}",
+                        news.findtext("ht:news_item_url", "", ns) if news is not None else ""))
+    except Exception as e:
+        print(f"  Google Trends unavailable ({type(e).__name__})")
+    return [(h.strip(), u) for h, u in dict(out).items() if h.strip()]
+
+
+def trending(con, want=1):
+    """Ideas from what's in the news in the channel's topics, phrased as explainer questions (researched when made)."""
+    topics = channel_topics()
+    print(f"looking for trending ideas in: {', '.join(topics)}")
+    items = headlines(topics)
+    if not items:
+        return []
+    picks = llm(TREND_PROMPT.format(topics=", ".join(topics), n=want + 2,  # a couple spare: some may be made already
+                                    headlines="\n".join(f"{k + 1}. {h}" for k, (h, _) in enumerate(items[:60]))), 0.4, local=True).get("ideas") or []
+    found = []
+    picks = [pk for pk in picks if str(pk.get("kind", "")).lower() not in TREND_SKIP and int(pk.get("fit") or 0) >= 7]  # checked here, not trusted
+    for pk in sorted(picks, key=lambda pk: -int(pk.get("fit") or 0)):
+        n, q = pk.get("n"), str(pk.get("question") or "").strip()
+        if len(found) >= want or not q or not str(n).isdigit() or not 1 <= int(n) <= len(items):
+            continue
+        pid = add_question(con, q[:90])
+        if pid:
+            h, link = items[int(n) - 1]
+            upsert(con, pid, source="trend", via=link or h, reason=f"trending: {h[:150]}")
+            found.append(pid)
+    return found
+
+
+def next_ideas(con, want=1):
+    """New ideas when nothing is queued, from Settings → Brand → New ideas: a mix of fresh angles on your topics and
+    what's trending in them (default), only one of those, or random Wikipedia pages. Falls back down that list."""
+    import random
+    how = BRAND.get("idea_source") or "mix"
+    order = {"mix": random.sample(["topics", "trending"], 2), "topics": ["topics", "trending"], "trending": ["trending", "topics"],
+             "wikipedia": ["wikipedia"]}.get(how, ["topics", "trending"]) + ["wikipedia"]
+    if how == "mix" and want > 1:  # several at once: half trending, the rest fresh angles on your topics
+        got = []
+        for f in (lambda: trending(con, (want + 1) // 2), lambda: brainstorm(con, random.choice(channel_topics()), "any", want - len(got))):
+            try:
+                got += f()
+            except (SystemExit, Exception) as e:
+                print(f"  ({e})")
+        if got:
+            return got
+    for src in dict.fromkeys(order):
+        try:
+            got = (trending(con, want) if src == "trending" else brainstorm(con, random.choice(channel_topics()), "any", want)
+                   if src == "topics" else discover(con, want))
+        except (SystemExit, Exception) as e:
+            print(f"  no {src} ideas ({e})")
+            got = []
+        if got:
+            return got
+    raise SystemExit("couldn't find a new idea; add some to the ideabank")
+
+
 def add_question(con, question, force=False):
     """Queue a question as an idea; it is researched when the video is made."""
     q, pid = question_id(question)
@@ -2318,8 +2413,8 @@ def auto(con, dry_run=False):
     try:
         row = con.execute(f"select pageid, title from pages where status='queued' {QUEUE_ORDER} limit 1").fetchone()
         when = publish_time_utc(sch["publish_time"]) if sch["publish"] == "at" else None
-        plan = (f"make: {row['title']}" if row else f"queue empty: discover 1 idea from {sch['fallback']}"
-                + (f" ({sch['fallback_arg']})" if sch["fallback_arg"] else ""))
+        plan = (f"make: {row['title']}" if row else f"queue empty: find 1 idea in {sch['fallback_arg']}" if sch["fallback_arg"]
+                else f"queue empty: find 1 new idea ({BRAND.get('idea_source') or 'mix'} of {', '.join(channel_topics())})")
         ready = con.execute(f"select ep, title from pages where status='rendered' {UPLOAD_ORDER} limit 1").fetchone()
         which = ("the video it makes" if sch["pick"] == "newest" or not ready
                  else f"EP {ready['ep']:03d} {ready['title']} (top of the Queue)")
@@ -2329,8 +2424,10 @@ def auto(con, dry_run=False):
             return
         if row:
             pid = row["pageid"]
-        elif sch["fallback"] == "wikipedia":
-            pid = (brainstorm(con, sch["fallback_arg"], "any", 1) if sch["fallback_arg"] else discover(con, 1))[0]
+        elif not sch["fallback_arg"]:  # nothing set for empty runs: your topics and what's trending in them
+            pid = next_ideas(con, 1)[0]
+        elif sch["fallback"] == "wikipedia":  # a topic you typed
+            pid = brainstorm(con, sch["fallback_arg"], "any", 1)[0]
         else:
             pid = discover_source(con, sch["fallback"], 1, sch["fallback_arg"] or None)[0]
         make(con, pid)
@@ -2861,7 +2958,8 @@ def main():
     rr.add_argument("--ai-voice", action="store_const", const="ai", dest="narration", help="go back to the AI voice")
     dc = sub.add_parser("discover"); dc.add_argument("--count", type=int, default=5)
     dc.add_argument("--topic"); dc.add_argument("--degree", choices=["1", "2", "3", "any"], default="any")
-    dc.add_argument("--source", choices=["wikipedia", "link", "hackernews", "rss", "arxiv", "apod"], default="wikipedia")
+    dc.add_argument("--source", choices=["ideas", "trending", "wikipedia", "link", "hackernews", "rss", "arxiv", "apod"], default="ideas",
+                    help="ideas: your topics and what's trending in them (Settings); wikipedia: random pages")
     dc.add_argument("--feed", help="RSS/Atom feed URL (for --source rss)")
     dc.add_argument("--link", help="any link (for --source link): feed, site, subreddit, Wikipedia category/list, ...")
     dl = sub.add_parser("download", help="save videos from almost any site into library/ (references, clips)")
@@ -2915,7 +3013,9 @@ def main():
         unpublish(con, args.ep, args.keep_local)
     elif args.cmd == "rerender":
         rerender(con, args.ep, args.repick_images, args.narration)
-    elif args.cmd == "discover" and args.source != "wikipedia":
+    elif args.cmd == "discover" and args.source in ("ideas", "trending") and not args.topic:
+        trending(con, args.count) if args.source == "trending" else next_ideas(con, args.count)
+    elif args.cmd == "discover" and args.source not in ("wikipedia", "ideas", "trending"):
         discover_source(con, args.source, args.count, {"rss": args.feed, "link": args.link}.get(args.source, args.topic))
     elif args.cmd == "discover":
         import sources
@@ -2948,7 +3048,7 @@ def main():
             pageid = row["pageid"] if row else None
             if pageid is None:
                 print("discovering…")
-                pageid = discover(con)[0]
+                pageid = next_ideas(con)[0]
         make(con, pageid, auto=args.auto)
         if args.upload:
             upload_pending(con, args.publish_at)

@@ -207,7 +207,7 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
 .qwhy { color: var(--text); opacity: .8; font-size: 13px; margin-top: 4px; }
 .qbtns { display: flex; gap: 6px; }
 .tag { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .4px; }
-.tag.curated { color: var(--info); } .tag.random { color: var(--muted); } .tag.seed { color: var(--ok); }
+.tag.curated { color: var(--info); } .tag.trend { color: #F472B6; } .tag.random { color: var(--muted); } .tag.seed { color: var(--ok); }
 .empty { color: var(--muted); padding: 40px 0; text-align: center; }
 .more { display: flex; justify-content: center; padding: 18px 0; grid-column: 1 / -1; }
 .thumb img.poster, .pthumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
@@ -307,7 +307,7 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
       <a class="tab" href="#/ideabank" data-route="ideabank" id="queueTab">Ideabank</a>
       <a class="tab" href="#/queue" data-route="queue" id="publishTab">Queue</a>
       <a class="tab" href="#/library" data-route="library" id="libraryTab">Library</a>
-      <a class="tab" href="#/log" data-route="log">Page log</a>
+      <a class="tab" href="#/log" data-route="log">Log</a>
       <a class="tab" href="#/connectors" data-route="connectors">Connectors</a>
       <a class="tab" href="#/settings" data-route="settings">Settings</a>
     </nav>
@@ -330,7 +330,7 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
       <div class="explore">
         <h4 style="margin:0;font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--muted)">Find ideas</h4>
         <div class="row">
-<input id="qTopic" placeholder="A topic (Nepal, jazz, black holes): the local model suggests ideas around it. Or a link (blog, feed, subreddit, Wikipedia category). Empty = random" aria-label="Topic or link to find ideas in">
+<input id="qTopic" placeholder="A topic (Nepal, jazz, black holes): the local model suggests ideas around it. Or a link (blog, feed, subreddit). Empty = your channel topics and what's trending in them" aria-label="Topic or link to find ideas in">
         </div>
         <div class="row" style="align-items:center">
           <span class="count" id="qDegLabel">Degree of relation</span>
@@ -352,7 +352,7 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
         <nav class="snav" aria-label="Settings">
           <a href="#/settings/brand" data-group="brand">Brand</a>
           <a href="#/settings/voice" data-group="voice">Voice &amp; music</a>
-          <a href="#/settings/content" data-group="content">Videos</a>
+          <a href="#/settings/content" data-group="content">Ideas &amp; videos</a>
           <a href="#/settings/automation" data-group="automation">Automation</a>
           <a href="#/connectors" class="snav-out">AI models &amp; publishing →</a>
         </nav>
@@ -414,6 +414,16 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
             <label style="max-width:320px">Volume under the voice <output id="volOut"></output><input type="range" name="music_volume" min="0" max="0.5" step="0.01"></label>
             <audio id="musicAudio" controls hidden></audio>
           </fieldset>
+          <fieldset class="scard" data-group="content"><legend>Ideas</legend>
+            <label>Channel topics <small>comma separated: what your channel is about</small><input name="topics" placeholder="science, history, technology, nature"></label>
+            <div style="display:grid;gap:6px"><span class="hint" style="margin:0">When the ideabank is empty, new ideas come from</span>
+              <label class="radio"><input type="radio" name="ideaSrc" value="mix"> <b>A mix</b>: fresh angles on your topics, and questions behind this week's news in them</label>
+              <label class="radio"><input type="radio" name="ideaSrc" value="topics"> Your topics only (evergreen)</label>
+              <label class="radio"><input type="radio" name="ideaSrc" value="trending"> Trending in your topics only (Google News and Google Trends)</label>
+              <label class="radio"><input type="radio" name="ideaSrc" value="wikipedia"> Random Wikipedia pages</label>
+            </div>
+            <span class="hint" style="margin:0">Trending ideas skip tragedies, politics, sports results and gossip, and are phrased as questions about the lasting idea behind the news. Every idea is researched when it's made.</span>
+          </fieldset>
           <fieldset class="scard" data-group="content"><legend>Videos</legend>
             <label style="max-width:320px">Minimum interest score <output id="scoreOut"></output><input type="range" name="min_score" min="1" max="10" step="1"></label>
             <label style="max-width:320px">Maximum video length <small>seconds</small><input type="number" name="max_seconds" min="20" max="175"></label>
@@ -431,7 +441,7 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
                 <div class="seg" id="schDays" role="group" aria-label="Days of the week"></div></div>
               <div class="inline">
                 <label style="flex:1;min-width:min(220px,100%)">If the ideabank is empty, find an idea from
-                  <input id="schArg" placeholder="A topic or a link. Empty = a random Wikipedia page"></label>
+                  <input id="schArg" placeholder="A topic or a link. Empty = your channel topics and what's trending in them"></label>
               </div>
               <label class="check"><input type="checkbox" id="schUp"> Publish after making <span class="hint" style="margin:0">to the platforms ticked in <a href="#/connectors">Connectors</a></span></label>
               <div id="schPick" style="display:grid;gap:6px;padding-left:24px">
@@ -692,7 +702,7 @@ async function loadPages() {
   $(".logo").innerHTML = j.brand.logo ? `<img src="/brand/logo.png?t=${Date.now()}" alt="" style="width:26px;height:26px;object-fit:contain">` : esc(j.brand.logo_text || "?");
   document.documentElement.style.setProperty("--accent", j.brand.colors.accent);
   const n = s => pages.filter(p => p.status === s).length;
-  $("#stats").innerHTML = `<span><b>${n("uploaded")}</b> uploaded</span><span><b>${n("rendered")}</b> in queue</span><span><b>${n("queued")}</b> ideas</span><span><b>${pages.length}</b> pages seen</span>`;
+  $("#stats").innerHTML = `<span><b>${n("uploaded")}</b> uploaded</span><span><b>${n("rendered")}</b> in queue</span><span><b>${n("queued")}</b> ideas</span><span><b>${pages.length}</b> ideas seen</span>`;
   $("#pendingHint").textContent = n("rendered") ? `${n("rendered")} video${n("rendered") > 1 ? "s" : ""} in the queue. Leave the time empty to upload as private.` : "Nothing waiting. Rendered videos appear here.";
   renderEpisodes(); renderQueue(); renderPublish(); renderLog();
 }
@@ -777,7 +787,7 @@ function renderQueue() {
     (b.source === "curated") - (a.source === "curated") || (a.created || "").localeCompare(b.created || ""));
   $("#queueTab").textContent = qs.length ? `Ideabank (${qs.length})` : "Ideabank";
   fullOrder.qList = qs.map(p => p.pageid);
-  $("#qList").innerHTML = !qs.length ? `<div class="empty">Ideabank is empty. <b>Make now</b> with an empty box makes a random page.<br>Save your own ideas from the <b>Make a video</b> box, or click <b>Find ideas</b> for a few candidates to review.</div>`
+  $("#qList").innerHTML = !qs.length ? `<div class="empty">Ideabank is empty. <b>Make now</b> with an empty box finds a new idea from your channel topics and what's trending in them.<br>Save your own ideas from the <b>Make a video</b> box, or click <b>Find ideas</b> for a few candidates to review.</div>`
     : `<div class="qlist">${paged("q", qs, "").map((p, i) => `
       <div class="qitem ${i === 0 ? "next" : ""}" draggable="true" data-sid="${p.pageid}">
         <button class="grip" aria-label="Reorder ${esc(p.title)} (drag, or use arrow keys)" title="Drag to reorder (or focus and press ↑/↓)">⠿</button>
@@ -1369,6 +1379,8 @@ async function loadSettings() {
   ["channel", "tagline", "outro_line", "logo_text", "voice_speed", "music_volume", "min_score", "max_seconds"].forEach(k => F(k).value = S[k] ?? "");
   F("logo_text").value = S.logo_text ?? "?";
   F("hashtags").value = (S.hashtags || []).join(", ");
+  F("topics").value = (S.topics || []).join(", ");
+  document.querySelectorAll("[name=ideaSrc]").forEach(r => r.checked = r.value === (S.idea_source || "mix"));
   F("display_weight").value = S.fonts.display_weight || "Bold";
   $("#voiceSel").innerHTML = Object.entries(VOICE_GROUPS).map(([pre, label]) => `<optgroup label="${label}">${j.voices.filter(v => v.startsWith(pre)).map(v => `<option>${v}</option>`).join("")}</optgroup>`).join("");
   F("voice").value = S.voice;
@@ -1424,7 +1436,8 @@ function collect() {
   S = {...S, channel: F("channel").value, tagline: F("tagline").value, outro_line: F("outro_line").value, logo_text: F("logo_text").value,
     hashtags: F("hashtags").value.split(",").map(x => x.trim()).filter(Boolean), voice: F("voice").value, voice_speed: +F("voice_speed").value,
     music_volume: +F("music_volume").value, voice_engine: document.querySelector("[name=vEngine]:checked")?.value || "kokoro",
-    clone_consent: $("#cloneConsent").checked, mode: document.querySelector("[name=mode]:checked")?.value || "auto", min_score: +F("min_score").value, max_seconds: +F("max_seconds").value, llm: $("#llmSel").value, gemini_model: $("#gemSel").value, claude_model: $("#clSel").value,
+    clone_consent: $("#cloneConsent").checked, mode: document.querySelector("[name=mode]:checked")?.value || "auto",
+    topics: F("topics").value.split(",").map(x => x.trim()).filter(Boolean), idea_source: document.querySelector("[name=ideaSrc]:checked")?.value || "mix", min_score: +F("min_score").value, max_seconds: +F("max_seconds").value, llm: $("#llmSel").value, gemini_model: $("#gemSel").value, claude_model: $("#clSel").value,
     ai: document.querySelector("[name=aiPick]:checked")?.value || "local", publish_to: [...document.querySelectorAll("[data-pub]:checked")].map(c => c.dataset.pub),
     fonts: {...S.fonts, display_weight: F("display_weight").value}};
   readSchedule();

@@ -10,11 +10,18 @@ In the studio's **Make a video** box, or `./rw run "…"` (`./rw add "…"` save
 | a paragraph (over 30 words): notes, a story, a draft | your text becomes the script, keeping your facts and order. Short texts get background notes from Wikipedia. Your facts aren't fact-checked against Wikipedia, so it's on you to get them right |
 | a link to an article: Wikipedia, any web page, Hacker News, arXiv, NASA APOD | that page is made into a video |
 | a link to a list: a feed, a site, a subreddit, a Wikipedia category or list | its most interesting items go into the ideabank |
-| nothing | the next idea in the ideabank, else a random interesting Wikipedia page |
+| nothing | the next idea in the ideabank, else a new one from your channel topics (see **Ideas** below) |
 
 **Questions get answered, or no video.** Two checks on the local model:
 1. Before writing, it must quote the sentence in the research that answers the question; the quote is checked against the notes and judged on its own. If web research (Gemini or Claude) has none, Wikipedia research by the local model is tried next. If neither has one, the video fails with "the research didn't find an answer" rather than circle the topic.
 2. After writing, it must quote the narration sentence that gives the answer, judged the same way. If none does, the script is rewritten around the answer (twice at most), else the video fails with the reason.
+
+## Ideas: your topics and what's trending in them
+Set your **channel topics** in **Settings → Ideas & videos** (for example *space, history, food science*). When the ideabank is empty (an empty **Make now**, **Find ideas** with no topic, or a scheduled run), new ideas come from, by default, **a mix**:
+- **Evergreen:** the local model brainstorms fresh angles on one of your topics.
+- **Trending:** this week's Google News headlines in your topics plus today's Google Trends (no key needed). The local model turns the promising ones into a question about the lasting idea behind the news ("How do astronomers spot the earliest quasars?"), and labels what each headline is about. Sports results, politics, crime, war, disasters, celebrity and business stories are dropped in code, as are ideas that don't squarely fit your topics.
+
+You can also choose only one of those, or random Wikipedia pages. Either way, ideas are researched when they're made. `./rw discover --source trending` finds trending ideas on demand.
 
 ## AI models: local, Gemini or Claude
 Everything runs locally by default (Ollama). In the studio's **Connectors** tab you can add a Gemini key (free at [aistudio.google.com/apikey](https://aistudio.google.com/apikey)) or an Anthropic key for Claude ([platform.claude.com](https://platform.claude.com/settings/keys)), and choose which model writes:
@@ -27,7 +34,7 @@ Keys are yours, not the project's: `GEMINI_API_KEY` / `ANTHROPIC_API_KEY` in you
 **Usage:** each video shows the AI requests and tokens it used (Episodes → open a video), and Connectors shows today's totals per model. Days follow Pacific time, when Google resets the free quota. The API doesn't report how much quota is left; see [ai.dev/rate-limit](https://ai.dev/rate-limit).
 
 
-1. **Pick:** random Wikipedia articles (stubs, lists and disambiguation pages are dropped, and a local LLM scores the rest out of 10), or ideas around a topic: the local LLM brainstorms questions and subjects, closer or further from the topic (degree 1–3). Each idea must name a real Wikipedia article and is checked against its intro, so ideas with a false premise are reworded or dropped. Ideas are researched properly when the video is made.
+1. **Pick:** your ideabank, else new ideas from your channel topics and what's trending in them (see **Ideas**), or random Wikipedia articles if you choose (stubs, lists and disambiguation pages are dropped, and a local LLM scores the rest out of 10). Ideas around a topic: the local LLM brainstorms questions and subjects, closer or further from the topic (degree 1–3). Each idea must name a real Wikipedia article and is checked against its intro, so ideas with a false premise are reworded or dropped. Ideas are researched properly when the video is made.
 2. **Log:** every page that comes up is stored in SQLite with a status and the reason, so nothing is ever processed twice.
 3. **Script:** Ollama writes a 45–55s narration from the full article, then fact-checks it against the article. You can edit it before rendering again.
 4. **Visuals:** chosen from what the narration mentions, sentence by sentence. Each named thing (a person, place, organisation, product or logo) gets the lead image of its own Wikipedia article. Named things without one are searched in Commons and Openverse, needing all the words to match plus an LLM meaning check. Vague phrases keep the previous image rather than show a wrong one. Each image appears when its sentence is spoken; logos and screenshots are shown whole on a light card. Falls back to the article's own images. In the visuals editor you can **Auto-pick from script**, search NASA and The Met, or upload your own.
@@ -78,7 +85,7 @@ Visuals can also be **video clips**: free-licensed Wikimedia Commons clips (usin
 | arXiv | papers matching a topic | the abstract (arXiv metadata is CC0) | Commons search, else a title card |
 | NASA APOD | the latest pictures (via NASA's RSS feed) | the explanation | search; APOD photos are often copyrighted, so they're not reused automatically |
 
-**Find ideas** in the Ideabank takes a topic (the local LLM brainstorms ideas around it), a link, or nothing (random). A link (`./rw discover --topic URL`) is worked out what you pasted: an RSS/Atom feed, a site or blog (its feed is found automatically), a subreddit (link posts are read from the article they point to), a Wikipedia `Category:` or `List of…` page (its articles), a Wikipedia article (explores around it), a Hacker News list, an arXiv listing, a single article, or any page that lists articles (news sections, blog indexes). Automation can use a link as its source when the ideabank is empty.
+**Find ideas** in the Ideabank takes a topic (the local LLM brainstorms ideas around it), a link, or nothing (new ideas from your channel topics and what's trending in them). A link (`./rw discover --topic URL`) is worked out what you pasted: an RSS/Atom feed, a site or blog (its feed is found automatically), a subreddit (link posts are read from the article they point to), a Wikipedia `Category:` or `List of…` page (its articles), a Wikipedia article (explores around it), a Hacker News list, an arXiv listing, a single article, or any page that lists articles (news sections, blog indexes). Automation can use a link as its source when the ideabank is empty.
 
 Credits name the source and link back. Non-Wikipedia text is copyrighted by its authors: the narration is a short summary in new words, so review it before publishing.
 
@@ -110,7 +117,7 @@ A local web UI. It's bound to 127.0.0.1 and runs the same commands as the CLI, s
 - **Episodes:** previews you can search, filter and sort by potential. Open one to watch it, edit its title, narration and visuals, then **Save & re-render**. You can also publish it, skip it, delete it, or delete it from YouTube.
 - **Queue:** videos ready to upload, in the order they'll go out. Drag to reorder; videos you haven't placed are sorted by potential score. **Upload pending** and scheduled runs take from the top.
 - **Ideabank:** what gets made next. Drag to reorder, or **Find ideas** randomly, around a topic (with a degree-of-relation control), or in a link. Add your own with the sidebar's **Save idea**; several links, one per line, become one idea each.
-- **Page log:** every page seen, with reasons. Sortable and searchable, with multi-select delete. Uploaded pages are always kept.
+- **Log:** every idea seen, with reasons. Sortable and searchable, with multi-select delete. Uploaded pages are always kept.
 - **Connectors:** the AI model that writes (local, Gemini, Claude) and where videos are published (YouTube, Facebook, Instagram, TikTok).
 - **Settings:** Brand (channel, colours, Google Fonts, with a real-frame preview), Voice & music, Videos (thresholds) and Automation.
 
@@ -177,7 +184,7 @@ Videos post right away as public Reels with the title and description as the cap
 Create an app on TikTok for Developers (*Desktop* platform) with **Login Kit** and **Content Posting API** (`user.info.basic`, `video.upload`) and the redirect URI `http://127.0.0.1:8766/callback/`. Paste its client key and secret in **Connectors → TikTok** and **Connect TikTok** (or `./rw connect tiktok`). Videos are sent to your TikTok inbox; open TikTok to add the caption and post. Posting straight to a profile needs TikTok to audit the app; until then TikTok allows only private posts on a private account.
 
 ## Automation
-In the studio go to **Settings → Automation**: turn it on, pick up to 4 times a day and the weekdays, set a topic or link to find ideas in when the ideabank is empty (empty: random Wikipedia), and choose whether to publish. Each run publishes either the top of your **Queue** or the video it just made, kept private or public at a set time at least 2 hours later, so you can review it. **Save** installs a macOS launchd job (`~/Library/LaunchAgents/com.shortsmachine.auto.plist`); turning it off removes the job.
+In the studio go to **Settings → Automation**: turn it on, pick up to 4 times a day and the weekdays, set a topic or link to find ideas in when the ideabank is empty (empty: your channel topics and what's trending in them), and choose whether to publish. Each run publishes either the top of your **Queue** or the video it just made, kept private or public at a set time at least 2 hours later, so you can review it. **Save** installs a macOS launchd job (`~/Library/LaunchAgents/com.shortsmachine.auto.plist`); turning it off removes the job.
 - It runs `./rw auto` even when the studio is closed. If the Mac is asleep at that time, it runs when it wakes. Keep Ollama running.
 - Output goes to `data/auto.log`, and the last runs are shown in Settings. A failed run shows a macOS notification. Overlapping runs are skipped.
 - `./rw auto --dry-run` shows what the next run would do. `./rw schedule` applies the `brand.json` schedule from the command line.

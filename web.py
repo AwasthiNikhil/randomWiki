@@ -66,6 +66,10 @@ def save_brand(new):
         b["gemini_model"] = text("gemini_model", 1, 80)
     if new.get("claude_model"):
         b["claude_model"] = text("claude_model", 1, 80)
+    if "topics" in new:
+        b["topics"] = [str(t).strip()[:40] for t in new["topics"] if str(t).strip()][:12]
+    if new.get("idea_source") in ("mix", "topics", "trending", "wikipedia"):
+        b["idea_source"] = new["idea_source"]
     if new.get("mode") in ("auto", "manual"):
         b["mode"] = new["mode"]
     if "publish_to" in new:

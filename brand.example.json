@@ -1,7 +1,7 @@
 {
-  "channel": "Random Wiki",
-  "tagline": "One random Wikipedia page. Every day.",
-  "outro_line": "That was today's random page. Follow for tomorrow's.",
+  "channel": "My Channel",
+  "tagline": "Curious things, explained in a minute.",
+  "outro_line": "That's it for today. Subscribe for more.",
   "colors": {
     "bg": "#0E1116",
     "panel": "#1A1F29",
@@ -27,9 +27,9 @@
   "min_score": 7,
   "max_seconds": 58,
   "hashtags": [
-    "wikipedia",
+    "shorts",
+    "explained",
     "didyouknow",
-    "history",
     "facts"
   ],
   "user_agent": "ShortsMachine/0.1 (personal non-commercial project)",
@@ -60,5 +60,12 @@
   "publish_to": [
     "youtube"
   ],
-  "mode": "auto"
+  "mode": "auto",
+  "topics": [
+    "science",
+    "history",
+    "technology",
+    "nature"
+  ],
+  "idea_source": "mix"
 }
