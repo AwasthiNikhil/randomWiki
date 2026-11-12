@@ -277,18 +277,10 @@ class H(BaseHTTPRequestHandler):
             types = {"png": "image/png", "wav": "audio/wav", "mp3": "audio/mpeg"}
             return self.send_file(rw.ROOT / m[1] / m[2], types[m[2].rsplit(".", 1)[1]])
         if path == "/api/library":
-            items = []
-            for f in sorted(rw.LIBRARY.glob("*.json"), key=lambda f: f.stat().st_mtime, reverse=True) if rw.LIBRARY.exists() else []:
-                try:
-                    v = json.loads(f.read_text())
-                except ValueError:
-                    continue
-                if (rw.LIBRARY / v.get("file", "")).is_file():
-                    items.append(v)
-            return self.send(200, {"items": items})
-        m = re.fullmatch(r"/library/([\w.\-]+)", urllib.parse.unquote(path))
+            return self.send(200, {"items": rw.library_items()})
+        m = re.fullmatch(r"/library/([\w.\-]+\.(mp4|jpg))", urllib.parse.unquote(path))
         if m and (rw.LIBRARY / m[1]).is_file():  # basename only: no path traversal
-            return self.send_file(rw.LIBRARY / m[1], "video/mp4")
+            return self.send_file(rw.LIBRARY / m[1], "video/mp4" if m[2] == "mp4" else "image/jpeg")
         if path == "/api/job":
             since = int((re.search(r"since=(\d+)", query) or [0, 0])[1])
             running = bool(job["proc"] and job["proc"].poll() is None)
@@ -360,7 +352,7 @@ class H(BaseHTTPRequestHandler):
                     if img.get("file") and (work / Path(img["file"]).name).is_file():  # already in the folder
                         out.append({k: v for k, v in img.items() if k not in ("file", "credit", "tags") and (k != "thumb" or img.get("kind") == "video")}
                                    | {"path": str(work / Path(img["file"]).name)})
-                    elif str(img.get("url", "")).startswith("https://"):
+                    elif str(img.get("url", "")).startswith(("https://", "library:")):
                         out.append(rw.download_image(img, work))
                 if not out:
                     raise ValueError("keep at least one image")
@@ -375,6 +367,19 @@ class H(BaseHTTPRequestHandler):
                     raise ValueError("no such file in the library")
                 f.unlink()
                 f.with_suffix(".json").unlink(missing_ok=True)
+                f.with_suffix(".jpg").unlink(missing_ok=True)
+            elif self.path == "/api/library_use":  # body: {"file", "pageid"}: add the clip to that video's visuals
+                name, pid = str(body.get("file", "")), int(body["pageid"])
+                meta = rw.WORK / str(pid) / "meta.json"
+                if not re.fullmatch(r"[\w.\-]+", name) or not (rw.LIBRARY / name).is_file() or not meta.exists():
+                    raise ValueError("pick a clip from the library and a video")
+                m = json.loads(meta.read_text())
+                if len(m["images"]) >= 12:
+                    raise ValueError("that video already has 12 visuals; remove one in its editor first")
+                clip = next(c for c in rw.src_library("") if c["url"] == "library:" + name)
+                m["images"].append(rw.download_clip(clip, meta.parent))
+                meta.write_text(json.dumps(m, indent=2))
+                return self.send(200, {"ok": True, "n": len(m["images"])})
             elif self.path == "/api/gemini_key":  # body: {"key": "..."}; empty removes the saved key
                 key = str(body.get("key", "")).strip()
                 if not key:

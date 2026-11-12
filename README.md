@@ -41,6 +41,8 @@ The key is yours, not the project's: `GEMINI_API_KEY` in your shell is used firs
 Keep reference videos and clips from other creators' work in `library/`, separate from what you make (git-ignored). In the studio's **Library** tab, paste links (one per line) and optionally a part to keep (`1:20-1:45`); or run `./rw download URL [URL ...] [--section 1:20-1:45]`.
 - Works with YouTube, Vimeo, X, Reddit, TikTok, Instagram, Internet Archive and [many more sites](https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md) through yt-dlp, and with Wikimedia Commons pages through Commons' own API.
 - Saved as MP4 (up to 1080p), next to a `.json` with the title, uploader, source link and licence when the site states one, so you can credit it later.
+- **Use in a video:** on a library card, pick one of your videos and the clip is added to its visuals. Or, in a video's visuals editor, choose **▶ My library** and search. Either way the clip is credited in the description; open the video, place the clip, and **Save & re-render**.
+- Search the library by title, uploader, site or licence. Nothing else is kept: no download history, and yt-dlp's cache is off.
 - Use other people's videos only with permission, under their licence (Creative Commons, public domain), or as fair use.
 
 ## Video clips

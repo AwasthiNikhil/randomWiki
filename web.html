@@ -150,7 +150,9 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
 .lib .body { padding: 10px 12px 12px; display: grid; gap: 6px; }
 .lib h3 { margin: 0; font-size: 14px; font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
 .lib .meta { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
-.lib .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.lib .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; min-width: 0; }
+.lib, .lib .body { min-width: 0; }
+.lib select { width: 0; flex: 1 1 0; text-overflow: ellipsis; }
 #libLinks { width: 100%; min-height: 64px; resize: vertical; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font: 13px var(--mono); color: var(--text); }
 #libLinks:focus, #libSection:focus { outline: none; border-color: var(--accent); }
 .explore { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; margin-bottom: 18px; display: grid; gap: 10px; }
@@ -404,6 +406,7 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
         </div>
         <span class="hint">Saved to <code>library/</code>, separate from your videos, with where each came from and its licence when the site states one. Use other people's videos only with permission, under their licence (Creative Commons, public domain), or as fair use.</span>
       </div>
+      <div class="toolbar" style="margin-bottom:12px"><input class="search" id="libSearch" placeholder="Search title, uploader, site, licence…" aria-label="Search library"></div>
       <div id="libList"></div>
     </section>
     <section id="log" hidden>
@@ -626,7 +629,7 @@ function wireVisuals(p) {
     const r = await fetch(`/api/images/search?source=${$("#vSource").value}&q=${encodeURIComponent($("#vQuery").value)}`);
     const j = await r.json();
     results = j.results || [];
-    $("#vResults").innerHTML = !r.ok ? `<span class="hint">${esc(j.error)}</span>` : !results.length ? `<span class="hint">No free-licensed images found.</span>`
+    $("#vResults").innerHTML = !r.ok ? `<span class="hint">${esc(j.error)}</span>` : !results.length ? `<span class="hint">${$("#vSource").value === "library" ? "Nothing in your library matches. Download clips in the Library tab." : "No free-licensed images found."}</span>`
       : results.map((c, n) => `<button class="vres" data-r="${n}" data-url="${esc(c.url)}" title="${esc(c.name + " · " + (c.artist && !/^unknown/i.test(c.artist) ? c.artist + " · " : "") + c.license)}"><img src="${esc(c.thumb)}" alt="${esc(c.name)}" loading="lazy">${c.kind === "video" ? `<span class="n" style="position:absolute;left:4px;bottom:4px;font:600 11px var(--mono);background:#000c;padding:0 5px;border-radius:4px">▶</span>` : ""}</button>`).join("");
     strip();
   };
@@ -723,7 +726,7 @@ function openDetail(id) {
           <select id="vSource" aria-label="Image source">
             <option value="article">This article</option><option value="commons" selected>Wikimedia Commons</option>
             <option value="openverse">Openverse (Flickr etc.)</option><option value="nasa">NASA</option><option value="met">The Met (art &amp; history)</option>
-            <option value="commons_video">▶ Commons videos</option><option value="nasa_video">▶ NASA videos</option>
+            <option value="commons_video">▶ Commons videos</option><option value="nasa_video">▶ NASA videos</option><option value="library">▶ My library</option>
           </select>
           <input id="vQuery" value="${esc(p.title)}" aria-label="Image search">
           <button class="btn" id="vGo">Search</button>
@@ -777,24 +780,48 @@ async function poll() {
 }
 
 const mmss = s => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, "0")}`;
+let library = [];
 async function loadLibrary() {
-  const items = (await (await fetch("/api/library")).json()).items;
-  $("#libraryTab").textContent = `Library (${items.length})`;
-  $("#libList").innerHTML = !items.length ? `<div class="empty">Nothing saved yet. Paste a link above.</div>` : `<div class="libgrid">${items.map(v => `
-    <div class="lib"><video src="/library/${encodeURIComponent(v.file)}" controls preload="metadata"></video>
+  library = (await (await fetch("/api/library")).json()).items;
+  $("#libraryTab").textContent = `Library (${library.length})`;
+  renderLibrary();
+}
+function renderLibrary() {
+  const words = $("#libSearch").value.toLowerCase().split(/\s+/).filter(Boolean);
+  const items = library.filter(v => words.every(w => [v.title, v.uploader, v.site, v.license, v.file].join(" ").toLowerCase().includes(w)));
+  const eps = pages.filter(p => p.ep && p.video && p.status !== "uploaded");  // videos a clip can still go into
+  $("#libList").innerHTML = !library.length ? `<div class="empty">Nothing saved yet. Paste a link above.</div>`
+    : !items.length ? `<div class="empty">Nothing matches.</div>` : `<div class="libgrid">${items.map(v => `
+    <div class="lib"><video src="/library/${encodeURIComponent(v.file)}" poster="/library/${encodeURIComponent(v.file.replace(/\.mp4$/, ".jpg"))}" controls preload="none"></video>
       <div class="body"><h3>${esc(v.title)}</h3>
         <div class="meta">${[v.uploader, v.site, v.duration ? mmss(v.duration) : "", v.section ? "part " + v.section : ""].filter(Boolean).map(esc).join(" · ")}</div>
         ${v.license ? `<div class="meta">Licence: ${esc(v.license)}</div>` : ""}
         <div class="meta" title="File in library/">${esc(v.file)}</div>
         <div class="row"><a class="btn sm" href="${esc(v.url)}" target="_blank" rel="noopener">Source ↗</a>
-          <button class="btn sm danger" data-libdel="${esc(v.file)}">Delete</button></div></div></div>`).join("")}</div>`;
+          <button class="btn sm" data-libuse="${esc(v.file)}">Use in a video</button>
+          <button class="btn sm danger" data-libdel="${esc(v.file)}">Delete</button></div>
+        <div class="row" data-usebox="${esc(v.file)}" hidden>
+          <select class="sort" style="margin:0;flex:1;min-width:0" aria-label="Video to add this clip to">${eps.map(p => `<option value="${p.pageid}">EP ${String(p.ep).padStart(3, "0")} · ${esc(p.yt_title || p.title)}</option>`).join("")}</select>
+          <button class="btn sm primary" data-libadd="${esc(v.file)}">Add</button></div></div></div>`).join("")}</div>`;
 }
+$("#libSearch").oninput = renderLibrary;
 $("#libGo").onclick = () => {
   const links = $("#libLinks").value.split("\n").map(x => x.trim()).filter(Boolean), sec = $("#libSection").value.trim();
   if (!links.length) return termLine("! paste a video link first", "err");
   exec("download " + links.map(quote).join(" ") + (sec ? ` --section ${quote(sec)}` : "")).then(ok => ok && ($("#libLinks").value = ""));
 };
 $("#libList").addEventListener("click", async e => {
+  const use = e.target.closest("[data-libuse]"), add = e.target.closest("[data-libadd]");
+  if (use) { const box = document.querySelector(`[data-usebox="${CSS.escape(use.dataset.libuse)}"]`); box.hidden = !box.hidden; if (!box.querySelector("option")) termLine("! no videos to add it to yet: make one first", "err"); return; }
+  if (add) {
+    const box = add.closest("[data-usebox]"), pid = +box.querySelector("select").value; if (!pid) return;
+    add.disabled = true; add.textContent = "Adding…";
+    const r = await fetch("/api/library_use", {method: "POST", headers: {"Content-Type": "application/json", "X-RW": "1"}, body: JSON.stringify({file: add.dataset.libadd, pageid: pid})});
+    const j = await r.json(), p = pages.find(x => x.pageid === pid);
+    if (r.ok) { termLine(`added to EP ${String(p.ep).padStart(3, "0")} as visual ${j.n}. Open that video, place it where you want, and click Save & re-render.`, "good"); box.hidden = true; loadPages(); }
+    else termLine("! " + j.error, "err");
+    add.disabled = false; add.textContent = "Add"; return;
+  }
   const b = e.target.closest("[data-libdel]"); if (!b) return;
   if (b.textContent !== "Delete for good?") { b.textContent = "Delete for good?"; return; }
   if (await post("/api/library_delete", {file: b.dataset.libdel})) loadLibrary();

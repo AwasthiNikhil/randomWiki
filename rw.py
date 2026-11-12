@@ -1081,17 +1081,23 @@ def download_clip(clip, dest, seconds=12):
 
     def convert(src, input_params=()):
         dur = next(imageio_ffmpeg.read_frames(src, input_params=list(input_params))).get("duration") or 0
-        skip = min(dur * 0.25, 120) if dur > 20 else 0  # long clips usually open with a title slate
+        skip = 0 if local else min(dur * 0.25, 120) if dur > 20 else 0  # long clips usually open with a title slate
         subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(), "-y", "-loglevel", "error", *input_params, "-ss", f"{skip:.1f}", "-i", src,
                         "-t", str(seconds), "-an", "-vf", "scale=-2:720", "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
                         "-pix_fmt", "yuv420p", str(path)], timeout=600)
 
-    if not ok():
+    local = clip["url"].startswith("library:")
+    if local and not ok():  # your own download: its start is where you chose to cut it
+        src = LIBRARY / Path(clip["url"][8:]).name
+        if not src.is_file():
+            raise RuntimeError(f"not in your library any more: {src.name}")
+        convert(str(src))
+    if not ok() and not local:
         try:  # MP4 can be read straight from the server, fetching only the part we use
             convert(clip["url"], ["-user_agent", BRAND["user_agent"]])
         except Exception:
             pass
-    if not ok():  # WebM/Ogg often can't seek over HTTP: download the file (Commons clips are capped at 150 MB)
+    if not ok() and not local:  # WebM/Ogg often can't seek over HTTP: download the file (Commons clips are capped at 150 MB)
         raw = dest / (path.stem + ".src")
         try:
             raw.write_bytes(fetch(clip["url"]))
@@ -1655,7 +1661,8 @@ def description(m):
              *([f"Source: {m['url']}", ""] if m.get("url") else []),
              f"{BRAND['channel']}: {BRAND['tagline']}", "", "CREDITS",
              m.get("credit") or f"Text adapted from the Wikipedia article \"{m['article_title']}\", CC BY-SA 4.0: {m['url']}"]
-    lines += [f"Image: \"{i['name']}\", {credit(i).replace(' · ', ', ')}: {i['page']}" for i in m["images"] if credit(i)]
+    lines += [f"{'Video' if i.get('kind') == 'video' else 'Image'}: \"{i['name']}\", {credit(i).replace(' · ', ', ')}: {i['page']}"
+              for i in m["images"] if credit(i)]
     narration = {"recording": f"Narration: {BRAND['channel']}.", "clone": "Narration: AI voice clone of the creator (Chatterbox)."}
     lines += [narration.get(m.get("narration"), "Narration: AI voice (Kokoro TTS).") + " Fonts: SIL OFL.", "",
               " ".join("#" + re.sub(r"\W", "", t) for t in BRAND["hashtags"] + m["tags"][:3])]
@@ -1829,6 +1836,47 @@ def commons_file(url):
                       uploader=strip_html(meta.get("Artist")), license=meta.get("LicenseShortName") or "")
 
 
+def library_poster(path):
+    """A still from 1 s in (or the first frame), shown before the video plays and in the visuals editor."""
+    import subprocess, imageio_ffmpeg
+    jpg = path.with_suffix(".jpg")
+    for at in ("1", "0"):
+        if not jpg.exists():
+            subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(), "-y", "-loglevel", "error", "-ss", at, "-i", str(path), "-frames:v", "1",
+                            "-vf", "scale=480:-2", str(jpg)], timeout=60)
+    return jpg
+
+
+def library_items():
+    """Your downloads, newest first, as their sidecar details."""
+    out = []
+    for f in sorted(LIBRARY.glob("*.json"), key=lambda f: f.stat().st_mtime, reverse=True) if LIBRARY.exists() else []:
+        try:
+            v = json.loads(f.read_text())
+        except ValueError:
+            continue
+        if (LIBRARY / v.get("file", "")).is_file():
+            out.append(v)
+    return out
+
+
+def src_library(q, limit=30):
+    """Clips from your own library/ (empty query: all of them), for the visuals editor."""
+    words = q.lower().split()
+    out = []
+    for v in library_items():
+        text = " ".join(str(v.get(k, "")) for k in ("title", "uploader", "site", "license", "file")).lower()
+        if all(w in text for w in words):
+            library_poster(LIBRARY / v["file"])
+            out.append(dict(source="library", kind="video", url="library:" + v["file"], name=v["title"], page=v["url"],
+                            artist=v.get("uploader") or "", license=v.get("license") or "",
+                            thumb="/library/" + urllib.parse.quote(Path(v["file"]).with_suffix(".jpg").name)))
+    return out[:limit]
+
+
+IMAGE_SOURCES["library"] = src_library
+
+
 def download(url, section=None):
     """Save a video from almost any site (yt-dlp) into library/, with a small sidecar of where it came from."""
     import yt_dlp, imageio_ffmpeg
@@ -1857,7 +1905,7 @@ def download(url, section=None):
             "noprogress": True, "no_warnings": True, "progress_hooks": [progress],
             "logger": type("Quiet", (), {"debug": print_nothing, "warning": print_nothing, "error": print_nothing})(),
             "format": "bv*[height<=1080][ext=mp4]+ba[ext=m4a]/b[height<=1080][ext=mp4]/bv*[height<=1080]+ba/b",
-            "merge_output_format": "mp4", "ffmpeg_location": imageio_ffmpeg.get_ffmpeg_exe(),
+            "merge_output_format": "mp4", "ffmpeg_location": imageio_ffmpeg.get_ffmpeg_exe(), "cachedir": False,
             "postprocessors": [{"key": "FFmpegVideoRemuxer", "preferedformat": "mp4"}]}  # one format for the whole library
     if cut:
         opts |= {"download_ranges": yt_dlp.utils.download_range_func(None, [cut]), "force_keyframes_at_cuts": True}
@@ -1874,6 +1922,7 @@ def download(url, section=None):
                 duration=round(cut[1] - cut[0] if cut else info.get("duration") or 0), section=section or "",
                 file=path.name, saved=time.strftime("%Y-%m-%d %H:%M")) | {k: v for k, v in known.items() if v}
     path.with_suffix(".json").write_text(json.dumps(side, indent=1))
+    library_poster(path)
     print(f"saved: {side['title']} -> library/{path.name}" + (f"  ({section})" if section else ""))
     return path
 
