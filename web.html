@@ -110,6 +110,8 @@ aside { border-left: 1px solid var(--line); display: flex; flex-direction: colum
 @keyframes pulse { 50% { opacity: .4; } }
 .term-head .btn { padding: 3px 10px; font-size: 12px; }
 .term-head .btn:first-of-type { margin-left: auto; }
+#jobLabel { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }  /* long commands never push Clear/Stop away */
+.term-head .btn { flex: none; }
 pre.out { flex: 1; margin: 0; padding: 14px 18px; overflow: auto; font: 12.5px/1.55 var(--mono); color: #C9D1D9; white-space: pre-wrap; word-break: break-word; }
 .out .cmd { color: var(--accent); }
 .out .err { color: var(--bad); }
@@ -1142,6 +1144,7 @@ async function poll() {
     const was = running; running = j.running;
     $("#dot").className = "dot" + (running ? " run" : "");
     $("#jobLabel").textContent = running ? j.cmd : (j.cmd ? `idle · last: ${j.cmd}` : "idle");
+    $("#jobLabel").title = $("#jobLabel").textContent;
     document.querySelectorAll("[data-cmd], #makeNow, #saveIdea, #upload, #qFind, #libGo, [data-remake], [data-upload], [data-make], [data-rerender], [data-unpubgo]").forEach(b => b.disabled = running);
     $("#stop").disabled = !running;
     if (was && !running) {
