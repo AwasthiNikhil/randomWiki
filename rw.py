@@ -1,11 +1,9 @@
 """Shorts Machine: Wikipedia pages, web articles, feeds, Hacker News, arXiv and NASA APOD -> branded YouTube Shorts.
 
-  ./rw run [--url URL] [--upload] [--publish-at ISO]   make one video
-  ./rw add URL [URL ...]                              queue curated pages
-  ./rw ask "QUESTION" [--now]                         research a question and make an explainer
-  ./rw discover [--count N] [--topic KEY --degree 1|2|3|any]   queue N Wikipedia ideas (random, or around a topic)
-  ./rw discover --source hackernews|apod|arxiv --topic T|rss --feed URL   queue ideas from other sources
-  ./rw discover --source link --link URL              ideas from any link (feed, site, subreddit, category, list...)
+  ./rw run ["ANYTHING"] [--upload] [--publish-at ISO]  make a video from a question, topic, paragraph or link
+                                                      (nothing = the next idea, else a random Wikipedia page)
+  ./rw add "ANYTHING" [...]                           save ideas for later
+  ./rw discover [--count N] [--topic TOPIC|LINK --degree 1|2|3|any]   find N ideas (random, around a topic, or in a link)
   ./rw upload [--ep N] [--publish-at ISO]             upload every rendered video (or just episode N)
   ./rw auto [--dry-run]                               one scheduled run (make next video, upload)
   ./rw schedule                                       install/remove the launchd job from brand.json "schedule"
@@ -204,10 +202,10 @@ def discover(con, want=1):
     return found
 
 
-def discover_source(con, origin, want=5, arg=None):
+def discover_source(con, origin, want=5, arg=None, cands=None):
     """Queue up to `want` interesting items from another source (hackernews, rss, arxiv, apod, or any link)."""
     import sources
-    cands = sources.discover(origin, want * 4, arg)
+    cands = cands if cands is not None else sources.discover(origin, want * 4, arg)
     print(f"{len(cands)} candidates from {origin}" + (f" ({arg})" if arg else ""))
     if cands and cands[0]["origin"] == "topic":  # a Wikipedia article link: explore around it
         return explore(con, cands[0]["ref"], "1", want)
@@ -387,17 +385,17 @@ def fetch_article(pageid):
     return p["title"], p.get("description", ""), text, p.get("pageimage")
 
 
-QUESTION_PROMPT = """Write the narration for a YouTube Short that answers the question below, using the research notes.
+QUESTION_PROMPT = """Write the narration for a YouTube Short that answers the question (or explains the topic) below, using the research notes.
 Rules:
 - 100 to 120 words (about 7 sentences of 15 words). Plain spoken English for a curious 14-year-old; explain any jargon in a few words.
-- Open by asking the question in a vivid way (one short sentence).
+- Open by asking the question in a vivid way (one short sentence). For a topic, open with a curious question about it.
 - For "how" questions, answer as 3 or 4 steps in the order they actually happen, using "First", "Next", "Then", "Finally".
   For "why" or "what" questions, give the cause or core idea first, then one concrete example.
 - End with a satisfying one-line takeaway.
 - Use ONLY facts from the research notes. Do not invent numbers, names or dates.
 - Do not say "Wikipedia", "this article", "in this video", or ask viewers to like or subscribe.
 
-Question: {title}
+Question or topic: {title}
 Research notes:
 {text}
 
@@ -437,12 +435,67 @@ def research(question):
                        + " (CC BY-SA 4.0): " + " ".join(urls),
                 source_label="Sources: Wikipedia · CC BY-SA 4.0", titles=titles)
 
+TEXT_PROMPT = """Write the narration for a YouTube Short based on the creator's text below.
+Rules:
+- 100 to 120 words (about 7 sentences of 15 words). Plain spoken English, short sentences, no lists, no emojis, no hashtags.
+- Keep the text's main points, angle and order. The first sentence is a hook of under 14 words.
+- Facts come from the creator's text; background notes may only fill in or explain. Do not invent anything.
+- Do not say "Wikipedia", "this text", "in this video", or ask viewers to like or subscribe.
+
+Title: {title}
+{text}
+
+Reply as JSON: {{"title": "<YouTube title, max 60 characters, curious but accurate>", "script": "<narration>", "tags": ["<5 to 8 lowercase tags>"]}}"""
+
+QUESTION_WORDS = re.compile(r"^(how|why|what|when|where|who|which|is|are|can|could|do|does|did|should|would|will)\b", re.I)
+
+
+def add_input(con, text, force=False, make_now=False):
+    """Anything -> a queued idea. A link is made into a video (a feed, site, subreddit, category or list gets its
+    best items queued instead); a paragraph is the script's source; a short query or question is researched."""
+    import sources
+    t = text.strip()
+    if not t:
+        raise SystemExit("type something: a question, a topic, a paragraph or a link")
+    if "\n" not in t and sources.looks_like_link(t):
+        url = t if "://" in t else "https://" + t
+        origin, _ = sources.detect(url)
+        listing = origin == "wikipedia" and re.search(r"/wiki/(Category:|Lists? of|Index of|Outline of)", urllib.parse.unquote(url).replace("_", " "))
+        if origin == "web" or listing:
+            kind, cands = sources.discover_link(url, 20)
+            if kind != "single article":
+                print(f"link is: {kind}, so finding the best ideas in it")
+                found = discover_source(con, "link", 5, url, cands)
+                return found[0] if found else None
+        return add_curated(con, url, force, make_now)
+    if len(t.split()) > 30 or "\n" in t:
+        return add_text(con, t, force)
+    return add_question(con, t, force)
+
+
+def add_text(con, text, force=False):
+    """Queue the creator's own text (a paragraph, notes, a draft) as an idea."""
+    import sources
+    pid = sources.synthetic_id("text:" + re.sub(r"\s+", " ", text).lower())
+    row = con.execute("select status from pages where pageid=?", (pid,)).fetchone()
+    if row and row["status"] in ("rendered", "uploaded") and not force:
+        print(f"skip: already made ({row['status']}); use --force to make it again")
+        return None
+    words = re.split(r"(?<=[.!?])\s", text, 1)[0].split()
+    title = " ".join(words[:9]).rstrip(".,;:") + ("…" if len(words) > 9 else "")
+    if not row or row["status"] != "queued":
+        upsert(con, pid, title=title, url="", source="curated", status="queued", reason="your text", origin="text", ref=text)
+    print(f"queued your text: {title}")
+    return pid
+
 
 def add_question(con, question, force=False):
     """Queue a question as an idea; it is researched when the video is made."""
     import sources
-    q = re.sub(r"\s+", " ", question).strip().rstrip("?") + "?"
+    q = re.sub(r"\s+", " ", question).strip()
     q = q[0].upper() + q[1:]
+    if QUESTION_WORDS.match(q):
+        q = q.rstrip("?") + "?"
     pid = sources.synthetic_id("question:" + q.lower())
     row = con.execute("select status from pages where pageid=?", (pid,)).fetchone()
     if row and row["status"] in ("rendered", "uploaded") and not force:
@@ -451,11 +504,11 @@ def add_question(con, question, force=False):
     if not row or row["status"] != "queued":
         upsert(con, pid, title=q, url="https://en.wikipedia.org/w/index.php?search=" + urllib.parse.quote(q),
                source="curated", status="queued", reason="question", origin="question", ref=q)
-    print(f"queued question: {q}")
+    print(f"queued: {q} (researched when it's made)")
     return pid
 
 
-def write_script(title, text, prompt=None):
+def write_script(title, text, prompt=None, check=True):
     s = {}
     for _ in range(6):
         n = len(str(s.get("script", "")).split())
@@ -470,7 +523,7 @@ def write_script(title, text, prompt=None):
         n = len(str(s.get("script", "")).split())
         if 85 <= n <= 128 and 0 < len(str(s.get("title", ""))) <= 70:
             s["tags"] = [str(t) for t in s.get("tags", [])][:8]
-            c = llm(CHECK_PROMPT.format(text=text[:12000], script=s["script"]), 0.1)
+            c = llm(CHECK_PROMPT.format(text=text[:12000], script=s["script"]), 0.1) if check else {}
             fixed = str(c.get("script", ""))
             if c.get("errors") and 85 <= len(fixed.split()) <= 128:
                 print("  fact-check fixed: " + "; ".join(map(str, c["errors"]))[:300])
@@ -1365,7 +1418,7 @@ def render(meta, words, audio_path, duration, out_path, frame_at=None):
 # ---------- orchestration ----------
 def description(m):
     lines = [m["script"].split(". ")[0].rstrip(".") + ".", "",
-             f"Source: {m['url']}", "",
+             *([f"Source: {m['url']}", ""] if m.get("url") else []),
              f"Episode {m['ep']} of {BRAND['channel']}. {BRAND['tagline']}", "", "CREDITS",
              m.get("credit") or f"Text adapted from the Wikipedia article \"{m['article_title']}\", CC BY-SA 4.0: {m['url']}"]
     lines += [f"Image: \"{i['name']}\", {credit(i).replace(' · ', ', ')}: {i['page']}" for i in m["images"] if credit(i)]
@@ -1450,6 +1503,19 @@ def make(con, pageid):
             title, desc, text, pageimage, prompt = a["title"], a["description"], a["text"], None, QUESTION_PROMPT
             src = dict(url=a["url"], own=None, credit=a["credit"], source_label=a["source_label"], popularity=None,
                        topics=a["titles"])
+        elif origin == "text":
+            text, title, desc, pageimage, prompt = row["ref"], row["title"], "", None, TEXT_PROMPT
+            src = dict(url="", own=None, credit=f"Written by {BRAND['channel']}.", source_label=f"Written by {BRAND['channel']}",
+                       popularity=None)
+            if len(text.split()) < 150:  # a short text: add background notes so the narration has enough to say
+                try:
+                    a = research(text[:300])
+                    text = f"Creator's text:\n{text}\n\nBackground notes:\n{a['text']}"
+                    src.update(url=a["url"], credit=f"Written by {BRAND['channel']}, with background from " + a["credit"][16:],
+                               source_label=f"Written by {BRAND['channel']} · Wikipedia CC BY-SA")
+                    # no topic images: research matches the subject loosely, and a personal story shouldn't show a stranger's tower
+                except SystemExit as e:
+                    print(f"  no background found ({e}); using your text only")
         else:
             import sources
             a = sources.fetch_article(origin, row["ref"])
@@ -1457,7 +1523,7 @@ def make(con, pageid):
             src = dict(url=a["url"], own=a["images"], credit=a["credit"], source_label=a["source_label"],
                        popularity=a.get("popularity"))
         print(f"[{ep:03d}] {title}" + ("" if origin == "wikipedia" else f"  [{origin}]") + "\n  writing script…")
-        s = write_script(title, text, prompt)
+        s = write_script(title, text, prompt, check=origin != "text")  # your own text is yours to vouch for
         print(f"  \"{s['title']}\"\n  fetching images…")
         images = pick_visuals(title, s["script"], work, own=src.pop("own"), pageimage=pageimage, topics=src.get("topics", ()))
         print(f"  {len(images)} images")
@@ -1800,12 +1866,12 @@ def selftest():
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
-    r = sub.add_parser("run"); r.add_argument("--url"); r.add_argument("--force", action="store_true")
+    r = sub.add_parser("run", help="make a video from anything: a question, topic, paragraph or link (none = next idea)")
+    r.add_argument("input", nargs="?"); r.add_argument("--url", dest="input", help=argparse.SUPPRESS)
+    r.add_argument("--force", action="store_true")
     r.add_argument("--upload", action="store_true"); r.add_argument("--publish-at")
-    a = sub.add_parser("add"); a.add_argument("urls", nargs="+"); a.add_argument("--force", action="store_true")
-    ak = sub.add_parser("ask", help="make an explainer that answers a question")
-    ak.add_argument("question"); ak.add_argument("--now", action="store_true", help="make it right away")
-    ak.add_argument("--force", action="store_true")
+    a = sub.add_parser("add", help="save ideas: questions, topics, paragraphs or links")
+    a.add_argument("items", nargs="+"); a.add_argument("--force", action="store_true")
     u = sub.add_parser("upload"); u.add_argument("--publish-at"); u.add_argument("--ep", type=int)
     lg = sub.add_parser("log"); lg.add_argument("n", nargs="?", type=int, default=30)
     sub.add_parser("selftest")
@@ -1835,14 +1901,9 @@ def main():
         return web.serve(args.port, not args.no_open)
     if args.cmd == "selftest":
         return selftest()
-    if args.cmd == "ask":
-        pid = add_question(con, args.question, args.force)
-        if pid and args.now:
-            make(con, pid)
-        return
     if args.cmd == "add":
-        for url in args.urls:
-            add_curated(con, url, args.force)
+        for item in args.items:
+            add_input(con, item, args.force)
     elif args.cmd == "log":
         for row in con.execute("select * from pages order by updated desc limit ?", (args.n,)):
             print(f"{row['status']:<9} {row['score'] or '':>2} {row['source']:<8} {row['pageid']:>9}  "
@@ -1863,7 +1924,10 @@ def main():
     elif args.cmd == "discover" and args.source != "wikipedia":
         discover_source(con, args.source, args.count, {"rss": args.feed, "link": args.link}.get(args.source, args.topic))
     elif args.cmd == "discover":
-        if args.topic:
+        import sources
+        if args.topic and sources.looks_like_link(args.topic):
+            discover_source(con, "link", args.count, args.topic)
+        elif args.topic:
             explore(con, args.topic, args.degree, args.count)
         else:
             print(f"finding {args.count} interesting random pages…")
@@ -1880,8 +1944,8 @@ def main():
     elif args.cmd == "upload":
         upload_pending(con, args.publish_at, args.ep)
     elif args.cmd == "run":
-        if args.url:
-            pageid = add_curated(con, args.url, args.force, make_now=True)
+        if args.input:
+            pageid = add_input(con, args.input, args.force, make_now=True)
             if pageid is None:
                 return
         else:

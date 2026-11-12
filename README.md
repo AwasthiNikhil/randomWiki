@@ -1,6 +1,17 @@
 # Shorts Machine
 
-Articles go in, and branded YouTube Shorts come out. Wikipedia is the main source; any web article, RSS/Atom feeds, Hacker News, arXiv and NASA's Astronomy Picture of the Day also work. Everything runs locally and costs nothing.
+Type anything: a question, a topic, a paragraph or a link. A branded YouTube Short comes out. Everything runs locally and costs nothing.
+
+## One box
+In the studio's **Make a video** box, or `./rw run "…"` (`./rw add "…"` saves it as an idea instead):
+| You type | What happens |
+|---|---|
+| a question or topic: *How does a search engine work?*, *black holes* | the local LLM picks the Wikipedia articles that cover it (plus the Simple English version of the main one), and the script answers it in steps ("First… Next… Finally…"), using only those facts |
+| a paragraph (over 30 words): notes, a story, a draft | your text becomes the script, keeping your facts and order. Short texts get background notes from Wikipedia. Your facts aren't fact-checked against Wikipedia, so it's on you to get them right |
+| a link to an article: Wikipedia, any web page, Hacker News, arXiv, NASA APOD | that page is made into a video |
+| a link to a list: a feed, a site, a subreddit, a Wikipedia category or list | its most interesting items go into the ideabank |
+| nothing | the next idea in the ideabank, else a random interesting Wikipedia page |
+
 
 1. **Pick:** random articles, or ideas found around a topic through its Wikipedia link network (1–3 hops). Stubs, lists and disambiguation pages are dropped, and a local LLM scores the rest out of 10.
 2. **Log:** every page that comes up is stored in SQLite with a status and the reason, so nothing is ever processed twice.
@@ -16,13 +27,7 @@ Articles go in, and branded YouTube Shorts come out. Wikipedia is the main sourc
 7. **Score:** each video gets a 0–100 potential score from topic demand, hook, appeal, reach, visuals and length.
 8. **Publish:** YouTube Data API upload, private or scheduled, best potential first. Credits go into the description automatically.
 
-## Explain a question
-Type a question in the studio's **Explain a question** box, or run `./rw ask "How does a search engine work?" --now`.
-- **Research:** the local LLM names the Wikipedia articles that together answer it. Those, plus the Simple English version of the main one, become the research notes.
-- **Script:** opens with the question and answers it in steps ("First… Next… Finally…"), using only facts from the notes, and is fact-checked.
-- **Visuals:** picked per sentence. Gaps are filled with the lead images of the researched articles, which are usually diagrams, placed on the sentence that mentions them.
-- **Credits:** every article used is credited.
-
+## Video clips
 Visuals can also be **video clips**: free-licensed Wikimedia Commons clips (using Wikimedia's own small transcodes) and NASA footage (public domain). They're trimmed to 12 s, skip any opening slate, are muted, and play in the panel. Auto-pick can choose them for named things; in the visuals editor, pick *▶ Commons videos* or *▶ NASA videos*.
 
 ## Sources
@@ -35,16 +40,13 @@ Visuals can also be **video clips**: free-licensed Wikimedia Commons clips (usin
 | arXiv | papers matching a topic | the abstract (arXiv metadata is CC0) | Commons search, else a title card |
 | NASA APOD | the latest pictures (via NASA's RSS feed) | the explanation | search; APOD photos are often copyrighted, so they're not reused automatically |
 
-**Any link** (Find ideas → *Any link*, or `./rw discover --source link --link URL`) works out what you pasted: an RSS/Atom feed, a site or blog (its feed is found automatically), a subreddit (link posts are read from the article they point to), a Wikipedia `Category:` or `List of…` page (its articles), a Wikipedia article (explores around it), a Hacker News list, an arXiv listing, a single article, or any page that lists articles (news sections, blog indexes). Automation can use a link as its source when the ideabank is empty.
+**Find ideas** in the Ideabank takes a topic (explored through Wikipedia's links), a link, or nothing (random). A link (`./rw discover --topic URL`) is worked out what you pasted: an RSS/Atom feed, a site or blog (its feed is found automatically), a subreddit (link posts are read from the article they point to), a Wikipedia `Category:` or `List of…` page (its articles), a Wikipedia article (explores around it), a Hacker News list, an arXiv listing, a single article, or any page that lists articles (news sections, blog indexes). Automation can use a link as its source when the ideabank is empty.
 
 Credits name the source and link back. Non-Wikipedia text is copyrighted by its authors: the narration is a short summary in new words, so review it before publishing.
 
 ```
-./rw run --url https://news.ycombinator.com/item?id=8863     # any supported link works
-./rw discover --source hackernews --count 5
-./rw discover --source rss --feed https://www.nasa.gov/feed/
-./rw discover --source arxiv --topic "dark matter"
-./rw discover --source apod
+./rw run https://news.ycombinator.com/item?id=8863     # any supported link works
+./rw discover --topic https://www.nasa.gov/feed/      # ideas from a feed, site or list
 ```
 
 ## Requirements
@@ -75,10 +77,9 @@ A local web UI. It's bound to 127.0.0.1 and runs the same commands as the CLI, s
 
 ## CLI
 ```
-./rw run                      # make the next video in the queue, else discover a random page
-./rw run --url <wiki url>     # make a specific page now (also retries a failed one)
-./rw add <url> [<url> ...]    # queue pages for later runs
-./rw discover [--count 5] [--topic nepal --degree 1|2|3|any]   # queue ideas: random, or from a topic's link network
+./rw run ["anything"]         # a question, topic, paragraph or link; nothing = the next idea, else a random page
+./rw add "anything" [...]     # save ideas for later runs
+./rw discover [--count 5] [--topic nepal|URL --degree 1|2|3|any]   # find ideas: random, a topic's link network, or a link
 ./rw run --upload [--publish-at 2026-11-12T15:00:00Z]
 ./rw upload [--ep N]          # upload every rendered video not yet uploaded (best first), or just episode N
 ./rw unpublish --ep N [--keep-local]   # delete an uploaded episode from YouTube (and locally unless --keep-local)
@@ -114,7 +115,7 @@ New settings apply to new renders. Use **Save & re-render** on a video to update
 Videos upload **private**, or scheduled with `--publish-at`. Until the project passes YouTube's API audit, YouTube keeps API uploads private. Quota allows about 6 uploads a day (deleting costs 50 units). The first `unpublish` asks Google once for the extra "manage videos" permission.
 
 ## Automation
-In the studio go to **Settings → Automation**: turn it on, pick up to 4 times a day and the weekdays, choose where ideas come from when the ideabank is empty, and choose whether to upload. Each run publishes either the top of your **Queue** or the video it just made, kept private or public at a set time at least 2 hours later, so you can review it. **Save** installs a macOS launchd job (`~/Library/LaunchAgents/com.shortsmachine.auto.plist`); turning it off removes the job.
+In the studio go to **Settings → Automation**: turn it on, pick up to 4 times a day and the weekdays, set a topic or link to find ideas in when the ideabank is empty (empty: random Wikipedia), and choose whether to upload. Each run publishes either the top of your **Queue** or the video it just made, kept private or public at a set time at least 2 hours later, so you can review it. **Save** installs a macOS launchd job (`~/Library/LaunchAgents/com.shortsmachine.auto.plist`); turning it off removes the job.
 - It runs `./rw auto` even when the studio is closed. If the Mac is asleep at that time, it runs when it wakes. Keep Ollama running.
 - Output goes to `data/auto.log`, and the last runs are shown in Settings. A failed run shows a macOS notification. Overlapping runs are skipped.
 - `./rw auto --dry-run` shows what the next run would do. `./rw schedule` applies the `brand.json` schedule from the command line.

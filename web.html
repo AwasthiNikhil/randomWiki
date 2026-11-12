@@ -82,6 +82,8 @@ td.num { font-family: var(--mono); color: var(--muted); white-space: nowrap; }
 
 aside { border-left: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; background: #0B0E12; }
 .actions { padding: 18px; display: grid; gap: 14px; border-bottom: 1px solid var(--line); }
+.actions textarea.make { width: 100%; resize: vertical; min-height: 84px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font: 13px/1.5 Inter, sans-serif; color: var(--text); }
+.actions textarea.make:focus { outline: none; border-color: var(--accent); }
 .actions h4 { margin: 0 0 6px; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); font-weight: 600; }
 .row { display: flex; gap: 8px; }
 .row.wrap { flex-wrap: wrap; }
@@ -258,19 +260,13 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
     </section>
     <section id="queue" hidden>
       <div class="qadd">
-        <textarea id="qText" placeholder="Paste links (Wikipedia, any article, Hacker News, arXiv, APOD) or Wikipedia titles, one per line" aria-label="Links to add to the ideabank"></textarea>
+        <textarea id="qText" placeholder="Questions, topics or links, one per line" aria-label="Ideas to add to the ideabank"></textarea>
         <button class="btn primary" id="qAdd">Add to ideabank</button>
       </div>
       <div class="explore">
         <h4 style="margin:0;font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--muted)">Find ideas</h4>
         <div class="row">
-          <select class="sort" id="qSource" aria-label="Source" style="margin-left:0">
-            <option value="link">Any link: feed, site, subreddit, Wikipedia category or list…</option>
-            <option value="wikipedia" selected>Wikipedia</option><option value="hackernews">Hacker News (top stories)</option>
-            <option value="apod">NASA Astronomy Picture of the Day</option><option value="arxiv">arXiv papers</option>
-            <option value="rss">RSS / Atom feed</option>
-          </select>
-          <input id="qTopic" placeholder="Topic to explore, e.g. Nepal, jazz, black holes (empty = fully random)" aria-label="Topic or feed URL">
+<input id="qTopic" placeholder="A topic (Nepal, jazz, black holes) or a link (blog, feed, subreddit, Wikipedia category). Empty = random" aria-label="Topic or link to find ideas in">
         </div>
         <div class="row" style="align-items:center">
           <span class="count" id="qDegLabel">Degree of relation</span>
@@ -360,9 +356,7 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
                 <div class="seg" id="schDays" role="group" aria-label="Days of the week"></div></div>
               <div class="inline">
                 <label style="flex:1;min-width:min(220px,100%)">If the ideabank is empty, find an idea from
-                  <select id="schFb"><option value="wikipedia">Wikipedia (random, or a topic)</option><option value="link">Any link (feed, site, subreddit, category…)</option><option value="hackernews">Hacker News</option>
-                  <option value="apod">NASA APOD</option><option value="arxiv">arXiv (topic)</option><option value="rss">RSS feed (URL)</option></select></label>
-                <label style="flex:1;min-width:min(220px,100%)"><span id="schArgLabel">Topic (optional)</span><input id="schArg"></label>
+                  <input id="schArg" placeholder="A topic or a link. Empty = a random Wikipedia page"></label>
               </div>
               <label class="check"><input type="checkbox" id="schUp"> Upload to YouTube after making</label>
               <div id="schPick" style="display:grid;gap:6px;padding-left:24px">
@@ -404,27 +398,13 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
   <aside>
     <div class="actions">
       <div>
-        <h4>Generate</h4>
-        <div class="row">
-          <button class="btn primary" data-cmd="run" title="Next idea in the ideabank, otherwise a random interesting page">Make next video</button>
+        <h4>Make a video</h4>
+        <textarea id="input" class="make" rows="4" placeholder="Ask a question, name a topic, paste a paragraph or a link" aria-label="What to make a video from"></textarea>
+        <div class="row" style="margin-top:8px">
+          <button class="btn primary" id="makeNow" title="Make it now. Empty: the next idea in the ideabank, else a random page">Make now</button>
+          <button class="btn" id="saveIdea" title="Save it to the ideabank for later">Save idea</button>
         </div>
-      </div>
-      <div>
-        <h4>From a link</h4>
-        <div class="row wrap">
-          <input id="url" placeholder="Wikipedia, article, Hacker News, arXiv or APOD link" aria-label="Link to make a video from">
-          <button class="btn" id="makeUrl">Make now</button>
-          <button class="btn" id="queueUrl" title="Save it to the ideabank for later">Save idea</button>
-        </div>
-      </div>
-      <div>
-        <h4>Explain a question</h4>
-        <div class="row wrap">
-          <input id="ask" placeholder="e.g. How does a search engine work?" aria-label="Question to explain">
-          <button class="btn primary" id="askNow" title="Research it on Wikipedia and make an explainer now">Make now</button>
-          <button class="btn" id="askSave" title="Save the question to the ideabank">Save idea</button>
-        </div>
-        <div class="hint">Researched from several Wikipedia articles, then answered step by step.</div>
+        <div class="hint">Questions and topics are researched, a paragraph becomes the script, and a link is made into a video. A feed, site or category link fills the ideabank instead. Leave it empty to make the next idea.</div>
       </div>
       <div>
         <h4>Publish</h4>
@@ -438,7 +418,7 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
     <div class="term">
       <div class="term-head"><span class="dot" id="dot"></span><span id="jobLabel">idle</span><button class="btn" id="clearTerm" title="Clear terminal history">Clear</button><button class="btn danger" id="stop" disabled>Stop</button></div>
       <pre class="out" id="out" aria-live="polite"></pre>
-      <form class="prompt" id="prompt"><span>rw ›</span><input id="cmd" placeholder="run --url … · add … · upload · log 20" autocomplete="off" aria-label="Command"></form>
+      <form class="prompt" id="prompt"><span>rw ›</span><input id="cmd" placeholder="run &quot;anything&quot; · add … · upload · log 20" autocomplete="off" aria-label="Command"></form>
     </div>
   </aside>
 </div>
@@ -523,7 +503,7 @@ function potDetail(p) {
     <div class="hint">${esc(i.why)} · ${i.views60.toLocaleString()} article views in 60 days · ${i.languages} languages · ${i.seconds}s</div>`;
 }
 
-const ORIGIN_NAMES = {wikipedia: "Wikipedia", web: "Article", hackernews: "Hacker News", arxiv: "arXiv", apod: "NASA APOD", question: "Question"};
+const ORIGIN_NAMES = {wikipedia: "Wikipedia", web: "Article", hackernews: "Hacker News", arxiv: "arXiv", apod: "NASA APOD", question: "Researched", text: "Your text"};
 const STATUS_LABEL = {queued: "idea", rendered: "in queue"};
 const statusLabel = st => STATUS_LABEL[st] || st;
 const originName = p => ORIGIN_NAMES[p.origin || "wikipedia"] || p.origin;
@@ -582,7 +562,7 @@ function renderQueue() {
             : `<div class="via">from <a href="${esc(p.via)}" target="_blank" rel="noopener">${esc(p.via.replace(/^https?:\/\/(www\.)?/, "").slice(0, 70))}</a></div>`}
         </div>
         <div class="qbtns">
-          <button class="btn primary" data-make="${esc(p.url)}">Make now</button>
+          <button class="btn primary" data-make="${esc(["question", "text"].includes(p.origin) ? p.ref : p.url)}">Make now</button>
           <button class="btn danger" data-skip="${p.pageid}">Remove</button>
         </div>
       </div>`).join("")}</div>`;
@@ -763,7 +743,7 @@ async function poll() {
     const was = running; running = j.running;
     $("#dot").className = "dot" + (running ? " run" : "");
     $("#jobLabel").textContent = running ? j.cmd : (j.cmd ? `idle · last: ${j.cmd}` : "idle");
-    document.querySelectorAll("[data-cmd], #makeUrl, #queueUrl, #upload, #qAdd, #qFind, [data-remake], [data-upload], [data-make], [data-rerender], [data-unpubgo]").forEach(b => b.disabled = running);
+    document.querySelectorAll("[data-cmd], #makeNow, #saveIdea, #upload, #qAdd, #qFind, [data-remake], [data-upload], [data-make], [data-rerender], [data-unpubgo]").forEach(b => b.disabled = running);
     $("#stop").disabled = !running;
     if (was && !running) loadPages();
   } catch (e) {
@@ -797,7 +777,7 @@ document.addEventListener("click", async e => {
   else if (t.dataset.id) openDetail(t.dataset.id);
   else if (t.dataset.cmd) exec(t.dataset.cmd);
   else if (t.dataset.upload) { dlg.close(); exec(`upload --ep ${+t.dataset.upload}` + publishArg()); }
-  else if (t.dataset.make) exec(`run --url ${quote(t.dataset.make)}`);
+  else if (t.dataset.make) exec(`run ${quote(t.dataset.make)}`);
   else if (t.dataset.delvid) {
     $("#delVidBox").innerHTML = `<span class="hint" style="color:var(--bad)">Delete this video and its files? Can't be undone.</span>
       <button class="btn danger" data-delvidyes="${t.dataset.delvid}">Delete</button> <button class="btn" data-delvidno="${t.dataset.delvid}">Cancel</button>`;
@@ -826,27 +806,13 @@ document.addEventListener("click", async e => {
   else if (t.dataset.remake) { dlg.close(); exec(`run --force --url ${quote(t.dataset.remake)}`); }
   else if (t.dataset.skip) { if (await post("/api/skip", {pageid: +t.dataset.skip})) { if (dlg.open) dlg.close(); termLine("removed/skipped page " + t.dataset.skip); loadPages(); } }
 });
-$("#makeUrl").onclick = () => { const u = $("#url").value.trim(); if (u) exec(`run --url ${quote(u)}`).then(ok => ok && ($("#url").value = "")); };
-$("#queueUrl").onclick = () => { const u = $("#url").value.trim(); if (u) exec(`add ${quote(u)}`).then(ok => ok && ($("#url").value = "")); };
+$("#makeNow").onclick = () => { const v = $("#input").value.trim(); exec("run" + (v ? " " + quote(v) : "")).then(ok => ok && ($("#input").value = "")); };
+$("#saveIdea").onclick = () => { const v = $("#input").value.trim(); if (!v) return termLine("! type or paste something first", "err");
+  exec(`add ${quote(v)}`).then(ok => ok && ($("#input").value = "")); };
 const publishArg = () => { const v = $("#publishAt").value; return v ? " --publish-at " + new Date(v).toISOString().replace(/\.\d+Z$/, "Z") : ""; };
-const SOURCE_HINT = {
-  link: "Paste a link (blog, news section, feed, subreddit, Wikipedia category or list…) or type a topic",
-  wikipedia: "Topic to explore, e.g. Nepal, jazz, black holes (empty = fully random)",
-  hackernews: "No input needed: today's top stories", apod: "No input needed: latest Astronomy Pictures of the Day",
-  arxiv: "Topic to search papers for, e.g. black holes", rss: "Feed URL, e.g. https://www.nasa.gov/feed/",
-};
-const syncSource = () => {
-  const src = $("#qSource").value;
-  $("#qTopic").placeholder = SOURCE_HINT[src];
-  $("#qTopic").disabled = ["hackernews", "apod"].includes(src);
-  $("#qDegree").hidden = $("#qDegLabel").hidden = src !== "wikipedia";
-};
-$("#qSource").onchange = syncSource;
 $("#qFind").onclick = () => {
-  const src = $("#qSource").value, v = $("#qTopic").value.trim(), n = $("#qCount").value;
-  if (src === "wikipedia") return exec(`discover --count ${n}` + (v ? ` --topic ${quote(v)} --degree ${qDegree}` : ""));
-  if (["arxiv", "rss", "link"].includes(src) && !v) return termLine(`! ${src === "arxiv" ? "enter a topic" : "paste a link"} first`, "err");
-  exec(`discover --source ${src} --count ${n}` + (src === "rss" ? ` --feed ${quote(v)}` : src === "link" ? ` --link ${quote(v)}` : src === "arxiv" ? ` --topic ${quote(v)}` : ""));
+  const v = $("#qTopic").value.trim();
+  exec(`discover --count ${$("#qCount").value}` + (v ? ` --topic ${quote(v)} --degree ${qDegree}` : ""));
 };
 $("#qDegree").onclick = e => {
   const b = e.target.closest("[data-deg]"); if (!b) return;
@@ -882,10 +848,6 @@ $("#qAdd").onclick = () => {
   const items = $("#qText").value.split("\n").map(x => x.trim()).filter(Boolean);
   if (items.length) exec("add " + items.map(quote).join(" ")).then(ok => ok && ($("#qText").value = ""));
 };
-const askCmd = now => { const q = $("#ask").value.trim(); if (!q) return termLine("! type a question first", "err");
-  exec(`ask ${quote(q)}` + (now ? " --now" : "")).then(ok => ok && ($("#ask").value = "")); };
-$("#askNow").onclick = () => askCmd(true);
-$("#askSave").onclick = () => askCmd(false);
 $("#upload").onclick = () => exec("upload" + publishArg());
 $("#search").oninput = e => { q = e.target.value; renderLog(); };
 $("#epSearch").oninput = e => { epQ = e.target.value; renderEpisodes(); };
@@ -1092,9 +1054,7 @@ function renderSchedule() {
       ${sch.times.length > 1 ? `<button type="button" data-trm="${i}" aria-label="Remove time ${i + 1}">✕</button>` : ""}</span>`).join("")
     + (sch.times.length < 4 ? `<button class="btn sm" type="button" id="tAdd">+ Add time</button>` : "");
   $("#schDays").innerHTML = DAY_NAMES.map((n, d) => `<button type="button" data-day="${d}" class="${sch.days.includes(d) ? "on" : ""}" aria-pressed="${sch.days.includes(d)}">${n}</button>`).join("");
-  $("#schFb").value = sch.fallback; $("#schArg").value = sch.fallback_arg;
-  $("#schArgLabel").textContent = {wikipedia: "Topic (optional)", arxiv: "Topic", rss: "Feed URL", link: "Link"}[sch.fallback] || "No input needed";
-  $("#schArg").disabled = ["hackernews", "apod"].includes(sch.fallback);
+  $("#schArg").value = sch.fallback_arg;
   $("#schUp").checked = sch.upload; $("#schPub").hidden = $("#schPick").hidden = !sch.upload;
   document.querySelectorAll("[name=schPick]").forEach(r => r.checked = r.value === (sch.pick || "order"));
   document.querySelectorAll("[name=schPub]").forEach(r => r.checked = r.value === sch.publish);
@@ -1109,7 +1069,8 @@ function readSchedule() {
   const sch = S.schedule;
   sch.enabled = $("#schOn").checked;
   sch.times = [...document.querySelectorAll("[data-ti]")].map(i => i.value).filter(Boolean);
-  sch.fallback = $("#schFb").value; sch.fallback_arg = $("#schArg").value.trim();
+  sch.fallback_arg = $("#schArg").value.trim();  // a link finds ideas in it; anything else is a Wikipedia topic
+  sch.fallback = /^(https?:\/\/\S+|[\w-]+(\.[\w-]+)+(\/\S*)?)$/.test(sch.fallback_arg) ? "link" : "wikipedia";
   sch.upload = $("#schUp").checked;
   sch.publish = document.querySelector("[name=schPub]:checked")?.value || "private";
   sch.pick = document.querySelector("[name=schPick]:checked")?.value || "order";
