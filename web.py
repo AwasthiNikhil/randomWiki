@@ -116,21 +116,112 @@ def start(cmd):
     threading.Thread(target=pump, daemon=True).start()
 
 
-def pages():
+def poster(video):
+    """out/.posters/<video>.jpg at 1.5 s, 270 px wide; remade if the video is newer. Images scale to thousands of
+    cards where <video> elements don't."""
+    import imageio_ffmpeg
+    jpg = rw.OUT / ".posters" / (video.name + ".jpg")
+    if not jpg.exists() or jpg.stat().st_mtime < video.stat().st_mtime:
+        jpg.parent.mkdir(exist_ok=True)
+        subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(), "-y", "-loglevel", "error", "-ss", "1.5", "-i", str(video),
+                        "-frames:v", "1", "-vf", "scale=270:-2", "-q:v", "4", str(jpg)], timeout=60)
+    return jpg
+
+
+def store_audio(raw, kind, pid=None):
+    """Convert audio bytes for its use and save it; checks first, so a bad file never replaces a good one."""
+    import imageio_ffmpeg, tempfile, uuid
+    dest = {"sample": rw.ROOT / "brand" / "voice_sample.wav", "narration": rw.WORK / str(pid) / "voice_recorded.wav",
+            "music": rw.WORK / str(pid) / "music.m4a", "sfx": rw.WORK / str(pid) / f"sfx-{uuid.uuid4().hex[:8]}.m4a"}[kind]
+    staged = dest.with_suffix(".new" + dest.suffix)
+    enc = ["-ac", "1", "-ar", "24000"] if kind in ("sample", "narration") else ["-vn", "-ac", "2", "-ar", "48000", "-c:a", "aac", "-b:a", "160k", "-f", "mp4"]
+    with tempfile.NamedTemporaryFile(suffix=".audio", dir=rw.DB.parent) as tmp:
+        tmp.write(raw)
+        tmp.flush()
+        r = subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(), "-y", "-loglevel", "error", "-i", tmp.name, *enc, str(staged)],
+                           capture_output=True, text=True)
+    if r.returncode:
+        staged.unlink(missing_ok=True)
+        raise ValueError("couldn't read that audio file")
+    secs = rw.video_seconds(staged)
+    bad = ("record 10-30 seconds" if kind == "sample" and not 5 <= secs <= 90 else
+           "keep sound effects under 20 seconds" if kind == "sfx" and secs > 20 else "it looks empty" if secs < 0.2 else "")
+    if bad:
+        staged.unlink()
+        raise ValueError(f"that audio is {secs:.1f}s; {bad}")
+    staged.replace(dest)
+    return dest, secs
+
+
+def clean_overlays(items):
+    """Arrows, circles and labels from the editor: up to 4 per visual, positions inside the panel."""
+    out = []
+    for o in (items if isinstance(items, list) else [])[:4]:
+        if not isinstance(o, dict) or o.get("type") not in ("arrow", "circle", "label"):
+            continue
+        c = {"type": o["type"], "x": min(max(float(o.get("x", 0.5)), 0), 1), "y": min(max(float(o.get("y", 0.5)), 0), 1),
+             "delay": min(max(float(o.get("delay", 0.3)), 0), 8)}
+        if o["type"] == "arrow":
+            c["dir"] = o.get("dir") if o.get("dir") in ("left", "right", "up", "down") else "left"
+        if o["type"] == "circle":
+            c["r"] = min(max(float(o.get("r", 0.12)), 0.04), 0.4)
+        if o["type"] == "label":
+            c["text"] = str(o.get("text", ""))[:40]
+        out.append(c)
+    return out or None
+
+
+def set_audio_credit(pid, file, item):
+    """Remember where a track or sound came from, for the description's credits (None: it's your own)."""
+    meta = rw.WORK / str(pid) / "meta.json"
+    m = json.loads(meta.read_text())
+    creds = m.setdefault("audio_credits", {})
+    if item:
+        creds[file] = {k: str(item.get(k, ""))[:300] for k in ("name", "artist", "license", "page")}
+    else:
+        creds.pop(file, None)
+    meta.write_text(json.dumps(m, indent=2))
+
+
+_meta_cache = {}  # path -> (mtime, summary): thousands of videos shouldn't mean thousands of JSON reads per refresh
+
+
+HEAVY = ("images", "yt_description", "potential_info", "audio_credits")  # only the open video needs these
+
+
+def pages(pageid=None):
+    """The list (light: the cards and filters need title, status, scores, a cover), or one video in full."""
     con = rw.db()
-    rows = [dict(r) for r in con.execute("select * from pages order by coalesce(ep, 0) desc, updated desc")]
+    rows = [dict(r) for r in (con.execute("select * from pages where pageid=?", (pageid,)) if pageid else
+                              con.execute("select * from pages order by coalesce(ep, 0) desc, updated desc"))]
     for r in rows:
         meta = rw.WORK / str(r["pageid"]) / "meta.json"
         if r["ep"] and meta.exists():
-            m = json.loads(meta.read_text())
-            r.update(yt_title=m["title"], script=m["script"], yt_description=m["yt_description"], potential_info=m.get("potential"),
-                     narration=m.get("narration", "kokoro"), music=m.get("music", "brand"), music_volume=m.get("music_volume"),
-                     own_music=(rw.WORK / str(r["pageid"]) / "music.m4a").is_file(), ai=m.get("ai") or m.get("gemini"), has_recording=(rw.WORK / str(r["pageid"]) / "voice_recorded.wav").exists(),
-                     images=[{k: v for k, v in i.items() if k != "path"} | {"credit": rw.credit(i), "file": Path(i["path"]).name}
-                             for i in m["images"]])
+            mt = meta.stat().st_mtime
+            hit = _meta_cache.get(meta)
+            if hit and hit[0] == mt:
+                r.update(hit[1])
+            else:
+                _meta_cache[meta] = (mt, meta_summary(r["pageid"], json.loads(meta.read_text())))
+                r.update(_meta_cache[meta][1])
+            work = meta.parent  # files that change without touching meta.json: checked every time
+            r.update(own_music=(work / "music.m4a").is_file(), has_recording=(work / "voice_recorded.wav").is_file())
         v = Path(r["video_path"] or "")
         r["video"] = v.name if r["video_path"] and v.exists() else None
+        if not pageid and "images" in r:
+            r["cover"] = (r["images"] or [{}])[0].get("file")
+            for k in HEAVY:
+                r.pop(k, None)
     return rows
+
+
+def meta_summary(pid, m):
+    return dict(yt_title=m["title"], script=m["script"], yt_description=m["yt_description"], potential_info=m.get("potential"),
+                     narration=m.get("narration", "kokoro"), music=m.get("music", "brand"), music_volume=m.get("music_volume"),
+                     ai=m.get("ai") or m.get("gemini"),
+                     audio_credits=m.get("audio_credits") or {},
+                     images=[{k: v for k, v in i.items() if k != "path"} | {"credit": rw.credit(i), "file": Path(i["path"]).name}
+                             for i in m["images"]])
 
 
 class H(BaseHTTPRequestHandler):
@@ -140,6 +231,10 @@ class H(BaseHTTPRequestHandler):
     def send(self, code, body, ctype="application/json"):
         data = body if isinstance(body, bytes) else json.dumps(body).encode()
         self.send_response(code)
+        if len(data) > 20_000 and "gzip" in self.headers.get("Accept-Encoding", ""):  # big lists: ~5x smaller
+            import gzip
+            data = gzip.compress(data, 5)
+            self.send_header("Content-Encoding", "gzip")
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-store")
@@ -194,30 +289,16 @@ class H(BaseHTTPRequestHandler):
     def upload_audio(self, raw):
         """POST /api/upload_audio?kind=sample|narration|music|sfx[&pageid=N] with recorded/uploaded audio (webm, ogg, m4a, mp3, wav).
         music: this video's own track; sfx: a sound effect for one visual (the reply names its file)."""
-        import imageio_ffmpeg, tempfile, uuid
         kind = (re.search(r"kind=(sample|narration|music|sfx)", self.path) or [None, None])[1]
         pid = (re.search(r"pageid=(\d+)", self.path) or [None, None])[1]
         if not kind or not 0 < len(raw) <= 60_000_000 or (kind != "sample" and not (pid and (rw.WORK / pid).is_dir())):
             return self.send(400, {"error": "bad upload"})
-        dest = {"sample": rw.ROOT / "brand" / "voice_sample.wav", "narration": rw.WORK / str(pid) / "voice_recorded.wav",
-                "music": rw.WORK / str(pid) / "music.m4a", "sfx": rw.WORK / str(pid) / f"sfx-{uuid.uuid4().hex[:8]}.m4a"}[kind]
-        staged = dest.with_suffix(".new" + dest.suffix)  # convert and check first, so a bad upload never replaces a good file
-        enc = ["-ac", "1", "-ar", "24000"] if kind in ("sample", "narration") else ["-vn", "-ac", "2", "-ar", "48000", "-c:a", "aac", "-b:a", "160k", "-f", "mp4"]
-        with tempfile.NamedTemporaryFile(suffix=".audio", dir=rw.DB.parent) as tmp:
-            tmp.write(raw)
-            tmp.flush()
-            r = subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(), "-y", "-loglevel", "error", "-i", tmp.name, *enc, str(staged)],
-                               capture_output=True, text=True)
-        if r.returncode:
-            staged.unlink(missing_ok=True)
-            return self.send(400, {"error": "couldn't read that audio file"})
-        secs = rw.video_seconds(staged)
-        bad = ("record 10-30 seconds" if kind == "sample" and not 5 <= secs <= 90 else
-               "keep sound effects under 20 seconds" if kind == "sfx" and secs > 20 else "it looks empty" if secs < 0.2 else "")
-        if bad:
-            staged.unlink()
-            return self.send(400, {"error": f"that audio is {secs:.1f}s; {bad}"})
-        staged.replace(dest)
+        try:
+            dest, secs = store_audio(raw, kind, pid)
+        except ValueError as e:
+            return self.send(400, {"error": str(e)})
+        if kind == "music":  # your own track: no third-party credit
+            set_audio_credit(pid, dest.name, None)
         return self.send(200, {"ok": True, "seconds": round(secs, 1), "file": dest.name})
 
     def upload_brand(self, raw):
@@ -247,6 +328,9 @@ class H(BaseHTTPRequestHandler):
         path, _, query = self.path.partition("?")
         if path == "/":
             return self.send(200, (rw.ROOT / "web.html").read_bytes(), "text/html; charset=utf-8")
+        if path == "/api/page":  # ?id=N: one video with everything the editor needs
+            got = pages(int((re.search(r"id=(\d+)", query) or [0, 0])[1]))
+            return self.send(200, got[0]) if got else self.send(404, {"error": "no such page"})
         if path == "/api/pages":
             return self.send(200, {"pages": pages(), "brand": brand()})
         if path == "/api/settings":
@@ -274,6 +358,7 @@ class H(BaseHTTPRequestHandler):
             log = rw.AUTO_LOG.read_text(errors="ignore").splitlines()[-40:] if rw.AUTO_LOG.exists() else []
             return self.send(200, {"brand": b, "voices": sorted(rw.KOKORO_VOICES), "models": models, "gemini": gemini, "claude": claude, "ai": b.get("ai") or "gemini", "publish": rw.publish_status(),
                                    "publish_to": b.get("publish_to") or ["youtube"], "youtube": rw.youtube_status(),
+                                   "stock": {n: "shell" if os.environ.get(f"{n.upper()}_API_KEY", "").strip() else "saved" if rw.stock_key(n) else "" for n in rw.STOCK},
                                    "schedule": rw.SCHEDULE_DEFAULTS | b.get("schedule", {}), "schedule_loaded": rw.schedule_loaded(),
                                    "auto_log": [l for l in log if l.startswith(("===", "make:", "queue empty", "  done", "  uploaded", "  upload failed", "  publishing failed", "  YouTube", "  Facebook", "  Instagram", "  TikTok"))][-12:],
                                    "music": (rw.ROOT / b["music"]).is_file(), "voice_sample": (rw.ROOT / "brand" / "voice_sample.wav").is_file(),
@@ -305,6 +390,18 @@ class H(BaseHTTPRequestHandler):
             running = bool(job["proc"] and job["proc"].poll() is None)
             return self.send(200, {"running": running, "cmd": job["cmd"], "code": job["code"],
                                    "lines": job["lines"][since:], "next": len(job["lines"])})
+        if path == "/api/audio/search":  # ?kind=music|sfx&q=…: free tracks and sounds via Openverse
+            from urllib.parse import parse_qs
+            qs = {k: v[0] for k, v in parse_qs(query).items()}
+            if not qs.get("q") or qs.get("kind") not in ("music", "sfx"):
+                return self.send(400, {"error": "need kind and q"})
+            try:
+                return self.send(200, {"results": rw.src_audio(qs["q"], qs["kind"])})
+            except Exception as e:
+                return self.send(502, {"error": f"audio search failed: {e}"})
+        m = re.fullmatch(r"/poster/([\w.\-\[\],]+)\.jpg", path)  # small still of a rendered video, made once, for the grids
+        if m and (rw.OUT / m[1]).is_file():
+            return self.send_file(poster(rw.OUT / m[1]), "image/jpeg")
         if path == "/api/images/search":
             from urllib.parse import parse_qs
             qs = {k: v[0] for k, v in parse_qs(query).items()}
@@ -375,7 +472,8 @@ class H(BaseHTTPRequestHandler):
                         out.append(rw.download_image(img, work))
                     else:
                         continue
-                    edit = {k: img.get(k) for k in ("motion", "sfx", "sentence")}  # your choices in the editor
+                    edit = {k: img.get(k) for k in ("motion", "sfx", "sentence", "overlays")}  # your choices in the editor
+                    edit["overlays"] = clean_overlays(edit["overlays"])
                     if edit["motion"] not in ("in", "out", "left", "right", "still"):
                         edit["motion"] = None
                     if not (re.fullmatch(r"sfx-[0-9a-f]{8}\.m4a", str(edit["sfx"])) and (work / edit["sfx"]).is_file()):
@@ -416,6 +514,24 @@ class H(BaseHTTPRequestHandler):
                 m["images"].append(rw.download_clip(clip, meta.parent))
                 meta.write_text(json.dumps(m, indent=2))
                 return self.send(200, {"ok": True, "n": len(m["images"])})
+            elif self.path == "/api/audio_use":  # body: {"pageid", "kind": "music"|"sfx", "item": {url, name, artist, license, page}}
+                pid, kind, item = int(body["pageid"]), body.get("kind"), body.get("item") or {}
+                if kind not in ("music", "sfx") or not (rw.WORK / str(pid) / "meta.json").exists():
+                    raise ValueError("pick a track for a video")
+                if not any(item.get("url") == x["url"] for x in rw.src_audio(str(body.get("q") or item.get("name", "")), kind)):
+                    raise ValueError("that track isn't in the search results any more; search again")  # only fetch what Openverse listed
+                dest, secs = store_audio(rw.fetch(item["url"]), kind, pid)
+                set_audio_credit(pid, dest.name, item)
+                return self.send(200, {"ok": True, "file": dest.name, "seconds": round(secs, 1)})
+            elif self.path == "/api/stock_key":  # body: {"name": "pexels"|"pixabay", "key": "..."}; empty removes it
+                name, key = body.get("name"), str(body.get("key", "")).strip()
+                if name not in rw.STOCK:
+                    raise ValueError("unknown stock library")
+                keys = rw.secret(rw.STOCK_FILE)
+                if key and not re.fullmatch(r"[\w\-]{20,100}", key):
+                    raise ValueError(f"that doesn't look like a {rw.STOCK[name]} API key")
+                keys[name] = key
+                rw.secret(rw.STOCK_FILE, {k: v for k, v in keys.items() if v})
             elif self.path == "/api/youtube_client":  # body: {"json": "<client file contents>"}
                 rw.save_youtube_client(str(body.get("json", "")))
             elif self.path == "/api/youtube_disconnect":

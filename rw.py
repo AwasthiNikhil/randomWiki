@@ -1050,8 +1050,97 @@ def src_nasa_video(q, limit=8):
     return out
 
 
+# ---------- stock libraries: Pexels and Pixabay (your own free key), WordPress Photos (CC0, no key) ----------
+STOCK_FILE = SECRETS / "stock.json"  # {"pexels": key, "pixabay": key}
+STOCK = {"pexels": "Pexels", "pixabay": "Pixabay"}
+
+
+def stock_key(name):
+    """PEXELS_API_KEY / PIXABAY_API_KEY from the shell, else the key saved in Connectors."""
+    return os.environ.get(f"{name.upper()}_API_KEY", "").strip() or secret(STOCK_FILE).get(name, "")
+
+
+def stock_get(name, url, params, headers=None):
+    k = stock_key(name)
+    if not k:
+        raise RuntimeError(f"add a {STOCK[name]} API key in Connectors")
+    if name == "pixabay":
+        params = {**params, "key": k}
+    return http_json(urllib.request.Request(url + "?" + urllib.parse.urlencode(params),
+                                            headers={"User-Agent": BRAND["user_agent"], **({"Authorization": k} if name == "pexels" else {})}))
+
+
+def src_pexels(q, limit=24):
+    d = stock_get("pexels", "https://api.pexels.com/v1/search", {"query": q, "per_page": min(limit, 40)})
+    return [dict(source="pexels", url=x["src"]["large2x"], thumb=x["src"]["medium"], page=x["url"], name=x.get("alt") or "Pexels photo",
+                 artist=x.get("photographer") or "", license="Pexels License", tags=x.get("alt") or "") for x in d.get("photos", [])]
+
+
+def src_pexels_video(q, limit=12):
+    d = stock_get("pexels", "https://api.pexels.com/videos/search", {"query": q, "per_page": min(limit, 40)})
+    out = []
+    for v in d.get("videos", []):
+        files = sorted((f for f in v.get("video_files", []) if f.get("file_type") == "video/mp4" and (f.get("height") or 0) >= 720),
+                       key=lambda f: f["height"])  # smallest HD rendition: we only use a few seconds at 1000 px
+        if files:
+            out.append(dict(source="pexels", kind="video", url=files[0]["link"], thumb=v.get("image", ""), page=v["url"],
+                            name=re.sub(r"[-/]", " ", v["url"].rstrip("/").rsplit("/", 1)[-1]).strip() or "Pexels video",
+                            artist=(v.get("user") or {}).get("name", ""), license="Pexels License"))
+    return out
+
+
+def src_pixabay(q, limit=24):
+    d = stock_get("pixabay", "https://pixabay.com/api/", {"q": q[:100], "image_type": "photo", "safesearch": "true", "per_page": max(3, min(limit, 200))})
+    return [dict(source="pixabay", url=x["largeImageURL"], thumb=x["webformatURL"], page=x["pageURL"], name=x.get("tags") or "Pixabay image",
+                 artist=x.get("user", ""), license="Pixabay Content License", tags=x.get("tags", "")) for x in d.get("hits", [])]
+
+
+def src_pixabay_video(q, limit=12):
+    d = stock_get("pixabay", "https://pixabay.com/api/videos/", {"q": q[:100], "safesearch": "true", "per_page": max(3, min(limit, 200))})
+    out = []
+    for x in d.get("hits", []):
+        v = (x.get("videos") or {}).get("medium") or (x.get("videos") or {}).get("small") or {}
+        if v.get("url"):
+            out.append(dict(source="pixabay", kind="video", url=v["url"], thumb=v.get("thumbnail", ""), page=x["pageURL"],
+                            name=x.get("tags") or "Pixabay video", artist=x.get("user", ""), license="Pixabay Content License", tags=x.get("tags", "")))
+    return out
+
+
+WP_PHOTOS = "https://wordpress.org/photos/wp-json/wp/v2/"
+
+
+def src_wordpress(q, limit=24):
+    """WordPress Photo Directory: CC0 photos. Its text search matches inside words ("cat" finds "delicate"),
+    so search by tag first, else keep only whole-word matches."""
+    ql = q.lower().strip()
+    tags = get_json(WP_PHOTOS + "photo-tags", {"search": q, "per_page": 20, "_fields": "id,name"})
+    ids = [t["id"] for t in tags if t["name"].lower() == ql] or [t["id"] for t in tags if ql in t["name"].lower().split()]
+    params = {"per_page": min(limit, 50), "_fields": "link,content,photo-thumbnail-url"}
+    photos = get_json(WP_PHOTOS + "photos", params | ({"photo-tags": ",".join(map(str, ids[:5]))} if ids else {"search": q}))
+    out = []
+    for x in photos:
+        desc, thumb = strip_html(x["content"]["rendered"]), x.get("photo-thumbnail-url") or ""
+        if thumb and (ids or re.search(rf"\b{re.escape(ql)}\b", desc.lower())):
+            out.append(dict(source="wordpress", url=re.sub(r"-\d+x\d+(?=\.\w+$)", "", thumb), thumb=thumb, page=x["link"],
+                            name=desc[:90] or "WordPress photo", artist="", license="CC0", tags=desc))
+    return out
+
+
 IMAGE_SOURCES = {"article": src_article, "commons": src_commons, "openverse": src_openverse, "nasa": src_nasa, "met": src_met,
-                 "commons_video": src_commons_video, "nasa_video": src_nasa_video}
+                 "commons_video": src_commons_video, "nasa_video": src_nasa_video, "wordpress": src_wordpress,
+                 "pexels": src_pexels, "pexels_video": src_pexels_video, "pixabay": src_pixabay, "pixabay_video": src_pixabay_video}
+
+
+def src_audio(q, kind="music", limit=20):
+    """Free music (Jamendo, ccMixter, …) or sound effects (Freesound) through Openverse. Only licences that allow
+    putting it under a narration: CC0, CC BY, CC BY-SA, public domain (never ND or NC)."""
+    params = {"q": q, "license": "cc0,by,by-sa,pdm", "page_size": min(limit, 20)}
+    params |= {"category": "music"} if kind == "music" else {"source": "freesound", "length": "shortest"}
+    r = get_json("https://api.openverse.org/v1/audio/", params)
+    return [dict(source=x.get("source", ""), url=x["url"], page=x.get("foreign_landing_url") or x["url"], name=x.get("title") or "untitled",
+                 artist=x.get("creator") or "unknown", seconds=round((x.get("duration") or 0) / 1000, 1),
+                 license="Public domain" if x["license"] in ("cc0", "pdm") else f"CC {x['license'].upper()} {x.get('license_version', '')}".strip())
+            for x in r.get("results", []) if x.get("url")]
 
 
 def download_image(img, dest):
@@ -1162,9 +1251,14 @@ def pick_visuals(title, script, dest, own=None, pageimage=None, limit=6, topics=
             print(f"  sentence {k + 1}: {q!r} -> keeping the previous image")
             continue
         cands = []  # 2. a named thing: photo libraries, all words required, then a meaning check
-        for search in (lambda: [c for c in src_commons(q, 12) if mentions(q, c, every=True)][:4],
-                       lambda: [c for c in src_commons_video(q, 12) if mentions(q, c, every=True)][:2],
-                       lambda: [c for c in src_openverse(q, 12) if mentions(q, c, every=True)][:3]):
+        fallbacks = [lambda: [c for c in src_wordpress(q, 12) if mentions(q, c, every=True)][:3]]
+        fallbacks += [lambda f=f: [c for c in f(q, 12) if mentions(q, c, every=True)][:3]
+                      for name, f in (("pexels", src_pexels), ("pixabay", src_pixabay)) if stock_key(name)]
+        for k2, search in enumerate([lambda: [c for c in src_commons(q, 12) if mentions(q, c, every=True)][:4],
+                                     lambda: [c for c in src_commons_video(q, 12) if mentions(q, c, every=True)][:2],
+                                     lambda: [c for c in src_openverse(q, 12) if mentions(q, c, every=True)][:3]] + fallbacks):
+            if k2 >= 3 and cands:
+                break  # WordPress and stock only when the free encyclopedic libraries found nothing
             try:
                 cands += [c for c in search() if c["url"] not in seen_img]
             except Exception:
@@ -1741,6 +1835,50 @@ def render(meta, words, audio_path, duration, out_path, frame_at=None):
             cap_cache[key] = im
         return cap_cache[key]
 
+    label_cache = {}
+
+    def overlays(im, items, t_in):
+        """Callouts placed in the editor, on top of the panel: arrows draw in, circles trace round, labels pop.
+        Positions are fractions of the panel; t_in is seconds since this visual appeared."""
+        d = ImageDraw.Draw(im)
+        for o in items:
+            k = (t_in - float(o.get("delay", 0.3))) / 0.45
+            if k <= 0:
+                continue
+            k = min(k, 1.0)
+            pop = 1 + 2.70158 * (k - 1) ** 3 + 1.70158 * (k - 1) ** 2  # ease-out-back: overshoots a little, then settles
+            x, y = PX + float(o["x"]) * PW, PY + float(o["y"]) * PH
+            if o["type"] == "arrow":  # points at (x, y), coming from the side opposite its direction
+                ux, uy = {"left": (1, 0), "right": (-1, 0), "up": (0, 1), "down": (0, -1)}.get(o.get("dir"), (1, 0))
+                tx, ty = x + ux * 230, y + uy * 230
+                hx, hy = tx + (x - tx) * k, ty + (y - ty) * k  # the head travels from the tail to the target
+                px, py = -uy, ux
+                for colour, w in (("#000000", 30), (C["accent"], 18)):
+                    d.line((tx, ty, hx + ux * 30, hy + uy * 30), fill=colour, width=w)
+                    head = 44 + (w - 18)
+                    d.polygon([(hx, hy), (hx + ux * head * 1.3 + px * head, hy + uy * head * 1.3 + py * head),
+                               (hx + ux * head * 1.3 - px * head, hy + uy * head * 1.3 - py * head)], fill=colour)
+            elif o["type"] == "circle":  # traced clockwise around (x, y)
+                r = float(o.get("r", 0.12)) * PW
+                for colour, w in (("#000000", 22), (C["accent"], 12)):
+                    d.arc((x - r, y - r * 0.85, x + r, y + r * 0.85), -90, -90 + 360 * k, fill=colour, width=w)
+            elif o["type"] == "label" and str(o.get("text", "")).strip():
+                text = str(o["text"]).strip()[:40]
+                if text not in label_cache:
+                    f = font("display", 64)
+                    tw = f.getlength(text)
+                    lab = Image.new("RGBA", (int(tw) + 60, 104), (0, 0, 0, 0))
+                    ld = ImageDraw.Draw(lab)
+                    ld.rounded_rectangle((0, 0, lab.width - 1, lab.height - 1), 26, fill=C["accent"], outline="#000000", width=4)
+                    ld.text((lab.width / 2, lab.height / 2), text.upper(), font=f, fill=C["bg"], anchor="mm")
+                    label_cache[text] = lab
+                lab = label_cache[text]
+                s_ = max(0.05, pop)
+                lw, lh = max(1, int(lab.width * s_)), max(1, int(lab.height * s_))
+                l2 = lab.resize((lw, lh), Image.BILINEAR)
+                lx = int(min(max(x - lw / 2, 20), W - 20 - lw))  # keep it on screen
+                im.paste(l2, (lx, int(y - lh / 2)), l2)
+
     starts = image_starts(cues, words, duration)
     if starts is None:  # no sentence cues (older videos, hand-picked mixes): spread evenly
         starts = [k * duration / len(srcs) for k in range(len(srcs))]
@@ -1757,6 +1895,8 @@ def render(meta, words, audio_path, duration, out_path, frame_at=None):
             panel = Image.blend(panel, kb(i + 1, 0, start=True), 1 - (ends[i] - t) / fade)
         im = bg.copy()
         im.paste(panel, (PX, PY), mask)
+        if srcs[i][1].get("overlays"):
+            overlays(im, srcs[i][1]["overlays"], t - starts[i])
         fd = ImageDraw.Draw(im)
         gi = max([k for k, g in enumerate(groups) if g[0] <= t] or [0])
         if groups and groups[gi][0] <= t < groups[gi][1]:
@@ -1814,6 +1954,9 @@ def description(m):
              *([f"Source: {m['url']}", ""] if m.get("url") else []),
              f"{BRAND['channel']}: {BRAND['tagline']}", "", "CREDITS",
              m.get("credit") or f"Text adapted from the Wikipedia article \"{m['article_title']}\", CC BY-SA 4.0: {m['url']}"]
+    used = {i.get("sfx") for i in m["images"]} | ({"music.m4a"} if m.get("music") == "own" else set())
+    lines += [f"{'Music' if f == 'music.m4a' else 'Sound'}: \"{c['name']}\" by {c['artist']}, {c['license']}: {c['page']}"
+              for f, c in (m.get("audio_credits") or {}).items() if f in used]
     lines += [f"{'Video' if i.get('kind') == 'video' else 'Image'}: \"{i['name']}\", {credit(i).replace(' · ', ', ')}: {i['page']}"
               for i in m["images"] if credit(i)]
     narration = {"recording": f"Narration: {BRAND['channel']}.", "clone": "Narration: AI voice clone of the creator (Chatterbox)."}

@@ -44,10 +44,18 @@ Keys are yours, not the project's: `GEMINI_API_KEY` / `ANTHROPIC_API_KEY` in you
 ## Auto or manual
 **Settings → Videos → When a video is made.** *Auto* researches, writes, picks visuals, voices and renders in one go. *Manual* stops at a **draft** once the script and visuals are ready, so you can shape it before anything is voiced or rendered (`./rw run --auto "…"` skips the stop for one video). Open the draft (Episodes) and:
 - **Script:** edit the title and narration, or record it in your own voice.
-- **Visuals:** search Commons, Openverse, NASA, the Met or your library, upload your own, drag to reorder. Click a visual to set **when it appears** (which sentence), its **motion** (zoom in, zoom out, pan left, pan right, still) and a **sound effect** that plays as it appears.
-- **Sound:** the channel music, no music, or a track just for this video, with its own volume.
+- **Visuals:** search Commons, Openverse, NASA, the Met, WordPress Photos, Pexels, Pixabay or your library, upload your own, drag to reorder. Click a visual to set:
+  - **when it appears** (which sentence) and its **motion** (zoom in, zoom out, pan left, pan right, still);
+  - **callouts**: up to 4 arrows, circles and labels, placed by clicking the picture. Arrows draw in, circles trace round, labels pop in, after the delay you choose;
+  - a **sound effect** as it appears: upload one, or search free ones (Freesound, via Openverse).
+- **Sound:** the channel music, no music, or a track just for this video: upload one, or search free music (Jamendo, ccMixter and others, via Openverse), with its own volume.
 
 Then click **Render video**. The same controls stay available on rendered videos with **Save & re-render**.
+
+Free music and sounds are limited to licences that allow reuse under a narration (public domain, CC0, CC BY, CC BY-SA; never "no derivatives" or "non-commercial"), and each one used is credited in the video's description.
+
+## Stock media
+In **Connectors → Stock media**, add a free key for **Pexels** and/or **Pixabay** (or set `PEXELS_API_KEY` / `PIXABAY_API_KEY`). Their photos and videos then appear in the editor's search, and auto-pick falls back to them (and to the keyless WordPress Photo Directory) when Wikipedia, Commons and Openverse have nothing for a sentence. Keys are saved in `secrets/stock.json`.
 
 ## Library: download videos
 Keep reference videos and clips from other creators' work in `library/`, separate from what you make (git-ignored). In the studio's **Library** tab, paste links (one per line) and optionally a part to keep (`1:20-1:45`); or run `./rw download URL [URL ...] [--section 1:20-1:45]`.
@@ -107,6 +115,8 @@ A local web UI. It's bound to 127.0.0.1 and runs the same commands as the CLI, s
 - **Settings:** Brand (channel, colours, Google Fonts, with a real-frame preview), Voice & music, Videos (thresholds) and Automation.
 
 Every view has its own address, so refreshing or bookmarking keeps your place: `#/ideabank`, `#/settings/voice`, `#/video/<id>` and so on.
+
+It stays quick with thousands of videos: lists show 60 at a time and load more as you scroll, cards use small poster images (`out/.posters/`, made once per video), the list data is trimmed and gzipped, and a video's full details load only when you open it.
 
 ## CLI
 ```

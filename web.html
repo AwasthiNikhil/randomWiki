@@ -144,6 +144,22 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
 .vedit select { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 7px 8px; color: var(--text); min-width: 0; }
 .vedit input[type=range] { accent-color: var(--accent); }
 .vedit .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.ovwrap { grid-column: 1 / -1; display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 12px; align-items: start; }
+@media (max-width: 640px) { .ovwrap { grid-template-columns: 1fr; } }
+.ovprev { position: relative; width: 220px; aspect-ratio: 1; border-radius: 10px; overflow: hidden; background: var(--panel2); cursor: crosshair; }
+.ovprev img { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; }
+.ovmark { position: absolute; transform: translate(-50%, -50%); pointer-events: none; color: var(--accent); font: 700 22px Inter; text-shadow: 0 0 3px #000, 0 0 3px #000; white-space: nowrap; }
+.ovmark.ring { border: 3px solid var(--accent); border-radius: 50%; box-shadow: 0 0 0 1px #000; }
+.ovmark.pill { background: var(--accent); color: var(--bg); font: 700 11px Inter; padding: 2px 6px; border-radius: 8px; text-shadow: none; text-transform: uppercase; }
+.ovmark.on { outline: 2px dashed #fff; outline-offset: 3px; }
+.ovrow { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; }
+.ovrow.on { border-color: var(--accent); }
+.ovrow input { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; color: var(--text); min-width: 0; flex: 1; }
+.ovrow select { padding: 5px 6px; }
+.aures { grid-column: 1 / -1; display: grid; gap: 6px; max-height: 260px; overflow: auto; }
+.aurow { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; align-items: center; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; font-size: 12px; }
+.aurow b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
+.aurow audio { height: 30px; width: 170px; }
 .vtile.dragging { opacity: .35; }
 .vsearch { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
 .vsearch input, .vsearch select { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; color: var(--text); }
@@ -193,6 +209,8 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
 .tag { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .4px; }
 .tag.curated { color: var(--info); } .tag.random { color: var(--muted); } .tag.seed { color: var(--ok); }
 .empty { color: var(--muted); padding: 40px 0; text-align: center; }
+.more { display: flex; justify-content: center; padding: 18px 0; grid-column: 1 / -1; }
+.thumb img.poster, .pthumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 
 
 /* ---- settings ---- */
@@ -475,6 +493,35 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
         </div>
         <span class="hint">Keys from your shell (<code>GEMINI_API_KEY</code>, <code>ANTHROPIC_API_KEY</code>) are used first. Saved keys stay in <code>secrets/</code> on this computer, which scheduled runs need.</span>
 
+        <h2 class="ch">Stock media</h2>
+        <p class="hint ch-sub">Where visuals, music and sound effects come from. The free libraries need no key. With a stock key, its photos and videos appear in the video editor's search and fill in when auto-pick finds nothing in the free libraries.</p>
+        <div class="cgrid">
+          <div class="ccard">
+            <div class="chead"><b>Pexels</b><span class="cstate" id="st_pexels"></span></div>
+            <span class="hint">Photos and HD videos, free to use without attribution (credited anyway). <a href="https://www.pexels.com/api/" target="_blank" rel="noopener">Get a free key ↗</a></span>
+            <span class="hint" id="stm_pexels"></span>
+            <div class="inline"><input type="password" id="stk_pexels" placeholder="Paste a Pexels API key" autocomplete="off" aria-label="Pexels API key" style="flex:1;min-width:0">
+              <button class="btn sm" type="button" data-stocksave="pexels">Save key</button><button class="btn sm danger" type="button" data-stockrm="pexels" hidden>Remove</button></div>
+          </div>
+          <div class="ccard">
+            <div class="chead"><b>Pixabay</b><span class="cstate" id="st_pixabay"></span></div>
+            <span class="hint">Photos, illustrations and videos under the Pixabay Content License. The key is shown on that page once you sign in. <a href="https://pixabay.com/api/docs/" target="_blank" rel="noopener">Get a free key ↗</a></span>
+            <span class="hint" id="stm_pixabay"></span>
+            <div class="inline"><input type="password" id="stk_pixabay" placeholder="Paste a Pixabay API key" autocomplete="off" aria-label="Pixabay API key" style="flex:1;min-width:0">
+              <button class="btn sm" type="button" data-stocksave="pixabay">Save key</button><button class="btn sm danger" type="button" data-stockrm="pixabay" hidden>Remove</button></div>
+          </div>
+          <div class="ccard">
+            <div class="chead"><b>Free libraries</b><span class="cstate ok">Always on</span></div>
+            <ul class="hint" style="margin:0;padding-left:18px;display:grid;gap:3px">
+              <li><b>Images:</b> Wikipedia, Wikimedia Commons, Openverse (Flickr and others), NASA, The Met, WordPress Photo Directory (CC0)</li>
+              <li><b>Video clips:</b> Wikimedia Commons, NASA, and your Library</li>
+              <li><b>Music:</b> Openverse (Jamendo, ccMixter and others)</li>
+              <li><b>Sound effects:</b> Freesound, through Openverse</li>
+            </ul>
+            <span class="hint">Only licences that allow reuse in your videos: public domain, CC0, CC BY, CC BY-SA (never "no derivatives" or "non-commercial"). Credits go in each video's description.</span>
+          </div>
+        </div>
+
         <h2 class="ch">Publishing</h2>
         <p class="hint ch-sub">Tick where your videos go. <b>Publish</b>, <b>Upload pending</b> and scheduled runs post to every ticked platform at once. If one fails, publishing again retries only that one.</p>
         <div class="cgrid">
@@ -596,6 +643,22 @@ let brandOutro = "";
 let selected = new Set(), confirming = false, logSort = {key: "updated", dir: -1};
 let pages = [], running = false, since = 0, statusFilter = "all", q = "", epFilter = "all", epQ = "", epSort = "potential", qDegree = "1";
 // load video previews only when their card scrolls near the viewport
+// ---- long lists: render 60 at a time; more load as the "Show more" button scrolls into view ----
+const PAGE = 60, shownN = {}, RERENDER = {ep: () => renderEpisodes(), lib: () => renderLibrary(), q: () => renderQueue(), pub: () => renderPublish(), log: () => renderLog()};
+function paged(key, arr, sig) {  // sig: the filter/search/sort; changing it starts again from the top
+  if (shownN[key]?.sig !== sig) shownN[key] = {sig, n: PAGE};
+  return arr.slice(0, shownN[key].n);
+}
+function moreBtn(key, total) {
+  const n = shownN[key].n;
+  return total > n ? `<div class="more"><button class="btn" data-more="${key}">Show more · ${n} of ${total}</button></div>` : "";
+}
+const moreSeen = new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) e.target.click(); }), {rootMargin: "600px"});
+function watchMore() { document.querySelectorAll("[data-more]").forEach(b => moreSeen.observe(b)); }
+document.addEventListener("click", e => {
+  const b = e.target.closest("[data-more]"); if (!b) return;
+  moreSeen.unobserve(b); shownN[b.dataset.more].n += PAGE; RERENDER[b.dataset.more]();
+});
 const lazy = new IntersectionObserver(es => es.forEach(e => {
   if (e.isIntersecting) { e.target.src = e.target.dataset.src; lazy.unobserve(e.target); }
 }), {rootMargin: "400px"});
@@ -642,20 +705,21 @@ function renderEpisodes() {
   const ql = epQ.toLowerCase().trim(), num = ql.match(/^(?:ep\s*)?0*(\d+)$/);
   // best potential: videos still to publish first, then uploaded, then skipped
   const key = {potential: p => -(p.potential ?? -1) + ({uploaded: 1000, skipped: 2000, rejected: 2000}[p.status] || 0), new: p => -(p.ep ?? 1e9), old: p => p.ep ?? 1e9, score: p => -(p.score ?? 0)}[epSort];
-  const shown = eps
+  const matched = eps
     .filter(p => epFilter === "all" || p.status === epFilter)
     .filter(p => !ql || (num && p.ep === +num[1]) || [p.title, p.yt_title, p.script].some(x => (x || "").toLowerCase().includes(ql)))
     .sort((a, b) => key(a) - key(b));
-  $("#epCount").textContent = shown.length === eps.length ? "" : `${shown.length} of ${eps.length}`;
+  const shown = paged("ep", matched, [epFilter, ql, epSort].join("|"));
+  $("#epCount").textContent = matched.length === eps.length ? "" : `${matched.length} of ${eps.length}`;
   $("#epGrid").innerHTML = !eps.length ? `<div class="empty">No videos yet. Click <b>Make next video</b>.</div>`
     : !shown.length ? `<div class="empty">No videos match.</div>` : `<div class="grid">${shown.map(p => `
     <button class="card" data-id="${p.pageid}">
-      <div class="thumb">${p.video ? `<video data-src="/video/${encodeURIComponent(p.video)}#t=1.5" preload="metadata" muted></video>`
-        : p.images?.[0]?.file ? `<img src="/work/${p.pageid}/${encodeURIComponent(p.images[0].file)}" alt="" style="width:100%;height:100%;object-fit:cover">` : "?"}</div>
+      <div class="thumb">${p.video ? `<img class="poster" src="/poster/${encodeURIComponent(p.video)}.jpg" alt="" loading="lazy">`
+        : p.cover ? `<img class="poster" src="/work/${p.pageid}/${encodeURIComponent(p.cover)}" alt="" loading="lazy">` : "?"}</div>
       <div class="body"><div class="top"><span class="ep">${p.ep ? "EP " + String(p.ep).padStart(3, "0") : "—"}</span>${potBadge(p)}</div>
       <h3>${esc(p.yt_title || p.title)}</h3><span class="chip s-${p.status}">${statusLabel(p.status)}</span></div>
-    </button>`).join("")}</div>`;
-  document.querySelectorAll("#epGrid video[data-src]").forEach(v => lazy.observe(v));
+    </button>`).join("")}${moreBtn("ep", matched.length)}</div>`;
+  watchMore();
 }
 
 // sqlite's current_timestamp (the created column) is UTC; show it in local time
@@ -682,12 +746,13 @@ const uploadOrder = (a, b) => (a.upload_rank == null) - (b.upload_rank == null) 
 function renderPublish() {
   const ready = pages.filter(p => p.status === "rendered").sort(uploadOrder);
   $("#publishTab").textContent = ready.length ? `Queue (${ready.length})` : "Queue";
+  fullOrder.pList = ready.map(p => p.pageid);
   $("#pList").innerHTML = !ready.length ? `<div class="empty">Nothing waiting to upload. Rendered videos appear here.</div>`
-    : `<div class="qlist">${ready.map((p, i) => `
+    : `<div class="qlist">${paged("pub", ready, "").map((p, i) => `
       <div class="qitem pitem ${i === 0 ? "next" : ""}" draggable="true" data-sid="${p.pageid}">
         <button class="grip" aria-label="Reorder ${esc(p.yt_title || p.title)} (drag, or use arrow keys)" title="Drag to reorder (or focus and press ↑/↓)">⠿</button>
         <div class="qpos">${i + 1}</div>
-        <div class="pthumb">${p.video ? `<video data-src="/video/${encodeURIComponent(p.video)}#t=1.5" preload="metadata" muted></video>` : ""}</div>
+        <div class="pthumb">${p.video ? `<img src="/poster/${encodeURIComponent(p.video)}.jpg" alt="" loading="lazy">` : ""}</div>
         <div>
           <h3>${esc(p.yt_title || p.title)}</h3>
           <div class="qmeta">
@@ -702,7 +767,7 @@ function renderPublish() {
           <button class="btn primary" data-upload="${p.ep}">Publish now</button>
         </div>
       </div>`).join("")}</div>`;
-  document.querySelectorAll("#pList video[data-src]").forEach(v => lazy.observe(v));
+  $("#pList .qlist")?.insertAdjacentHTML("beforeend", moreBtn("pub", ready.length)); watchMore();
 }
 
 function renderQueue() {
@@ -711,8 +776,9 @@ function renderQueue() {
     (a.rank == null) - (b.rank == null) || (a.rank ?? 0) - (b.rank ?? 0) ||
     (b.source === "curated") - (a.source === "curated") || (a.created || "").localeCompare(b.created || ""));
   $("#queueTab").textContent = qs.length ? `Ideabank (${qs.length})` : "Ideabank";
+  fullOrder.qList = qs.map(p => p.pageid);
   $("#qList").innerHTML = !qs.length ? `<div class="empty">Ideabank is empty. <b>Make now</b> with an empty box makes a random page.<br>Save your own ideas from the <b>Make a video</b> box, or click <b>Find ideas</b> for a few candidates to review.</div>`
-    : `<div class="qlist">${qs.map((p, i) => `
+    : `<div class="qlist">${paged("q", qs, "").map((p, i) => `
       <div class="qitem ${i === 0 ? "next" : ""}" draggable="true" data-sid="${p.pageid}">
         <button class="grip" aria-label="Reorder ${esc(p.title)} (drag, or use arrow keys)" title="Drag to reorder (or focus and press ↑/↓)">⠿</button>
         <div class="qpos">${i + 1}</div>
@@ -735,6 +801,28 @@ function renderQueue() {
           <button class="btn danger" data-skip="${p.pageid}">Remove</button>
         </div>
       </div>`).join("")}</div>`;
+  $("#qList .qlist")?.insertAdjacentHTML("beforeend", moreBtn("q", qs.length)); watchMore();
+}
+
+// ---- free music and sound effects (Openverse: Jamendo, ccMixter, Freesound…; CC0, CC BY, CC BY-SA only)
+async function audioSearch(kind, q, box, use) {
+  if (!q.trim()) return;
+  box.innerHTML = `<span class="hint">Searching…</span>`;
+  const r = await fetch(`/api/audio/search?kind=${kind}&q=${encodeURIComponent(q)}`), j = await r.json();
+  const res = j.results || [];
+  box.innerHTML = !r.ok ? `<span class="hint">${esc(j.error)}</span>` : !res.length ? `<span class="hint">Nothing found. Try other words.</span>`
+    : res.map((a, n) => `<div class="aurow"><div><b title="${esc(a.name)}">${esc(a.name)}</b><span class="hint" style="margin:0">${esc(a.artist)} · ${esc(a.license)} · ${a.seconds ? mmss(a.seconds) : "?"} · <a href="${esc(a.page)}" target="_blank" rel="noopener">${esc(a.source)} ↗</a></span></div>
+        <audio src="${esc(a.url)}" controls preload="none"></audio><button class="btn sm primary" type="button" data-au="${n}">Use</button></div>`).join("");
+  box.onclick = async e => {
+    const b = e.target.closest("[data-au]"); if (!b) return;
+    b.disabled = true; b.textContent = "Saving…";
+    const item = res[+b.dataset.au], pid = +$("[data-rerender]").dataset.rerender;
+    const rr = await fetch("/api/audio_use", {method: "POST", headers: {"Content-Type": "application/json", "X-RW": "1"}, body: JSON.stringify({pageid: pid, kind, q, item})});
+    const jj = await rr.json();
+    if (!rr.ok) { b.disabled = false; b.textContent = "Use"; return termLine("! " + jj.error, "err"); }
+    box.innerHTML = ""; use(jj.file, item);
+    termLine(`${kind === "music" ? "music" : "sound"} saved: "${item.name}" by ${item.artist} (${item.license}); it's credited in the description`, "good");
+  };
 }
 
 // ---- visuals editor: edImages is the ordered list that "Save & re-render" sends
@@ -746,7 +834,7 @@ function wireVisuals(p) {
     $("#vStrip").innerHTML = edImages.map((i, n) => `
       <div class="vtile ${i.file ? "" : "new"}" draggable="true" tabindex="0" data-i="${n}"
            title="${esc((i.name || "") + (i.credit || i.license ? " · " + (i.credit || i.license) : ""))}" aria-label="Image ${n + 1}: ${esc(i.name)}. Arrow keys to move.">
-        <img src="${esc(imgSrc(i))}" alt=""><span class="n">${n + 1}${i.kind === "video" ? " ▶" : ""}</span>${i.sfx || (i.motion && i.motion !== "auto") ? `<span class="fx">${i.sfx ? "♪" : ""}${i.motion && i.motion !== "auto" ? "↔" : ""}</span>` : ""}
+        <img src="${esc(imgSrc(i))}" alt=""><span class="n">${n + 1}${i.kind === "video" ? " ▶" : ""}</span>${i.sfx || i.overlays?.length || (i.motion && i.motion !== "auto") ? `<span class="fx">${i.sfx ? "♪" : ""}${i.overlays?.length ? "➚" : ""}${i.motion && i.motion !== "auto" ? "↔" : ""}</span>` : ""}
         <button class="x" data-rm="${n}" aria-label="Remove image ${n + 1}">✕</button>
       </div>`).join("") || `<span class="hint">No images: the video will use a title card.</span>`;
     document.querySelectorAll(".vres").forEach(b => b.classList.toggle("added", edImages.some(i => same(i, results[+b.dataset.r]))));
@@ -754,7 +842,7 @@ function wireVisuals(p) {
     document.querySelectorAll(".vtile").forEach(t => t.classList.toggle("sel", +t.dataset.i === sel));
     panel();
   };
-  let sel = -1;
+  let sel = -1, ovSel = -1;
   const sentences = () => $("#edScript").value.trim().split(/(?<=[.!?])\s+/).filter(Boolean);
   const panel = () => {  // timing, motion and sound of the selected visual
     const box = $("#vEdit"), i = edImages[sel];
@@ -766,9 +854,49 @@ function wireVisuals(p) {
         .map(([v, l]) => `<option value="${v}" ${(i.motion || "auto") === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
       <div style="display:grid;gap:4px"><span class="hint" style="margin:0">Sound effect when it appears</span><div class="row">
         ${i.sfx ? `<audio src="/work/${p.pageid}/${encodeURIComponent(i.sfx)}" controls style="height:32px;max-width:180px"></audio><button class="btn sm danger" type="button" id="veSfxRm">Remove</button>`
-          : `<label class="btn sm" style="cursor:pointer">Add sound…<input type="file" accept="audio/*" id="veSfx" hidden></label>`}</div></div>
+          : `<label class="btn sm" style="cursor:pointer">Upload…<input type="file" accept="audio/*" id="veSfx" hidden></label>
+             <input id="veSfxQ" placeholder="Find a free sound: whoosh, pop, ding…" style="flex:1;min-width:120px;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:6px 8px;color:var(--text)">`}</div></div>
+      <div class="aures" id="veSfxRes"></div>
+      <div class="ovwrap">
+        <div class="ovprev" id="ovPrev" title="Click to place the selected callout"><img src="${esc(imgSrc(i))}" alt="">${(i.overlays || []).map((o, k) =>
+          `<span class="ovmark ${o.type === "circle" ? "ring" : o.type === "label" ? "pill" : ""} ${k === ovSel ? "on" : ""}" style="left:${o.x * 100}%;top:${o.y * 100}%;${o.type === "circle" ? `width:${o.r * 200}%;height:${o.r * 170}%` : ""}">${
+            o.type === "arrow" ? {left: "←", right: "→", up: "↑", down: "↓"}[o.dir || "left"] : o.type === "label" ? esc(o.text || "label") : ""}</span>`).join("")}</div>
+        <div style="display:grid;gap:6px">
+          <div class="row"><span class="hint" style="margin:0">Callouts</span>
+            <button class="btn sm" type="button" data-ovadd="arrow">+ Arrow</button><button class="btn sm" type="button" data-ovadd="circle">+ Circle</button><button class="btn sm" type="button" data-ovadd="label">+ Label</button></div>
+          ${(i.overlays || []).map((o, k) => `<div class="ovrow ${k === ovSel ? "on" : ""}" data-ovsel="${k}"><b style="font-size:12px;min-width:44px">${{arrow: "Arrow", circle: "Circle", label: "Label"}[o.type]}</b>
+            ${o.type === "label" ? `<input data-ovtext="${k}" value="${esc(o.text || "")}" maxlength="40" placeholder="Text">` : ""}
+            ${o.type === "arrow" ? `<select data-ovdir="${k}">${["left", "right", "up", "down"].map(d => `<option value="${d}" ${o.dir === d ? "selected" : ""}>points ${d}</option>`).join("")}</select>` : ""}
+            ${o.type === "circle" ? `<select data-ovr="${k}">${[[0.08, "small"], [0.12, "medium"], [0.2, "large"]].map(([v, l]) => `<option value="${v}" ${Math.abs(o.r - v) < 0.01 ? "selected" : ""}>${l}</option>`).join("")}</select>` : ""}
+            <select data-ovdelay="${k}" title="When it appears">${[0.3, 1, 2, 3, 5].map(v => `<option value="${v}" ${o.delay === v ? "selected" : ""}>after ${v}s</option>`).join("")}</select>
+            <button class="btn sm danger" type="button" data-ovrm="${k}" aria-label="Remove callout">✕</button></div>`).join("")
+            || `<span class="hint" style="margin:0">Add an arrow, a circle or a label, then click the picture where it should go. Each animates in when this visual appears.</span>`}
+        </div>
+      </div>
       ${i.kind === "video" ? `<span class="hint" style="margin:0">Video clips play as they are; motion applies to images.</span>` : ""}`;
     $("#veAt").onchange = e => { i.sentence = e.target.value === "" ? null : +e.target.value; };
+    // callouts
+    $("#ovPrev").onclick = e => {
+      const o = (i.overlays || [])[ovSel]; if (!o) return;
+      const r = e.currentTarget.getBoundingClientRect();
+      o.x = +((e.clientX - r.left) / r.width).toFixed(3); o.y = +((e.clientY - r.top) / r.height).toFixed(3); panel();
+    };
+    box.querySelectorAll("[data-ovadd]").forEach(b => b.onclick = () => {
+      i.overlays = i.overlays || [];
+      if (i.overlays.length >= 4) return termLine("! up to 4 callouts per visual", "err");
+      const t = b.dataset.ovadd;
+      i.overlays.push({type: t, x: 0.5, y: t === "label" ? 0.15 : 0.5, delay: 0.3, ...(t === "arrow" ? {dir: "left"} : t === "circle" ? {r: 0.12} : {text: ""})});
+      ovSel = i.overlays.length - 1; panel(); strip();
+    });
+    box.querySelectorAll("[data-ovsel]").forEach(r => r.onclick = e => { if (e.target.closest("input,select,button")) return; ovSel = +r.dataset.ovsel; panel(); });
+    box.querySelectorAll("[data-ovrm]").forEach(b => b.onclick = () => { i.overlays.splice(+b.dataset.ovrm, 1); ovSel = -1; panel(); strip(); });
+    box.querySelectorAll("[data-ovtext]").forEach(x => x.oninput = () => { i.overlays[+x.dataset.ovtext].text = x.value; });
+    box.querySelectorAll("[data-ovtext]").forEach(x => x.onchange = () => panel());
+    box.querySelectorAll("[data-ovdir]").forEach(x => x.onchange = () => { i.overlays[+x.dataset.ovdir].dir = x.value; panel(); });
+    box.querySelectorAll("[data-ovr]").forEach(x => x.onchange = () => { i.overlays[+x.dataset.ovr].r = +x.value; panel(); });
+    box.querySelectorAll("[data-ovdelay]").forEach(x => x.onchange = () => { i.overlays[+x.dataset.ovdelay].delay = +x.value; });
+    // free sound effects
+    if ($("#veSfxQ")) $("#veSfxQ").onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); audioSearch("sfx", e.target.value, $("#veSfxRes"), f => { i.sfx = f; strip(); }); } };
     $("#veMo").onchange = e => { i.motion = e.target.value === "auto" ? null : e.target.value; strip(); };
     if ($("#veSfxRm")) $("#veSfxRm").onclick = () => { i.sfx = null; strip(); };
     if ($("#veSfx")) $("#veSfx").onchange = async e => {
@@ -794,7 +922,7 @@ function wireVisuals(p) {
   };
   $("#vStrip").onclick = e => {
     const rm = e.target.closest("[data-rm]"); if (rm) { edImages.splice(+rm.dataset.rm, 1); strip(); return; }
-    const tile = e.target.closest(".vtile"); if (tile) { sel = sel === +tile.dataset.i ? -1 : +tile.dataset.i; strip(); }
+    const tile = e.target.closest(".vtile"); if (tile) { sel = sel === +tile.dataset.i ? -1 : +tile.dataset.i; ovSel = -1; strip(); }
   };
   // sound: this video's music
   const music = () => { $("#sndVolOut").textContent = `${Math.round($("#sndVol").value * 100)}%`;
@@ -802,6 +930,13 @@ function wireVisuals(p) {
     a.hidden = !src; if (src && !a.src.endsWith(src)) a.src = src + "?t=" + Date.now(); };
   $("#sndMusic").value = p.music || "brand"; $("#sndVol").value = p.music_volume ?? brandMusicVolume; music();
   $("#sndMusic").onchange = $("#sndVol").oninput = music;
+  const credit = () => { const c = (p.audio_credits || {})["music.m4a"];
+    $("#sndCredit").textContent = c && $("#sndMusic").value === "own" ? `"${c.name}" by ${c.artist} · ${c.license} (credited in the description)` : ""; };
+  credit(); $("#sndMusic").addEventListener("change", credit);
+  const findMusic = () => audioSearch("music", $("#sndQ").value, $("#sndRes"), (f, item) => {
+    p.own_music = true; p.audio_credits = {...(p.audio_credits || {}), "music.m4a": item}; $("#sndMusic").value = "own"; music(); credit();
+  });
+  $("#sndGo").onclick = findMusic; $("#sndQ").onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); findMusic(); } };
   $("#sndFile").onchange = async e => {
     const f = e.target.files[0]; if (!f) return;
     const r = await fetch(`/api/upload_audio?kind=music&pageid=${p.pageid}`, {method: "POST", headers: {"X-RW": "1"}, body: f});
@@ -871,7 +1006,7 @@ function renderLog() {
     if (th.dataset.col === logSort.key) th.setAttribute("aria-sort", logSort.dir > 0 ? "ascending" : "descending"); else th.removeAttribute("aria-sort");
     th.querySelector(".sortbtn").textContent = th.querySelector(".sortbtn").textContent.replace(/ [▲▼]$/, "") + (th.dataset.col === logSort.key ? (logSort.dir > 0 ? " ▲" : " ▼") : "");
   });
-  const shown = rows.slice(0, 1000);
+  const shown = paged("log", rows, [statusFilter, ql, logSort.key, logSort.dir].join("|"));
   selected = new Set([...selected].filter(id => pages.some(p => p.pageid === id)));
   $("#selAll").checked = shown.length > 0 && shown.every(p => selected.has(p.pageid));
   $("#selAll").onchange = e => { shown.forEach(p => e.target.checked ? selected.add(p.pageid) : selected.delete(p.pageid)); confirming = false; renderLog(); };
@@ -879,7 +1014,9 @@ function renderLog() {
     <td class="ck"><input type="checkbox" data-sel="${p.pageid}" ${selected.has(p.pageid) ? "checked" : ""} aria-label="Select ${esc(p.title)}"></td>
     <td><span class="chip s-${p.status}">${statusLabel(p.status)}</span></td><td class="num">${p.score ?? ""}</td>
     <td><a href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.title)}</a></td><td>${esc(p.source)}${p.origin && p.origin !== "wikipedia" ? `<br><span class="tag seed">${esc(originName(p))}</span>` : ""}</td>
-    <td class="reason">${esc(p.reason)}</td><td class="num">${esc((p.updated || "").slice(5, 16))}</td></tr>`).join("");
+    <td class="reason">${esc(p.reason)}</td><td class="num">${esc((p.updated || "").slice(5, 16))}</td></tr>`).join("")
+    + (rows.length > shown.length ? `<tr><td colspan="7">${moreBtn("log", rows.length)}</td></tr>` : "");
+  watchMore();
   renderSelbar();
 }
 
@@ -888,8 +1025,10 @@ function postLinks(p) {
   let posts = {}; try { posts = JSON.parse(p.posts || "{}"); } catch (e) {}
   return Object.entries(posts).map(([k, v]) => v.url ? ` · <a href="${esc(v.url)}" target="_blank" rel="noopener">${PLATFORM_NAMES[k] || k} ↗</a>` : ` · ${PLATFORM_NAMES[k] || k}: ${esc(v.note || "sent")}`).join("");
 }
-function openDetail(id) {
+async function openDetail(id) {
   const p = pages.find(x => x.pageid == id);
+  const r = await fetch("/api/page?id=" + p.pageid);  // the list is light; the editor needs the full record
+  if (r.ok) Object.assign(p, await r.json());
   const yt = p.video_id ? `https://youtube.com/shorts/${p.video_id}` : null;
   $("#dlgBody").innerHTML = `<div class="detail">
     ${p.video ? `<video src="/video/${encodeURIComponent(p.video)}" controls autoplay playsinline></video>`
@@ -919,7 +1058,8 @@ function openDetail(id) {
           <select id="vSource" aria-label="Image source">
             <option value="article">This article</option><option value="commons" selected>Wikimedia Commons</option>
             <option value="openverse">Openverse (Flickr etc.)</option><option value="nasa">NASA</option><option value="met">The Met (art &amp; history)</option>
-            <option value="commons_video">▶ Commons videos</option><option value="nasa_video">▶ NASA videos</option><option value="library">▶ My library</option>
+            <option value="wordpress">WordPress Photos (CC0)</option><option value="pexels">Pexels photos</option><option value="pixabay">Pixabay photos</option>
+            <option value="commons_video">▶ Commons videos</option><option value="nasa_video">▶ NASA videos</option><option value="pexels_video">▶ Pexels videos</option><option value="pixabay_video">▶ Pixabay videos</option><option value="library">▶ My library</option>
           </select>
           <input id="vQuery" value="${esc(p.title)}" aria-label="Image search">
           <button class="btn" id="vGo">Search</button>
@@ -933,6 +1073,10 @@ function openDetail(id) {
           <label>Volume <output id="sndVolOut"></output><input type="range" id="sndVol" min="0" max="0.5" step="0.01"></label>
           <label class="btn sm" style="cursor:pointer;align-self:end">Upload a track for this video<input type="file" accept="audio/*" id="sndFile" hidden></label>
           <audio id="sndAudio" controls hidden style="grid-column:1/-1;width:100%"></audio>
+          <div style="grid-column:1/-1;display:flex;gap:6px"><input id="sndQ" placeholder="Find free music: calm piano, upbeat, cinematic…" style="flex:1;min-width:0;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:7px 10px;color:var(--text)">
+            <button class="btn sm" type="button" id="sndGo">Search</button></div>
+          <div class="aures" id="sndRes"></div>
+          <span class="hint" id="sndCredit" style="grid-column:1/-1;margin:0"></span>
         </div>
         <div class="btns" style="margin-top:12px"><button class="btn primary" data-rerender="${p.pageid}" data-ep="${p.ep}">${p.status === "draft" ? "Render video" : "Save &amp; re-render"}</button>
         <span class="hint" style="align-self:center">Applies your text and visuals, re-voices and re-renders (about 1–2 min). No AI rewrite.</span></div>
@@ -992,9 +1136,8 @@ async function loadLibrary() {
 function renderLibrary() {
   const words = $("#libSearch").value.toLowerCase().split(/\s+/).filter(Boolean);
   const items = library.filter(v => words.every(w => [v.title, v.uploader, v.site, v.license, v.file].join(" ").toLowerCase().includes(w)));
-  const eps = pages.filter(p => p.ep && p.video && p.status !== "uploaded");  // videos a clip can still go into
   $("#libList").innerHTML = !library.length ? `<div class="empty">Nothing saved yet. Paste a link above.</div>`
-    : !items.length ? `<div class="empty">Nothing matches.</div>` : `<div class="libgrid">${items.map(v => `
+    : !items.length ? `<div class="empty">Nothing matches.</div>` : `<div class="libgrid">${paged("lib", items, words.join(" ")).map(v => `
     <div class="lib"><video src="/library/${encodeURIComponent(v.file)}" poster="/library/${encodeURIComponent(v.file.replace(/\.mp4$/, ".jpg"))}" controls preload="none"></video>
       <div class="body"><h3>${esc(v.title)}</h3>
         <div class="meta">${[v.uploader, v.site, v.duration ? mmss(v.duration) : "", v.section ? "part " + v.section : ""].filter(Boolean).map(esc).join(" · ")}</div>
@@ -1004,8 +1147,9 @@ function renderLibrary() {
           <button class="btn sm" data-libuse="${esc(v.file)}">Use in a video</button>
           <button class="btn sm danger" data-libdel="${esc(v.file)}">Delete</button></div>
         <div class="row" data-usebox="${esc(v.file)}" hidden>
-          <select class="sort" style="margin:0;flex:1;min-width:0" aria-label="Video to add this clip to">${eps.map(p => `<option value="${p.pageid}">EP ${String(p.ep).padStart(3, "0")} · ${esc(p.yt_title || p.title)}</option>`).join("")}</select>
-          <button class="btn sm primary" data-libadd="${esc(v.file)}">Add</button></div></div></div>`).join("")}</div>`;
+          <select class="sort" style="margin:0;flex:1;min-width:0" aria-label="Video to add this clip to"></select>
+          <button class="btn sm primary" data-libadd="${esc(v.file)}">Add</button></div></div></div>`).join("")}${moreBtn("lib", items.length)}</div>`;
+  watchMore();
 }
 $("#libSearch").oninput = renderLibrary;
 $("#libGo").onclick = () => {
@@ -1015,7 +1159,13 @@ $("#libGo").onclick = () => {
 };
 $("#libList").addEventListener("click", async e => {
   const use = e.target.closest("[data-libuse]"), add = e.target.closest("[data-libadd]");
-  if (use) { const box = document.querySelector(`[data-usebox="${CSS.escape(use.dataset.libuse)}"]`); box.hidden = !box.hidden; if (!box.querySelector("option")) termLine("! no videos to add it to yet: make one first", "err"); return; }
+  if (use) {
+    const box = document.querySelector(`[data-usebox="${CSS.escape(use.dataset.libuse)}"]`); box.hidden = !box.hidden;
+    const eps = pages.filter(p => p.ep && p.status !== "uploaded" && ["draft", "rendered"].includes(p.status));  // videos a clip can still go into
+    box.querySelector("select").innerHTML = eps.map(p => `<option value="${p.pageid}">EP ${String(p.ep).padStart(3, "0")} · ${esc(p.yt_title || p.title)}</option>`).join("");
+    if (!eps.length) termLine("! no videos to add it to yet: make one first", "err");
+    return;
+  }
   if (add) {
     const box = add.closest("[data-usebox]"), pid = +box.querySelector("select").value; if (!pid) return;
     add.disabled = true; add.textContent = "Adding…";
@@ -1099,9 +1249,13 @@ $("#qDegree").onclick = e => {
 };
 
 // drag (mouse) or arrow keys on the grip (keyboard) to reorder a list; the new order is saved immediately
+const fullOrder = {};  // every item's id in list order, including those not rendered yet
 function sortable(list, endpoint) {
   let dragEl = null;
-  const save = () => post(endpoint, {order: [...list.querySelectorAll("[data-sid]")].map(el => +el.dataset.sid)}).then(loadPages);
+  const save = () => {
+    const shown = [...list.querySelectorAll("[data-sid]")].map(el => +el.dataset.sid);
+    return post(endpoint, {order: [...shown, ...(fullOrder[list.id] || []).filter(id => !shown.includes(id))]}).then(loadPages);
+  };
   list.addEventListener("dragstart", e => { dragEl = e.target.closest("[data-sid]"); dragEl?.classList.add("dragging"); });
   list.addEventListener("dragover", e => {
     e.preventDefault();
@@ -1341,6 +1495,11 @@ function renderConnectors(j) {
   document.querySelectorAll("[name=aiPick]").forEach(r => { r.disabled = !keyed[r.value] && r.value !== "local"; r.checked = r.value === (keyed[ai] ? ai : "local"); });
   document.querySelectorAll("[data-ai]").forEach(card => card.classList.toggle("chosen", card.dataset.ai === (keyed[ai] ? ai : "local")));
 
+  Object.entries(j.stock || {}).forEach(([k, v]) => {
+    STATE($("#st_" + k), v ? "Key added" : "No key", v ? "ok" : "");
+    $("#stm_" + k).textContent = v === "shell" ? `Using ${k.toUpperCase()}_API_KEY from your shell.` : v === "saved" ? "Using your saved key." : "";
+    $(`[data-stockrm="${k}"]`).hidden = v !== "saved";
+  });
   const pub = j.publish, on = S.publish_to || j.publish_to;
   document.querySelectorAll("[data-pub]").forEach(cb => { cb.checked = on.includes(cb.dataset.pub); cb.disabled = pub[cb.dataset.pub] !== "connected" && !cb.checked; });
   STATE($("#ytState"), {none: "Not set up", client: "Not connected", connected: "Connected"}[pub.youtube], {client: "warn", connected: "ok"}[pub.youtube]);
@@ -1373,6 +1532,12 @@ $("#connectors").addEventListener("click", async e => {
     if (!box.value.trim()) return termLine("! paste a key first", "err");
     if (await ok(t.id === "gemSave" ? "/api/gemini_key" : "/api/claude_key", {key: box.value}, "key saved")) box.value = "";
   }
+  else if (t.dataset.stocksave) {
+    const box = $("#stk_" + t.dataset.stocksave);
+    if (!box.value.trim()) return termLine("! paste a key first", "err");
+    if (await ok("/api/stock_key", {name: t.dataset.stocksave, key: box.value}, "key saved")) box.value = "";
+  }
+  else if (t.dataset.stockrm) ok("/api/stock_key", {name: t.dataset.stockrm, key: ""}, "key removed");
   else if (t.id === "gemRm") ok("/api/gemini_key", {key: ""}, "Gemini key removed");
   else if (t.id === "clRm") ok("/api/claude_key", {key: ""}, "Claude key removed");
   else if (t.id === "ytConnect") exec("connect").then(r => r && termLine("a browser window opens for Google sign-in; come back here when it says you can close it"));
