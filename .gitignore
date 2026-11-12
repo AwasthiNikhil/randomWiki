@@ -6,6 +6,7 @@ secrets/
 data/
 work/
 out/
+library/
 
 # local toolchain and model caches (recreated by ./setup.sh)
 .venv/

@@ -144,6 +144,15 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
 .detail .btns { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
 .close { position: absolute; top: 10px; right: 12px; background: var(--panel2); border: 1px solid var(--line); border-radius: 50%; width: 32px; height: 32px; cursor: pointer; }
 .qlist { display: grid; gap: 10px; }
+.libgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
+.lib { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; }
+.lib video { width: 100%; aspect-ratio: 16 / 9; background: #000; display: block; }
+.lib .body { padding: 10px 12px 12px; display: grid; gap: 6px; }
+.lib h3 { margin: 0; font-size: 14px; font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
+.lib .meta { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.lib .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+#libLinks { width: 100%; min-height: 64px; resize: vertical; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font: 13px var(--mono); color: var(--text); }
+#libLinks:focus, #libSection:focus { outline: none; border-color: var(--accent); }
 .explore { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; margin-bottom: 18px; display: grid; gap: 10px; }
 .explore .row { flex-wrap: wrap; }
 .explore input { min-width: 180px; }
@@ -237,6 +246,7 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
       <button class="tab on" data-tab="episodes" role="tab">Episodes</button>
       <button class="tab" data-tab="queue" role="tab" id="queueTab">Ideabank</button>
       <button class="tab" data-tab="publish" role="tab" id="publishTab">Queue</button>
+      <button class="tab" data-tab="library" role="tab" id="libraryTab">Library</button>
       <button class="tab" data-tab="log" role="tab">Page log</button>
       <button class="tab" data-tab="settings" role="tab">Settings</button>
     </div>
@@ -383,6 +393,18 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
           <div class="hint">Preview draws a real frame from your latest episode. New settings apply to new renders; use <b>Save &amp; re-render</b> on a video to update it.</div>
         </div>
       </div>
+    </section>
+    <section id="library" hidden>
+      <div class="explore">
+        <h4 style="margin:0;font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--muted)">Download videos</h4>
+        <textarea id="libLinks" placeholder="Video links, one per line: YouTube, Vimeo, X, Reddit, TikTok, Instagram, Wikimedia Commons, Internet Archive and many more" aria-label="Video links to download"></textarea>
+        <div class="row" style="align-items:center">
+          <input id="libSection" placeholder="Only part of it, e.g. 1:20-1:45 (optional)" aria-label="Section to download" style="flex:1;min-width:0;max-width:320px">
+          <button class="btn primary" id="libGo">Download</button>
+        </div>
+        <span class="hint">Saved to <code>library/</code>, separate from your videos, with where each came from and its licence when the site states one. Use other people's videos only with permission, under their licence (Creative Commons, public domain), or as fair use.</span>
+      </div>
+      <div id="libList"></div>
     </section>
     <section id="log" hidden>
       <div class="toolbar">
@@ -745,21 +767,45 @@ async function poll() {
     const was = running; running = j.running;
     $("#dot").className = "dot" + (running ? " run" : "");
     $("#jobLabel").textContent = running ? j.cmd : (j.cmd ? `idle · last: ${j.cmd}` : "idle");
-    document.querySelectorAll("[data-cmd], #makeNow, #saveIdea, #upload, #qFind, [data-remake], [data-upload], [data-make], [data-rerender], [data-unpubgo]").forEach(b => b.disabled = running);
+    document.querySelectorAll("[data-cmd], #makeNow, #saveIdea, #upload, #qFind, #libGo, [data-remake], [data-upload], [data-make], [data-rerender], [data-unpubgo]").forEach(b => b.disabled = running);
     $("#stop").disabled = !running;
-    if (was && !running) loadPages();
+    if (was && !running) { loadPages(); if (!$("#library").hidden) loadLibrary(); }
   } catch (e) {
     $("#jobLabel").textContent = "server not reachable";
   }
   setTimeout(poll, running ? 700 : 2500);
 }
 
+const mmss = s => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, "0")}`;
+async function loadLibrary() {
+  const items = (await (await fetch("/api/library")).json()).items;
+  $("#libraryTab").textContent = `Library (${items.length})`;
+  $("#libList").innerHTML = !items.length ? `<div class="empty">Nothing saved yet. Paste a link above.</div>` : `<div class="libgrid">${items.map(v => `
+    <div class="lib"><video src="/library/${encodeURIComponent(v.file)}" controls preload="metadata"></video>
+      <div class="body"><h3>${esc(v.title)}</h3>
+        <div class="meta">${[v.uploader, v.site, v.duration ? mmss(v.duration) : "", v.section ? "part " + v.section : ""].filter(Boolean).map(esc).join(" · ")}</div>
+        ${v.license ? `<div class="meta">Licence: ${esc(v.license)}</div>` : ""}
+        <div class="meta" title="File in library/">${esc(v.file)}</div>
+        <div class="row"><a class="btn sm" href="${esc(v.url)}" target="_blank" rel="noopener">Source ↗</a>
+          <button class="btn sm danger" data-libdel="${esc(v.file)}">Delete</button></div></div></div>`).join("")}</div>`;
+}
+$("#libGo").onclick = () => {
+  const links = $("#libLinks").value.split("\n").map(x => x.trim()).filter(Boolean), sec = $("#libSection").value.trim();
+  if (!links.length) return termLine("! paste a video link first", "err");
+  exec("download " + links.map(quote).join(" ") + (sec ? ` --section ${quote(sec)}` : "")).then(ok => ok && ($("#libLinks").value = ""));
+};
+$("#libList").addEventListener("click", async e => {
+  const b = e.target.closest("[data-libdel]"); if (!b) return;
+  if (b.textContent !== "Delete for good?") { b.textContent = "Delete for good?"; return; }
+  if (await post("/api/library_delete", {file: b.dataset.libdel})) loadLibrary();
+});
 document.addEventListener("click", async e => {
   const t = e.target.closest("button"); if (!t) return;
   if (t.dataset.tab) {
     document.querySelectorAll(".tab").forEach(b => b.classList.toggle("on", b === t));
-    ["episodes", "queue", "publish", "log", "settings"].forEach(id => $("#" + id).hidden = t.dataset.tab !== id);
+    ["episodes", "queue", "publish", "library", "log", "settings"].forEach(id => $("#" + id).hidden = t.dataset.tab !== id);
     if (t.dataset.tab === "settings" && !S) loadSettings();
+    if (t.dataset.tab === "library") loadLibrary();
   } else if (t.dataset.f) { statusFilter = t.dataset.f; renderLog(); }
   else if (t.id === "delSel") { confirming = true; renderSelbar(); }
   else if (t.id === "delNo") { confirming = false; renderSelbar(); }

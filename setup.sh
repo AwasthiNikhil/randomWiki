@@ -11,7 +11,7 @@ mkdir -p .tools/bin brand/fonts data work out secrets
 .tools/bin/uv python install 3.12
 [ -d .venv ] || .tools/bin/uv venv --python 3.12 .venv
 .tools/bin/uv pip install --python .venv/bin/python "kokoro>=0.9.4" soundfile pillow imageio-ffmpeg \
-  google-api-python-client google-auth-oauthlib trafilatura faster-whisper \
+  google-api-python-client google-auth-oauthlib trafilatura faster-whisper yt-dlp \
   "en_core_web_sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl"
 if [ "${1:-}" = "--clone" ]; then  # Chatterbox pins its own torch, so it lives in a separate venv
   .tools/bin/uv python install 3.11

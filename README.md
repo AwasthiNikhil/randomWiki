@@ -37,6 +37,12 @@ The key is yours, not the project's: `GEMINI_API_KEY` in your shell is used firs
 7. **Score:** each video gets a 0–100 potential score from topic demand, hook, appeal, reach, visuals and length.
 8. **Publish:** YouTube Data API upload, private or scheduled, best potential first. Credits go into the description automatically.
 
+## Library: download videos
+Keep reference videos and clips from other creators' work in `library/`, separate from what you make (git-ignored). In the studio's **Library** tab, paste links (one per line) and optionally a part to keep (`1:20-1:45`); or run `./rw download URL [URL ...] [--section 1:20-1:45]`.
+- Works with YouTube, Vimeo, X, Reddit, TikTok, Instagram, Internet Archive and [many more sites](https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md) through yt-dlp, and with Wikimedia Commons pages through Commons' own API.
+- Saved as MP4 (up to 1080p), next to a `.json` with the title, uploader, source link and licence when the site states one, so you can credit it later.
+- Use other people's videos only with permission, under their licence (Creative Commons, public domain), or as fair use.
+
 ## Video clips
 Visuals can also be **video clips**: free-licensed Wikimedia Commons clips (using Wikimedia's own small transcodes) and NASA footage (public domain). They're trimmed to 12 s, skip any opening slate, are muted, and play in the panel. Auto-pick can choose them for named things; in the visuals editor, pick *▶ Commons videos* or *▶ NASA videos*.
 
@@ -144,6 +150,7 @@ In the studio go to **Settings → Automation**: turn it on, pick up to 4 times 
 | `data/randomwiki.db` | page log (git-ignored) |
 | `work/<pageid>/` | images, voice, `meta.json` with script, title, description and credits (git-ignored) |
 | `out/NNN-slug.mp4` | finished videos (git-ignored) |
+| `library/` | videos you downloaded as references or clips, each with a `.json` of its source (git-ignored) |
 | `secrets/` | OAuth files (git-ignored) |
 
 ## Licences of what gets used

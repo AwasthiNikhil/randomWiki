@@ -3,13 +3,13 @@
 Runs the same rw.py commands as the CLI in a subprocess and streams their output.
 Bound to localhost only; POSTs require an X-RW header so other websites can't trigger jobs.
 """
-import json, os, re, shlex, shutil, signal, subprocess, sys, threading, urllib.request, webbrowser
+import json, os, re, shlex, shutil, signal, subprocess, sys, threading, urllib.parse, urllib.request, webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import rw
 
-ALLOWED = {"run", "add", "discover", "upload", "unpublish", "rerender", "log", "score", "selftest", "preview", "voicetest",
+ALLOWED = {"run", "add", "download", "discover", "upload", "unpublish", "rerender", "log", "score", "selftest", "preview", "voicetest",
            "auto", "schedule"}
 HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 BRAND_FILE = rw.BRAND_FILE
@@ -276,6 +276,19 @@ class H(BaseHTTPRequestHandler):
         if m and (rw.ROOT / m[1] / m[2]).is_file():
             types = {"png": "image/png", "wav": "audio/wav", "mp3": "audio/mpeg"}
             return self.send_file(rw.ROOT / m[1] / m[2], types[m[2].rsplit(".", 1)[1]])
+        if path == "/api/library":
+            items = []
+            for f in sorted(rw.LIBRARY.glob("*.json"), key=lambda f: f.stat().st_mtime, reverse=True) if rw.LIBRARY.exists() else []:
+                try:
+                    v = json.loads(f.read_text())
+                except ValueError:
+                    continue
+                if (rw.LIBRARY / v.get("file", "")).is_file():
+                    items.append(v)
+            return self.send(200, {"items": items})
+        m = re.fullmatch(r"/library/([\w.\-]+)", urllib.parse.unquote(path))
+        if m and (rw.LIBRARY / m[1]).is_file():  # basename only: no path traversal
+            return self.send_file(rw.LIBRARY / m[1], "video/mp4")
         if path == "/api/job":
             since = int((re.search(r"since=(\d+)", query) or [0, 0])[1])
             running = bool(job["proc"] and job["proc"].poll() is None)
@@ -355,6 +368,13 @@ class H(BaseHTTPRequestHandler):
                 meta.write_text(json.dumps(m, indent=2))
             elif self.path == "/api/settings":
                 return self.send(200, {"ok": True, "brand": save_brand(body["brand"])})
+            elif self.path == "/api/library_delete":  # body: {"file": "<name>.mp4"}
+                name = str(body.get("file", ""))
+                f = rw.LIBRARY / name
+                if not re.fullmatch(r"[\w.\-]+", name) or not f.is_file():
+                    raise ValueError("no such file in the library")
+                f.unlink()
+                f.with_suffix(".json").unlink(missing_ok=True)
             elif self.path == "/api/gemini_key":  # body: {"key": "..."}; empty removes the saved key
                 key = str(body.get("key", "")).strip()
                 if not key:

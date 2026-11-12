@@ -28,6 +28,7 @@ BRAND = json.loads(BRAND_FILE.read_text())
 C = BRAND["colors"]
 DB = ROOT / "data" / "randomwiki.db"
 WORK, OUT, SECRETS = ROOT / "work", ROOT / "out", ROOT / "secrets"
+LIBRARY = ROOT / "library"  # your downloaded reference videos and clips, kept apart from the videos we make
 API = "https://en.wikipedia.org/w/api.php"
 W, H, FPS = 1080, 1920, 30
 PX, PY, PW, PH = 40, 440, 1000, 1000  # image panel
@@ -1799,6 +1800,84 @@ def produce(con, m, out):
     print(f"  done: {out}")
 
 
+# ---------- library: download videos to keep as references or clips ----------
+def print_nothing(*_):  # yt-dlp's own messages; its errors are raised and reported once by us
+    pass
+
+
+def seconds(t):
+    """'1:20' / '01:02:03' / '95' -> seconds."""
+    n = 0.0
+    for part in t.strip().split(":"):
+        n = n * 60 + float(part)
+    return n
+
+
+def commons_file(url):
+    """A Commons File: page -> (its largest transcode up to 1080p, credit details). yt-dlp can't read Commons pages."""
+    title = "File:" + urllib.parse.unquote(url.split("File:", 1)[1].split("#")[0].split("?")[0]).replace("_", " ")
+    p = get_json(COMMONS_API, {"action": "query", "format": "json", "formatversion": 2, "titles": title,
+                               "prop": "videoinfo", "viprop": "url|extmetadata|derivatives"})["query"]["pages"][0]
+    ii = (p.get("videoinfo") or [None])[0]
+    if not ii:
+        raise SystemExit(f"not a video on Wikimedia Commons: {title}")
+    meta = {k: v.get("value") for k, v in ii.get("extmetadata", {}).items()}
+    sizes = {d["transcodekey"]: d["src"] for d in ii.get("derivatives", []) if d.get("transcodekey")}  # Wikimedia asks for these
+    best = next((sizes[k] for h in ("1080p", "720p", "480p", "360p") for k in (f"{h}.vp9.webm", f"{h}.mpeg4.mov") if k in sizes),
+                ii["url"])
+    return best, dict(title=p["title"][5:].rsplit(".", 1)[0], url=ii.get("descriptionurl") or url, site="WikimediaCommons",
+                      uploader=strip_html(meta.get("Artist")), license=meta.get("LicenseShortName") or "")
+
+
+def download(url, section=None):
+    """Save a video from almost any site (yt-dlp) into library/, with a small sidecar of where it came from."""
+    import yt_dlp, imageio_ffmpeg
+    LIBRARY.mkdir(exist_ok=True)
+    cut = None
+    if section:
+        a, _, b = section.partition("-")
+        cut = (seconds(a), seconds(b))
+        if not cut[0] < cut[1]:
+            raise SystemExit(f"section should look like 1:20-1:45, got {section}")
+    suffix = f"-{int(cut[0])}-{int(cut[1])}" if cut else ""
+    known = {}
+    if re.search(r"commons\.wikimedia\.org/wiki/File:", url):
+        url, known = commons_file(url)
+    shown = {"p": -1}
+
+    def progress(d):  # a line per 25% instead of yt-dlp's carriage-return bar, which the studio terminal can't show
+        if d["status"] == "downloading" and (d.get("total_bytes") or d.get("total_bytes_estimate")):
+            pct = int(100 * d.get("downloaded_bytes", 0) / (d.get("total_bytes") or d["total_bytes_estimate"]))
+            if pct // 25 > shown["p"]:
+                shown["p"] = pct // 25
+                print(f"  {pct}%")
+
+    name = ("WikimediaCommons-" + re.sub(r"[^\w-]+", "_", known["title"])[:80]) if known else "%(extractor_key)s-%(id)s"
+    opts = {"outtmpl": str(LIBRARY / f"{name}{suffix}.%(ext)s"), "noplaylist": True, "quiet": True,
+            "noprogress": True, "no_warnings": True, "progress_hooks": [progress],
+            "logger": type("Quiet", (), {"debug": print_nothing, "warning": print_nothing, "error": print_nothing})(),
+            "format": "bv*[height<=1080][ext=mp4]+ba[ext=m4a]/b[height<=1080][ext=mp4]/bv*[height<=1080]+ba/b",
+            "merge_output_format": "mp4", "ffmpeg_location": imageio_ffmpeg.get_ffmpeg_exe(),
+            "postprocessors": [{"key": "FFmpegVideoRemuxer", "preferedformat": "mp4"}]}  # one format for the whole library
+    if cut:
+        opts |= {"download_ranges": yt_dlp.utils.download_range_func(None, [cut]), "force_keyframes_at_cuts": True}
+    try:
+        with yt_dlp.YoutubeDL(opts) as y:
+            info = y.extract_info(url, download=True)
+            path = Path(y.prepare_filename(info)).with_suffix(".mp4")
+    except yt_dlp.utils.DownloadError as e:
+        raise SystemExit(re.sub(r"^ERROR:\s*|;? ?please report this issue.*", "", str(e)).split("\n")[0]) from None
+    if not path.exists():  # some sites deliver another container
+        path = next(LIBRARY.glob(path.stem + ".*"))
+    side = dict(title=info.get("title") or path.stem, url=info.get("webpage_url") or url, site=info.get("extractor_key"),
+                uploader=info.get("uploader") or info.get("channel") or "", license=info.get("license") or "",
+                duration=round(cut[1] - cut[0] if cut else info.get("duration") or 0), section=section or "",
+                file=path.name, saved=time.strftime("%Y-%m-%d %H:%M")) | {k: v for k, v in known.items() if v}
+    path.with_suffix(".json").write_text(json.dumps(side, indent=1))
+    print(f"saved: {side['title']} -> library/{path.name}" + (f"  ({section})" if section else ""))
+    return path
+
+
 # ---------- automation (macOS launchd) ----------
 SCHEDULE_DEFAULTS = {"enabled": False, "times": ["09:00"], "days": [0, 1, 2, 3, 4, 5, 6], "upload": True,
                      "publish": "private", "publish_time": "15:00", "fallback": "wikipedia", "fallback_arg": "",
@@ -2054,6 +2133,7 @@ def selftest():
     assert credit({"artist": "", "license": ""}) == ""  # own upload: no credit line
     assert json_in('Here you go:\n```json\n{"notes": "a {b}", "visuals": []}\n```') == {"notes": "a {b}", "visuals": []}
     assert json_in("no json") == {}
+    assert seconds("1:20") == 80 and seconds("01:02:03") == 3723 and seconds("95") == 95
     assert precheck({"title": "List of moths", "length": 9e9}) == "list page"
     assert precheck({"title": "X", "length": 9000, "pageviews": {"a": 100, "b": None}}).startswith("low views")
     assert precheck({"title": "X", "length": 9000, "pageviews": {"a": 500}}) is None
@@ -2129,6 +2209,8 @@ def main():
     dc.add_argument("--source", choices=["wikipedia", "link", "hackernews", "rss", "arxiv", "apod"], default="wikipedia")
     dc.add_argument("--feed", help="RSS/Atom feed URL (for --source rss)")
     dc.add_argument("--link", help="any link (for --source link): feed, site, subreddit, Wikipedia category/list, ...")
+    dl = sub.add_parser("download", help="save videos from almost any site into library/ (references, clips)")
+    dl.add_argument("urls", nargs="+"); dl.add_argument("--section", help="only part of it, e.g. 1:20-1:45")
     sc = sub.add_parser("score"); sc.add_argument("--all", action="store_true")
     wb = sub.add_parser("web"); wb.add_argument("--port", type=int, default=8765); wb.add_argument("--no-open", action="store_true")
     args = ap.parse_args()
@@ -2140,6 +2222,17 @@ def main():
         return web.serve(args.port, not args.no_open)
     if args.cmd == "selftest":
         return selftest()
+    if args.cmd == "download":
+        failed = 0
+        for url in args.urls:
+            try:
+                download(url, args.section)
+            except SystemExit as e:
+                failed += 1
+                print(f"! {url}: {e}")
+        if failed:
+            raise SystemExit(f"{failed} of {len(args.urls)} failed")
+        return
     if args.cmd == "add":
         for item in args.items:
             add_input(con, item, args.force)
