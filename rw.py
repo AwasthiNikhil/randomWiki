@@ -2376,6 +2376,46 @@ def download(url, section=None, kind="video"):
     return path
 
 
+def save_upload(kind, src, filename):
+    """A file from your device into media/<kind>/: video as MP4, audio as M4A, images as JPEG/PNG, with a sidecar like
+    downloads have (no source link). src is a temporary file; returns the sidecar."""
+    import hashlib, subprocess, imageio_ffmpeg
+    from PIL import Image
+    folder = MEDIA / kind
+    folder.mkdir(parents=True, exist_ok=True)
+    title = re.sub(r"[_\s]+", " ", Path(filename).stem).strip()[:150] or "Upload"
+    with open(src, "rb") as f:
+        digest = hashlib.sha1(f.read(1 << 20)).hexdigest()[:10]  # first MB: enough to tell files apart
+    stem = folder / f"Upload-{re.sub(r'[^A-Za-z0-9]+', '_', title)[:50]}-{digest}"
+    side = dict(title=title, url="", site="Uploaded", uploader="", license="", saved=time.strftime("%Y-%m-%d %H:%M"))
+    if kind == "image":
+        try:
+            im = Image.open(src)
+            im.load()
+        except Exception:
+            raise ValueError("that isn't an image file") from None
+        alpha = im.mode in ("RGBA", "LA") or "transparency" in im.info
+        path = stem.with_suffix(".png" if alpha else ".jpg")
+        (im.convert("RGBA") if alpha else im.convert("RGB")).save(path, "PNG" if alpha else "JPEG", quality=92)
+        side |= dict(width=im.width, height=im.height)
+    else:
+        path = stem.with_suffix(".m4a" if kind == "audio" else ".mp4")
+        ff = [imageio_ffmpeg.get_ffmpeg_exe(), "-y", "-loglevel", "error", "-i", str(src)]
+        tries = ([ff + ["-vn", "-c:a", "aac", "-b:a", "192k", str(path)]] if kind == "audio" else
+                 [ff + ["-c", "copy", "-movflags", "+faststart", str(path)],  # already H.264/AAC: just repackage, instantly
+                  ff + ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-vf", "scale='min(1920,iw)':-2", "-pix_fmt", "yuv420p",
+                        "-c:a", "aac", "-movflags", "+faststart", str(path)]])
+        if not any(subprocess.run(t, capture_output=True).returncode == 0 and path.exists() and path.stat().st_size > 1000 for t in tries):
+            path.unlink(missing_ok=True)
+            raise ValueError(f"couldn't read that {kind} file")
+        side["duration"] = round(video_seconds(path))
+        if kind == "video":
+            library_poster(path)
+    side["file"] = path.name
+    path.with_suffix(".json").write_text(json.dumps(side, indent=1))
+    return side
+
+
 def download_picture(url):
     """An image into media/image: a direct image link, a Wikimedia Commons File: page (with its licence), or any web
     page's main image (its og:image, what it shows when shared). Galleries and social posts need a gallery tool."""

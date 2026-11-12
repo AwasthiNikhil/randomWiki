@@ -612,7 +612,10 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
             <div class="row" style="align-items:center">
               <input id="libSection" placeholder="Only part of it, e.g. 1:20-1:45 (optional)" aria-label="Section to download" style="flex:1;min-width:0;max-width:320px">
               <button class="btn primary" id="libGo">Download</button>
+              <span class="hint" style="margin:0">or</span>
+              <label class="btn" style="cursor:pointer">Upload from device<input type="file" id="libFile" multiple hidden></label>
             </div>
+            <div class="hint" id="libUp" hidden></div>
             <span class="hint" id="libHint"></span>
           </div>
           <div class="toolbar" style="margin-bottom:12px"><input class="search" id="libSearch" placeholder="Search title, uploader, site, licence…" aria-label="Search media"></div>
@@ -1185,7 +1188,7 @@ function renderLibrary() {
         <div class="meta">${[v.uploader, v.site, v.duration ? mmss(v.duration) : "", v.width ? `${v.width}×${v.height}` : "", v.section ? "part " + v.section : ""].filter(Boolean).map(esc).join(" · ")}</div>
         ${v.license ? `<div class="meta">Licence: ${esc(v.license)}</div>` : ""}
         <div class="meta" title="File in media/${kind}/">${esc(v.file)}</div>
-        <div class="row"><a class="btn sm" href="${esc(v.url)}" target="_blank" rel="noopener">Source ↗</a>
+        <div class="row">${v.url ? `<a class="btn sm" href="${esc(v.url)}" target="_blank" rel="noopener">Source ↗</a>` : ""}
           <button class="btn sm" data-libuse="${esc(v.file)}">${c.use}</button>
           <button class="btn sm danger" data-libdel="${esc(v.file)}">Delete</button></div>
         <div class="row" data-usebox="${esc(v.file)}" hidden>
@@ -1194,6 +1197,28 @@ function renderLibrary() {
   watchMore();
 }
 $("#libSearch").oninput = renderLibrary;
+$("#libFile").onchange = async e => {  // one at a time, with progress: videos can be big
+  const files = [...e.target.files], kind = mediaKind, box = $("#libUp"); e.target.value = "";
+  let ok = 0;
+  for (const [n, f] of files.entries()) {
+    box.hidden = false;
+    const done = await new Promise(res => {
+      const x = new XMLHttpRequest();
+      x.open("POST", `/api/media_upload?kind=${kind}&name=${encodeURIComponent(f.name)}`);
+      x.setRequestHeader("X-RW", "1");
+      x.upload.onprogress = p => { box.textContent = `Uploading ${f.name} (${n + 1} of ${files.length}): ${Math.round(100 * p.loaded / p.total)}%`; };
+      x.upload.onload = () => { box.textContent = `Converting ${f.name}…`; };
+      x.onload = () => { let j = {}; try { j = JSON.parse(x.responseText); } catch (err) {}
+        if (x.status === 200) res(true); else { termLine(`! ${f.name}: ${j.error || "upload failed"}`, "err"); res(false); } };
+      x.onerror = () => { termLine(`! ${f.name}: upload failed`, "err"); res(false); };
+      x.send(f);
+    });
+    ok += done;
+  }
+  box.hidden = true;
+  if (ok) termLine(`${ok} file${ok > 1 ? "s" : ""} added to media/${kind}/`, "good");
+  if (mediaKind === kind) loadLibrary();
+};
 $("#libGo").onclick = () => {
   const links = $("#libLinks").value.split("\n").map(x => x.trim()).filter(Boolean), sec = mediaKind === "image" ? "" : $("#libSection").value.trim();
   if (!links.length) return termLine("! paste a link first", "err");
@@ -1368,6 +1393,7 @@ function route() {
     document.querySelectorAll("#library .snav a").forEach(a => { a.classList.toggle("on", a.dataset.kind === mediaKind); a.toggleAttribute("aria-current", a.dataset.kind === mediaKind); });
     const c = MEDIA_COPY[mediaKind];
     $("#libHead").textContent = c.head; $("#libLinks").placeholder = c.ph; $("#libHint").innerHTML = c.hint; $("#libSection").hidden = mediaKind === "image";
+    $("#libFile").accept = mediaKind + "/*";
     loadLibrary();
   }
   document.title = `${$(".tab.on").textContent.replace(/ \(\d+\)$/, "")} · ${channelName} studio`;

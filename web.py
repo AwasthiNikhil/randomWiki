@@ -430,9 +430,34 @@ class H(BaseHTTPRequestHandler):
                 return self.send_file(f, "video/mp4" if m[1] == "video" else "font/ttf")
         self.send(404, {"error": "not found"})
 
+    def media_upload(self):
+        """POST /api/media_upload?kind=video|audio|image&name=<file name> with the file as the body."""
+        import tempfile
+        kind = (re.search(r"kind=(video|audio|image)", self.path) or [0, None])[1]
+        name = urllib.parse.unquote((re.search(r"name=([^&]+)", self.path) or [0, "upload"])[1])
+        size = int(self.headers.get("Content-Length", 0))
+        if not kind or not 0 < size <= (4 << 30 if kind == "video" else 500 << 20):
+            return self.send(400, {"error": "bad upload (videos up to 4 GB, audio and images up to 500 MB)"})
+        with tempfile.NamedTemporaryFile(suffix=Path(name).suffix[:10], dir=rw.DB.parent) as tmp:
+            left = size
+            while left > 0:
+                chunk = self.rfile.read(min(1 << 20, left))
+                if not chunk:
+                    break
+                tmp.write(chunk)
+                left -= len(chunk)
+            tmp.flush()
+            try:
+                side = rw.save_upload(kind, tmp.name, name)
+            except ValueError as e:
+                return self.send(400, {"error": str(e)})
+        return self.send(200, {"ok": True, "item": side})
+
     def do_POST(self):
         if self.headers.get("X-RW") != "1":
             return self.send(403, {"error": "missing X-RW header"})
+        if self.path.startswith("/api/media_upload"):  # streamed to disk: videos can be large
+            return self.media_upload()
         raw = self.rfile.read(int(self.headers.get("Content-Length", 0)))
         if self.path.startswith("/api/upload_image"):
             return self.upload_image(raw)
@@ -517,8 +542,9 @@ class H(BaseHTTPRequestHandler):
                 side = next((v for v in rw.library_items(kind) if v["file"] == name), {})
                 if kind == "audio":
                     store_audio((rw.MEDIA / "audio" / name).read_bytes(), "music", pid)
-                    set_audio_credit(pid, "music.m4a", {"name": side.get("title", name), "artist": side.get("uploader") or "unknown",
-                                                        "license": side.get("license") or "licence not stated", "page": side.get("url", "")})
+                    set_audio_credit(pid, "music.m4a", None if side.get("site") == "Uploaded" else  # your own file: no credit line
+                                     {"name": side.get("title", name), "artist": side.get("uploader") or "unknown",
+                                      "license": side.get("license") or "licence not stated", "page": side.get("url", "")})
                     m = json.loads(meta.read_text())
                     m["music"] = "own"
                     meta.write_text(json.dumps(m, indent=2))
