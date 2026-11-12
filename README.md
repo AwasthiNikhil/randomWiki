@@ -125,10 +125,15 @@ Everything is editable in the studio's **Settings** tab and stored in `brand.jso
 New settings apply to new renders. Use **Save & re-render** on a video to update it.
 
 ## YouTube upload (one-time)
-1. In [Google Cloud Console](https://console.cloud.google.com), create a project, enable **YouTube Data API v3**, and create an OAuth client of type **Desktop app**. Save its JSON as `secrets/client_secret.json`.
-2. Under **Google Auth Platform → Branding**, set a homepage and privacy policy URL. This repo's GitHub Pages site works: `https://<user>.github.io/shorts-machine/` and `…/PRIVACY`. Add that domain under *Authorized domains*.
-3. Under **Audience**, click **Publish app** (*In production*). In *Testing* mode the sign-in token expires every 7 days.
-4. Run the first upload. A browser opens. Choose **Advanced → Go to (app name)**, since this is your own unverified app. `secrets/token.json` is then saved and later runs don't prompt.
+In the studio go to **Settings → YouTube**. It links each step straight to the right Google Cloud page:
+1. Create a Google Cloud project and enable the **YouTube Data API v3**.
+2. Set up **Google Auth Platform** (app name, your email, audience *External*), and under **Audience** click **Publish app**. In *Testing* mode the sign-in expires every 7 days.
+3. Create an OAuth client of type **Desktop app** and download its JSON.
+4. **Add client file** in Settings, then **Connect YouTube**. Google warns that the app isn't verified: it's your own, so choose **Advanced → Go to (app name)**.
+
+Everything stays in `secrets/` (git-ignored). **Disconnect** revokes the app's access at Google and deletes the saved sign-in. From the command line: put the file at `secrets/client_secret.json` and run `./rw connect`.
+
+Each user needs their own client: Google's quota (about 6 uploads a day) and its limits for unverified apps are per client, so one shared client would be split across everyone.
 
 Videos upload **private**, or scheduled with `--publish-at`. Until the project passes YouTube's API audit, YouTube keeps API uploads private. Quota allows about 6 uploads a day (deleting costs 50 units). The first `unpublish` asks Google once for the extra "manage videos" permission.
 

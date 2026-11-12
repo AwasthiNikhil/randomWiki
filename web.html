@@ -359,6 +359,23 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
             <label style="max-width:320px">Minimum interest score <output id="scoreOut"></output><input type="range" name="min_score" min="1" max="10" step="1"></label>
             <label style="max-width:320px">Maximum video length <small>seconds</small><input type="number" name="max_seconds" min="20" max="175"></label>
           </fieldset>
+          <fieldset class="scard"><legend>YouTube</legend>
+            <div class="hint" id="ytStatus"></div>
+            <details id="ytHelp"><summary class="hint" style="cursor:pointer">How to get the client file (about 5 minutes, once)</summary>
+              <ol class="hint" style="margin:8px 0 0;padding-left:18px;display:grid;gap:4px">
+                <li><a href="https://console.cloud.google.com/projectcreate" target="_blank" rel="noopener">Create a Google Cloud project ↗</a> (any name).</li>
+                <li><a href="https://console.cloud.google.com/apis/library/youtube.googleapis.com" target="_blank" rel="noopener">Enable the YouTube Data API v3 ↗</a> for it.</li>
+                <li><a href="https://console.cloud.google.com/auth/overview" target="_blank" rel="noopener">Set up Google Auth Platform ↗</a>: app name and your email; audience <b>External</b>. Under <b>Audience</b>, click <b>Publish app</b> (in Testing mode the sign-in expires every 7 days).</li>
+                <li><a href="https://console.cloud.google.com/auth/clients/create" target="_blank" rel="noopener">Create an OAuth client ↗</a> of type <b>Desktop app</b>, then <b>Download JSON</b>.</li>
+                <li>Add that file below and click <b>Connect YouTube</b>. Google will warn the app isn't verified: it's your own app, so choose <b>Advanced → Go to (app name)</b>.</li>
+              </ol></details>
+            <div class="inline">
+              <label class="btn sm" style="display:inline-block;cursor:pointer">Add client file<input type="file" accept=".json,application/json" id="ytFile" hidden></label>
+              <button class="btn sm primary" type="button" id="ytConnect">Connect YouTube</button>
+              <button class="btn sm danger" type="button" id="ytOff" hidden>Disconnect</button>
+            </div>
+            <span class="hint">Saved in <code>secrets/</code> on this computer only. Disconnect revokes the app's access at Google.</span>
+          </fieldset>
           <fieldset class="scard"><legend>Automation</legend>
             <label class="check"><input type="checkbox" id="schOn"> Make videos automatically on a schedule</label>
             <div id="schBody" style="display:grid;gap:12px">
@@ -772,7 +789,10 @@ async function poll() {
     $("#jobLabel").textContent = running ? j.cmd : (j.cmd ? `idle · last: ${j.cmd}` : "idle");
     document.querySelectorAll("[data-cmd], #makeNow, #saveIdea, #upload, #qFind, #libGo, [data-remake], [data-upload], [data-make], [data-rerender], [data-unpubgo]").forEach(b => b.disabled = running);
     $("#stop").disabled = !running;
-    if (was && !running) { loadPages(); if (!$("#library").hidden) loadLibrary(); }
+    if (was && !running) {
+      loadPages(); if (!$("#library").hidden) loadLibrary();
+      if (S && !$("#settings").hidden) { const keep = collect(); loadSettings().then(() => Object.assign(S, keep)); }  // e.g. YouTube just connected
+    }
   } catch (e) {
     $("#jobLabel").textContent = "server not reachable";
   }
@@ -999,6 +1019,13 @@ async function loadSettings() {
   syncEngine();
   $("#llmSel").innerHTML = [...new Set([S.llm, ...j.models])].map(m => `<option>${esc(m)}</option>`).join("");
   F("llm").value = S.llm;
+  $("#ytStatus").innerHTML = {none: "Not set up: add your OAuth client file (steps below).",
+    client: "Client file added. Click <b>Connect YouTube</b> and sign in with the account that owns your channel.",
+    connected: `<b style="color:var(--ok)">Connected.</b> Uploads go to the channel you chose when signing in.`}[j.youtube];
+  $("#ytHelp").open = j.youtube === "none";
+  $("#ytConnect").hidden = j.youtube === "none"; $("#ytConnect").textContent = j.youtube === "connected" ? "Reconnect" : "Connect YouTube";
+  $("#ytOff").hidden = j.youtube !== "connected";
+  $("#ytFile").parentElement.firstChild.textContent = j.youtube === "none" ? "Add client file" : "Replace client file";
   const g = j.gemini, gm = S.gemini_model || "gemini-flash-latest";
   $("#gemSel").innerHTML = [...new Set([gm, ...g.models])].map(m => `<option>${esc(m)}</option>`).join("");
   F("gemini_model").value = gm; $("#gemSel").disabled = !g.key;
@@ -1099,6 +1126,12 @@ $("#sform").addEventListener("click", async e => {
 });
 let fqTimer; $("#fq").oninput = () => { clearTimeout(fqTimer); fqTimer = setTimeout(searchFonts, 250); };
 $("#fcat").onchange = searchFonts;
+$("#ytFile").onchange = async e => {
+  const f = e.target.files[0]; e.target.value = ""; if (!f) return;
+  if (await post("/api/youtube_client", {json: await f.text()})) { termLine("YouTube client file saved", "good"); const keep = collect(); await loadSettings(); Object.assign(S, keep); }
+};
+$("#ytConnect").onclick = () => exec("connect").then(ok => ok && termLine("a browser window opens for Google sign-in; come back here when it says you can close it"));
+$("#ytOff").onclick = async () => { if (await post("/api/youtube_disconnect")) { termLine("YouTube disconnected", "good"); const keep = collect(); await loadSettings(); Object.assign(S, keep); } };
 $("#musicFile").onchange = e => e.target.files[0] && uploadBrand("music", e.target.files[0]);
 $("#logoFile").onchange = e => e.target.files[0] && uploadBrand("logo", e.target.files[0]);
 

@@ -2094,11 +2094,48 @@ def youtube(scope):
     if not creds or not creds.valid:
         cs = SECRETS / "client_secret.json"
         if not cs.exists():
-            raise SystemExit(f"Missing {cs}; see README.md")
+            raise SystemExit("YouTube isn't set up: in the studio, Settings → YouTube, add your client file and click Connect")
         had = json.loads(tok.read_text()).get("scopes", []) if tok.exists() else []
         creds = InstalledAppFlow.from_client_secrets_file(cs, sorted({*had, scope})).run_local_server(port=0)
     tok.write_text(creds.to_json())
     return build("youtube", "v3", credentials=creds)
+
+
+def youtube_status():
+    """'none' (no client file), 'client' (ready to connect) or 'connected'."""
+    return ("connected" if (SECRETS / "token.json").exists() else "client") if (SECRETS / "client_secret.json").exists() else "none"
+
+
+def save_youtube_client(text):
+    """Check and save the OAuth client JSON downloaded from Google Cloud. A new client signs the old one out."""
+    try:
+        c = json.loads(text)
+    except ValueError:
+        raise ValueError("that isn't the JSON file from Google Cloud") from None
+    if "web" in c:
+        raise ValueError("this is a 'Web application' client; create one of type 'Desktop app' instead")
+    inst = c.get("installed") or {}
+    if not (str(inst.get("client_id", "")).endswith(".apps.googleusercontent.com") and inst.get("client_secret")):
+        raise ValueError("that isn't an OAuth client file: in Google Cloud, create a 'Desktop app' client and download its JSON")
+    SECRETS.mkdir(exist_ok=True)
+    cs = SECRETS / "client_secret.json"
+    if cs.exists() and json.loads(cs.read_text()).get("installed", {}).get("client_id") != inst["client_id"]:
+        youtube_disconnect()
+    cs.write_text(json.dumps(c))
+    cs.chmod(0o600)
+
+
+def youtube_disconnect():
+    """Revoke the app's access at Google and forget the sign-in."""
+    tok = SECRETS / "token.json"
+    if tok.exists():
+        t = json.loads(tok.read_text())
+        try:
+            urllib.request.urlopen(urllib.request.Request("https://oauth2.googleapis.com/revoke",
+                                   urllib.parse.urlencode({"token": t.get("refresh_token") or t.get("token")}).encode()), timeout=20)
+        except OSError:
+            pass  # already revoked or offline: forgetting it locally is what matters
+        tok.unlink()
 
 
 def delete_local(con, pageid, reason):
@@ -2260,6 +2297,7 @@ def main():
     dc.add_argument("--link", help="any link (for --source link): feed, site, subreddit, Wikipedia category/list, ...")
     dl = sub.add_parser("download", help="save videos from almost any site into library/ (references, clips)")
     dl.add_argument("urls", nargs="+"); dl.add_argument("--section", help="only part of it, e.g. 1:20-1:45")
+    sub.add_parser("connect", help="sign in to YouTube (opens Google's consent page)")
     sc = sub.add_parser("score"); sc.add_argument("--all", action="store_true")
     wb = sub.add_parser("web"); wb.add_argument("--port", type=int, default=8765); wb.add_argument("--no-open", action="store_true")
     args = ap.parse_args()
@@ -2271,6 +2309,9 @@ def main():
         return web.serve(args.port, not args.no_open)
     if args.cmd == "selftest":
         return selftest()
+    if args.cmd == "connect":
+        youtube(YT_UPLOAD)
+        return print("YouTube connected. Uploads will go to the channel you chose.")
     if args.cmd == "download":
         failed = 0
         for url in args.urls:

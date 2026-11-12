@@ -9,7 +9,7 @@ from pathlib import Path
 
 import rw
 
-ALLOWED = {"run", "add", "download", "discover", "upload", "unpublish", "rerender", "log", "score", "selftest", "preview", "voicetest",
+ALLOWED = {"run", "add", "download", "connect", "discover", "upload", "unpublish", "rerender", "log", "score", "selftest", "preview", "voicetest",
            "auto", "schedule"}
 HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 BRAND_FILE = rw.BRAND_FILE
@@ -254,7 +254,7 @@ class H(BaseHTTPRequestHandler):
                     gemini["error"] = f"couldn't list models ({type(e).__name__})"
             b = brand()
             log = rw.AUTO_LOG.read_text(errors="ignore").splitlines()[-40:] if rw.AUTO_LOG.exists() else []
-            return self.send(200, {"brand": b, "voices": sorted(rw.KOKORO_VOICES), "models": models, "gemini": gemini,
+            return self.send(200, {"brand": b, "voices": sorted(rw.KOKORO_VOICES), "models": models, "gemini": gemini, "youtube": rw.youtube_status(),
                                    "schedule": rw.SCHEDULE_DEFAULTS | b.get("schedule", {}), "schedule_loaded": rw.schedule_loaded(),
                                    "auto_log": [l for l in log if l.startswith(("===", "make:", "queue empty", "  done", "  uploaded", "  upload failed"))][-12:],
                                    "music": (rw.ROOT / b["music"]).is_file(), "voice_sample": (rw.ROOT / "brand" / "voice_sample.wav").is_file(),
@@ -380,6 +380,10 @@ class H(BaseHTTPRequestHandler):
                 m["images"].append(rw.download_clip(clip, meta.parent))
                 meta.write_text(json.dumps(m, indent=2))
                 return self.send(200, {"ok": True, "n": len(m["images"])})
+            elif self.path == "/api/youtube_client":  # body: {"json": "<client file contents>"}
+                rw.save_youtube_client(str(body.get("json", "")))
+            elif self.path == "/api/youtube_disconnect":
+                rw.youtube_disconnect()
             elif self.path == "/api/gemini_key":  # body: {"key": "..."}; empty removes the saved key
                 key = str(body.get("key", "")).strip()
                 if not key:
