@@ -58,8 +58,10 @@ Also done: clip countdowns (see CLAUDE.md). Tested: a 3-clip video from the word
 channel (45 s, 1080×1920, sound, badges, credits), shown and playable in the studio; the channel setting saves.
 Not tested: links from TikTok / Instagram / Facebook / Reddit, a profile or playlist link, a clip with no sound,
 scheduled runs on a clips channel, uploading one.
-Known gaps: clips are picked by views only, so off-topic videos that spam the hashtag get in (seen in the test);
-letting Gemini watch and rate candidates is the fix. The video's dialog still shows the explainer editor (narration,
+Since then: clips play whole (4-30 s), text-on-screen clips are dropped (ocr.swift), hashtag results must name the
+subject in the title, and channels have a `clip_sources` list (a TikTok account was listed and downloaded in a test;
+its clips were then dropped for on-screen text). Known gaps: topic match is by title words only; small or brief
+stamps and emoji overlays pass the text check; letting Gemini watch and rate candidates is the real fix. The video's dialog still shows the explainer editor (narration,
 visuals), which doesn't apply; re-render is refused. No per-clip trimming or reordering yet; each clip is its first
 N seconds. Only YouTube is searched by words; other sites have no usable search in yt-dlp, so they need links.
 

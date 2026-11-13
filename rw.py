@@ -2512,7 +2512,11 @@ def download_picture(url):
 
 
 # ---------- clip countdowns: a video made of other videos, no narration ----------
-def clip_candidates(text, limit=50):
+CLIP_FILLER = {"funny", "funniest", "best", "top", "cute", "viral", "oddly", "video", "videos", "clip", "clips", "moments",
+               "short", "shorts", "the", "and", "most", "crazy", "epic", "new"}
+
+
+def clip_candidates(text, limit=200):
     """Short videos for a countdown, from words and/or links: YouTube Shorts under the words as a hashtag
     ("funny cats" -> #funnycats), each link as a single
     video (always used: you picked it) or, for a profile or playlist, its latest videos.
@@ -2522,6 +2526,9 @@ def clip_candidates(text, limit=50):
     query = re.sub(r"https?://\S+", " ", text).strip()
     quiet = type("Quiet", (), {"debug": print_nothing, "warning": print_nothing, "error": print_nothing})()
     tag = re.sub(r"\W", "", query.lower())  # YouTube's search returns long videos; a hashtag's Shorts page doesn't
+    # ponytail: on topic = the title names the subject ("funny dogs" -> "dog"); clips with vague titles are lost.
+    # A model that watches the clip (Gemini) is the upgrade.
+    topic = [w.rstrip("s") for w in re.findall(r"[a-z0-9]+", query.lower()) if w not in CLIP_FILLER and len(w) > 2] or [""]
     found = {}
     with yt_dlp.YoutubeDL({"extract_flat": True, "quiet": True, "no_warnings": True, "playlistend": limit,
                            "logger": quiet, "cachedir": False}) as y:
@@ -2534,38 +2541,88 @@ def clip_candidates(text, limit=50):
             many = info.get("_type") == "playlist"
             for e in (info.get("entries") or []) if many else [info]:
                 url = e.get("webpage_url") or e.get("url")
+                if src.endswith(f"/hashtag/{tag}/shorts") and not any(w in (e.get("title") or "").lower() for w in topic):
+                    continue  # hashtag pages are full of unrelated videos tagged for reach
                 if url and url not in found and not (many and (e.get("duration") or 30) > 90):  # shorts, not long videos
                     found[url] = dict(url=url, title=e.get("title") or "", views=e.get("view_count") or 0, picked=not many)
     return sorted(found.values(), key=lambda c: (not c["picked"], -c["views"]))
 
 
+def has_text(path, dur):
+    """True when captions or a channel stamp sit on a clip: readable text in at least 2 of 3 frames (macOS Vision,
+    through the small helper ocr.swift, compiled once into .tools/ocr). Without Swift nothing is filtered."""
+    import shutil, subprocess, tempfile, imageio_ffmpeg
+    ocr = ROOT / ".tools" / "ocr"
+    if not ocr.exists():
+        if not shutil.which("swiftc"):
+            return False
+        ocr.parent.mkdir(exist_ok=True)
+        subprocess.run(["swiftc", "-O", str(ROOT / "ocr.swift"), "-o", str(ocr)], check=True, capture_output=True)
+    with tempfile.TemporaryDirectory(dir=DB.parent) as tmp:
+        frames = [f"{tmp}/{k}.png" for k in range(3)]
+        for k, f in enumerate(frames):
+            subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(), "-y", "-loglevel", "error", "-ss", str(dur * (k + 1) / 4),
+                            "-i", str(path), "-frames:v", "1", f], capture_output=True)
+        found = subprocess.run([str(ocr), *frames], capture_output=True, text=True).stdout.split()
+    return sum(int(n) >= 4 for n in found) >= 2
+
+
+CLIP_SECONDS = (4, 30)  # a clip is used whole, so it has to be this short
+
+
 def make_clips(con, text, count=5):
-    """Find clips (see clip_candidates), keep `count`, and join them as a countdown: each fills the frame over a
-    blurred copy of itself, keeps its own sound, and carries its rank. Every clip is credited in the description."""
+    """Find clips (see clip_candidates) and join up to `count` of them as a countdown. Each is used whole, never cut,
+    so only short ones that fit the channel's maximum video length are taken, and ones with text on screen (captions,
+    channel stamps) are dropped. Each fills the frame over a blurred copy of itself, keeps its own sound and carries
+    its rank. Every clip is credited in the description."""
     # ponytail: "best" = most viewed, since no model here watches video; let Gemini rate the clips if that isn't enough
     import subprocess, imageio_ffmpeg
     from PIL import Image, ImageDraw, ImageFont
     ensure_fonts()
     ff = imageio_ffmpeg.get_ffmpeg_exe()
     query = re.sub(r"https?://\S+", " ", text).strip()
-    per = max(4, min(15, BRAND["max_seconds"] // count))  # seconds of each clip
     used_file = DB.parent / "clips_used.json"  # never show the same clip twice on a channel
     used = set(json.loads(used_file.read_text())) if used_file.exists() else set()
     print(f"looking for clips: {text[:80]}")
-    cands = [c for c in clip_candidates(text) if c["url"] not in used]
-    print(f"  {len(cands)} to choose from; taking the {count} most viewed, {per}s of each")
-    clips = []
-    for c in cands:
-        if len(clips) == count:
-            break
-        try:
-            path = download(c["url"], section=f"0-{per}")
-        except (SystemExit, Exception) as e:
-            print(f"  skipped {c['url'][:70]}: {str(e)[:100]}")
-            continue
-        clips.append(c | json.loads(path.with_suffix(".json").read_text()) | {"path": str(path), "found": c["url"]})
+    import yt_dlp
+    cands = [c for c in clip_candidates(" ".join([text, *(BRAND.get("clip_sources") or [])])) if c["url"] not in used]
+    lo, hi = CLIP_SECONDS
+    print(f"  {len(cands)} to choose from; taking up to {count} of the most viewed that are whole in {lo}-{hi}s, "
+          f"have no text on screen, and fit {BRAND['max_seconds']}s together")
+    clips, total, why = [], 0, {"too long or too short": 0, "text on screen": 0, "couldn't be read": 0}
+    quiet = type("Quiet", (), {"debug": print_nothing, "warning": print_nothing, "error": print_nothing})()
+    with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "logger": quiet, "cachedir": False, "noplaylist": True}) as y:
+        for c in cands[:80]:  # ponytail: a fixed cap on how many we look at per run; raise it if runs come up short
+            if len(clips) == count:
+                break
+            try:
+                info = y.extract_info(c["url"], download=False)
+                dur = info.get("duration") or 0
+                if not lo <= dur <= hi:
+                    why["too long or too short"] += 1
+                    used.add(c["url"])  # its length won't change: don't look again
+                    continue
+                if total + dur > BRAND["max_seconds"]:
+                    continue
+                path = download(c["url"])
+            except (SystemExit, Exception):
+                why["couldn't be read"] += 1
+                continue
+            if not c["picked"] and has_text(path, dur):  # a video you pasted is yours to judge
+                why["text on screen"] += 1
+                used.add(c["url"])
+                for f in (path, path.with_suffix(".json"), path.with_suffix(".jpg")):
+                    f.unlink(missing_ok=True)
+                print("  dropped it: text on screen")
+                continue
+            clips.append(c | json.loads(path.with_suffix(".json").read_text())
+                         | {"path": str(path), "found": c["url"], "seconds": dur, "views": c["views"] or info.get("view_count") or 0})
+            total += dur
+    print("  passed over: " + ", ".join(f"{n} {k}" for k, n in why.items() if n))
+    used_file.write_text(json.dumps(sorted(used)))
     if len(clips) < 2:
-        raise SystemExit("found fewer than two clips that could be downloaded; try other words or paste links")
+        raise SystemExit("found fewer than two clips that are short, whole and free of text; try other words, paste links, "
+                         "or add accounts to take clips from in Settings")
     clips.sort(key=lambda c: c["views"])  # count down: the most viewed plays last as number 1
     title = (f"Top {len(clips)} {query}" if query else f"Top {len(clips)} clips")[:60]
     pid = sources_id(f"clips:{title}:{time.time()}")
@@ -2588,7 +2645,7 @@ def make_clips(con, text, count=5):
                             f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},boxblur=24[bg];"
                             f"[0:v]scale={W}:{H}:force_original_aspect_ratio=decrease[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2[v0];"
                             f"[v0][1:v]overlay=0:0:shortest=1,fps={FPS},format=yuv420p[v]",
-                            "-map", "[v]", *sound[-2:], "-t", str(per), "-shortest", "-c:v", "libx264", "-preset", "medium", "-crf", "20",
+                            "-map", "[v]", *sound[-2:], "-t", str(c["seconds"]), "-shortest", "-c:v", "libx264", "-preset", "medium", "-crf", "20",
                             "-c:a", "aac", "-ar", "48000", "-ac", "2", "-b:a", "192k", str(seg)], capture_output=True, text=True)
         if r.returncode:
             raise RuntimeError(f"ffmpeg failed on {c['url']}: {r.stderr[-300:]}")

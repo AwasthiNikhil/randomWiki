@@ -83,9 +83,13 @@ yes/no judgements and at obeying "skip X" instructions: make it quote or label, 
 ## Clip countdowns (`make_clips()` in rw.py)
 A second kind of video, chosen per channel (`video_type: "clips"` in brand.json; Settings → Ideas & videos) or run
 directly with `./rw clips "<words and/or links>" --count N`. No research, script or voice: `clip_candidates()` reads
-YouTube Shorts under the words as a hashtag plus any links (yt-dlp: single video, profile or playlist), the most
-viewed are downloaded into `media/video/` (first N seconds), each is fitted to 1080×1920 over a blurred copy with a
-rank badge, and the pieces are joined with their own sound. Used clip links are remembered in the channel's
+YouTube Shorts under the words as a hashtag (kept only if the title names the subject, `CLIP_FILLER` words aside),
+plus any links and the channel's `clip_sources` (yt-dlp: single video, profile or playlist; TikTok accounts work,
+TikTok tags/search, Facebook and Instagram listings and Reddit's API don't). The most viewed are taken whole, never
+cut: only clips of `CLIP_SECONDS` (4-30 s) that fit `max_seconds` together, and not ones with text on screen
+(`has_text()`: 3 frames through `ocr.swift`, a macOS Vision helper compiled once into `.tools/ocr`; pasted single
+videos skip this check). They are downloaded into `media/video/`, each is fitted to 1080×1920 over a blurred copy
+with a rank badge, and the pieces are joined with their own sound. Used clip links are remembered in the channel's
 `data/clips_used.json`. On a clips channel, `run` and `auto` call it (no input = a random channel topic).
 **The owner chose to allow other people's clips here**, as an exception to the licence rule below; every clip is
 credited in the description, and publishing rights are theirs to sort out.
