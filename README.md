@@ -136,6 +136,14 @@ the background for every channel whichever one is open, taking turns if they fal
 channel lives in the project folder itself, later ones in `workspaces/<name>/`; deleting a channel means deleting its
 folder (turn its schedule off first). On the command line, `RW_WORKSPACE=<name> ./rw …` works on that channel.
 
+## Clip countdowns
+A channel can make countdowns of short clips instead of narrated explainers: Settings → Ideas & videos → "What this
+channel makes". Then the Make box takes words (YouTube Shorts under that hashtag: "funny cats" looks in #funnycats)
+and/or links from TikTok, Instagram, Facebook, YouTube or Reddit (one video, a profile or a playlist). The most viewed
+clips are cut to a few seconds each and joined, number 1 last, with their own sound and a rank badge; a clip is never
+used twice on a channel. From the command line: `./rw clips "funny cats" --count 5`. These are other people's videos:
+each is credited in the description, but credit is not permission, and platforms can remove or demonetise reposts.
+
 ## Prompts and themes
 Settings → Prompts shows the instructions each channel sends to the AI model: three for writing scripts (from an
 article, for a question, from your own text), three for ideas (in your topics, in the news, scoring articles) and one

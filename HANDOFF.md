@@ -54,6 +54,15 @@ Limits the owner knows: scripts are still forced to 85-128 words and fact-checke
 type, not a prompt: find clips → rank → cut and join, no narration; and reposting other people's clips conflicts
 with the licence rule in CLAUDE.md. Not built; owner to decide.
 
+Also done: clip countdowns (see CLAUDE.md). Tested: a 3-clip video from the words "funny cats" in a throwaway
+channel (45 s, 1080×1920, sound, badges, credits), shown and playable in the studio; the channel setting saves.
+Not tested: links from TikTok / Instagram / Facebook / Reddit, a profile or playlist link, a clip with no sound,
+scheduled runs on a clips channel, uploading one.
+Known gaps: clips are picked by views only, so off-topic videos that spam the hashtag get in (seen in the test);
+letting Gemini watch and rate candidates is the fix. The video's dialog still shows the explainer editor (narration,
+visuals), which doesn't apply; re-render is refused. No per-clip trimming or reordering yet; each clip is its first
+N seconds. Only YouTube is searched by words; other sites have no usable search in yt-dlp, so they need links.
+
 Open:
 - The project folder is still `~/projects/randomwiki`. Renaming it breaks the absolute paths in the first channel's DB
   (`video_path`) and `work/*/meta.json` (image paths), `.venv` scripts, and the launchd job; it needs a path rewrite

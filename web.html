@@ -445,6 +445,11 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
             <span class="hint" style="margin:0">Trending ideas skip tragedies, politics, sports results and gossip, and are phrased as questions about the lasting idea behind the news. Every idea is researched when it's made.</span>
           </fieldset>
           <fieldset class="scard" data-group="content"><legend>Videos</legend>
+            <div style="display:grid;gap:6px"><span class="hint" style="margin:0">What this channel makes</span>
+              <label class="radio"><input type="radio" name="vtype" value="explainer"> <b>Narrated explainers</b>: researched, scripted, voiced, with pictures and captions</label>
+              <label class="radio"><input type="radio" name="vtype" value="clips"> <b>Clip countdowns</b>: type what to search YouTube for, or paste links from TikTok, Instagram, Facebook, YouTube or Reddit (one video, a profile or a playlist). The most viewed clips are cut and joined, number 1 last, with their own sound.</label>
+            </div>
+            <span class="hint" style="margin:0">Clip countdowns use other people's videos. Each is credited in the description, but that is not permission: platforms can remove or demonetise reposted clips.</span>
             <label style="max-width:320px">Minimum interest score <output id="scoreOut"></output><input type="range" name="min_score" min="1" max="10" step="1"></label>
             <label style="max-width:320px">Maximum video length <small>seconds</small><input type="number" name="max_seconds" min="20" max="175"></label>
             <div style="display:grid;gap:6px"><span class="hint" style="margin:0">When a video is made</span>
@@ -1513,6 +1518,7 @@ async function loadSettings() {
   document.querySelectorAll("[name=vEngine]").forEach(r => r.checked = r.value === S.voice_engine);
   $("#cloneConsent").checked = !!S.clone_consent;
   document.querySelectorAll("[name=mode]").forEach(r => r.checked = r.value === (S.mode || "auto"));
+  document.querySelectorAll("[name=vtype]").forEach(r => r.checked = r.value === (S.video_type || "explainer"));
   sampleState(j.voice_sample);
   if (!j.clone_ready) document.querySelector("[name=vEngine][value=clone]").disabled = true;
   syncEngine();
@@ -1561,7 +1567,7 @@ function collect() {
   S = {...S, channel: F("channel").value, tagline: F("tagline").value, outro_line: F("outro_line").value, logo_text: F("logo_text").value,
     hashtags: F("hashtags").value.split(",").map(x => x.trim()).filter(Boolean), voice: F("voice").value, voice_speed: +F("voice_speed").value,
     music_volume: +F("music_volume").value, voice_engine: document.querySelector("[name=vEngine]:checked")?.value || "kokoro",
-    clone_consent: $("#cloneConsent").checked, mode: document.querySelector("[name=mode]:checked")?.value || "auto",
+    clone_consent: $("#cloneConsent").checked, mode: document.querySelector("[name=mode]:checked")?.value || "auto", video_type: document.querySelector("[name=vtype]:checked")?.value || "explainer",
     topics: F("topics").value.split(",").map(x => x.trim()).filter(Boolean), idea_source: document.querySelector("[name=ideaSrc]:checked")?.value || "mix", min_score: +F("min_score").value, max_seconds: +F("max_seconds").value, llm: $("#llmSel").value, gemini_model: $("#gemSel").value, claude_model: $("#clSel").value,
     ai: document.querySelector("[name=aiPick]:checked")?.value || "local", publish_to: [...document.querySelectorAll("[data-pub]:checked")].map(c => c.dataset.pub),
     prompts: Object.fromEntries([...document.querySelectorAll("[data-prompt]")].map(t => [t.dataset.prompt, t.value])),

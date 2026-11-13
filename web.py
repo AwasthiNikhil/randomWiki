@@ -10,7 +10,7 @@ from pathlib import Path
 import rw
 
 ALLOWED = {"run", "add", "download", "connect", "discover", "upload", "unpublish", "rerender", "log", "score", "selftest", "preview", "voicetest",
-           "auto", "schedule"}
+           "auto", "schedule", "clips"}
 HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 BRAND_FILE = rw.BRAND_FILE
 HEX = re.compile(r"^#[0-9a-fA-F]{6}$")
@@ -70,6 +70,8 @@ def save_brand(new):
         b["topics"] = [str(t).strip()[:40] for t in new["topics"] if str(t).strip()][:12]
     if new.get("idea_source") in ("mix", "topics", "trending", "wikipedia"):
         b["idea_source"] = new["idea_source"]
+    if new.get("video_type") in ("explainer", "clips"):
+        b["video_type"] = new["video_type"]
     if new.get("mode") in ("auto", "manual"):
         b["mode"] = new["mode"]
     if "publish_to" in new:
