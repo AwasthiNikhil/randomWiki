@@ -29,10 +29,13 @@ project the owner wants next. Everything below is committed on `main`; the last 
   `http://127.0.0.1:8766/callback/`).
 - **Images from galleries/social posts** (Instagram carousels, Reddit galleries, Flickr albums) aren't supported;
   suggested adding `gallery-dl`, owner hasn't decided.
-- **Still Wikipedia-coupled:** topic brainstorms verify each idea against a Wikipedia intro; research falls back to
-  Wikipedia; auto-picked visuals try Wikipedia lead images first; non-Wikipedia ideas get neutral demand numbers in
-  scoring. Proposed but not approved: a local "web reading" research step (local model suggests URLs, we fetch and
-  read them with trafilatura) as a fallback before Wikipedia, optionally Ollama's web search API.
+- **Research no longer defaults to Wikipedia:** `research_web()` (keyless search, reads four sites) runs before it;
+  tested on three questions and one full draft ("why is the sky blue": NASA, Mental Floss, Britannica, Live Science).
+  The answer check now accepts near-verbatim quotes (a word dropped or added), which web text needed. Risks: the
+  search reads DuckDuckGo's page for people and may get refused; any site in the results is trusted equally.
+- **Still Wikipedia-coupled:** topic brainstorms require and verify a Wikipedia article per idea; "Random Wikipedia
+  pages" as an idea source; auto-picked visuals try Wikipedia lead images first; non-Wikipedia ideas get neutral
+  demand numbers in scoring. The local judge in the answer check is still inconsistent (same quote judged both ways).
 - Gemini on the owner's key: Google Search grounding returns quota 429 (falls back to url_context); models are often
   "high demand" (503), so runs regularly fall back to the local model.
 - The owner rotated (or was told to rotate) their Gemini key after it was once printed in a session.

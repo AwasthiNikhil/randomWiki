@@ -648,7 +648,14 @@ def find_answer(question, text):
 def answers(question, quote, text):
     """True if `quote` really comes from `text` and, judged on its own, answers the question (local model)."""
     norm = lambda x: re.sub(r"\W+", " ", x).lower().strip()
-    if len(quote.split()) < 4 or norm(quote)[:120] not in norm(text) or "?" in quote:
+    # every sentence of the quote must be in the text, give or take a word: models join real sentences from different
+    # places and drop or add a word when copying, but an invented sentence matches nothing this closely
+    import difflib
+    split = lambda x: re.split(r"(?<=[.!?])\s+", x)
+    parts = [p for p in split(quote) if len(p.split()) >= 5] or [quote]
+    whole, sents = norm(text), [norm(x) for x in split(text)]
+    real = lambda p: norm(p)[:120] in whole or any(difflib.SequenceMatcher(None, norm(p), x).ratio() >= 0.85 for x in sents)
+    if len(quote.split()) < 4 or "?" in quote or not all(real(p) for p in parts):
         return False
     return str(llm(IS_ANSWER_PROMPT.format(question=question, quote=quote), 0.1, local=True).get("answers")).lower() == "true"
 
@@ -747,15 +754,48 @@ def researched(question, text, sources, how, who, linked):
                 source_label="Sources: " + ", ".join(sites[:3]), titles=titles)
 
 
+NOT_FOR_NOTES = re.compile(r"(^|\.)(wikipedia\.org|youtube\.com|youtu\.be|reddit\.com|quora\.com|facebook\.com|instagram\.com|"
+                           r"tiktok\.com|pinterest\.com|twitter\.com|x\.com|linkedin\.com)$")  # Wikipedia has its own step
+
+
+def research_web(question, pages=4):
+    """Search the web, read the first few pages that can be read (robots.txt respected), and use their text as the
+    notes. No key and no cloud model needed."""
+    import sources
+    notes, used = [], []
+    for url in sources.search_web(question):
+        site = urllib.parse.urlsplit(url).netloc.removeprefix("www.")
+        if len(used) == pages or NOT_FOR_NOTES.search(site) or site in [s for s, _ in used]:
+            continue
+        try:
+            a = sources.fetch_web(url)
+        except (SystemExit, Exception):  # blocked, paywalled, too little text: the next result
+            continue
+        notes.append(f"## {a['title']} ({site})\n{a['text'][:2600]}")
+        used.append((site, a["url"]))
+    if len(used) < 2:  # one page is one voice: not enough to call it research
+        raise RuntimeError("found fewer than two pages that could be read")
+    print(f"  researching on the web: {', '.join(s for s, _ in used)}")
+    return dict(origin="question", title=question, description="", text="\n\n".join(notes), url=used[0][1], images=[],
+                popularity=None, credit="Researched from: " + " ".join(u for _, u in used),
+                source_label="Sources: " + ", ".join(s for s, _ in used[:3]), titles=[])
+
+
 def research(question):
-    """Answer a question: the cloud model chosen in Connectors researches the web; otherwise (or if that fails) Wikipedia,
-    by picking the articles that cover it, reading them, and packaging the notes as an Article."""
+    """Answer a question from sources actually read: the cloud model chosen in Connectors researches the web; else, or
+    if that fails, we search and read the web ourselves; Wikipedia is the last resort (or the only one, if the channel
+    is set to "Wikipedia only")."""
     who = writer()
     if who != "local" and not ai_down:
         try:
             return (research_gemini if who == "gemini" else research_claude)(question)
         except (RuntimeError, ValueError) as e:
-            print(f"  {who.title()} research failed ({e}); researching on Wikipedia instead")
+            print(f"  {who.title()} research failed ({e}); reading the web ourselves instead")
+    if BRAND.get("research_from", "web") == "web":
+        try:
+            return research_web(question)
+        except Exception as e:
+            print(f"  web research failed ({e}); researching on Wikipedia instead")
     return research_wikipedia(question)
 
 

@@ -62,7 +62,10 @@ Non-Wikipedia rows use `sources.synthetic_id(key)` as pageid. Schema changes are
 
 ## Pipeline (`make()` in rw.py)
 input → `add_input` routes it (link → article or idea list; >30 words → `text`; else → `question`) → research
-(`research()`: Gemini or Claude web research if chosen in Connectors, else/fallback Wikipedia via the local LLM) →
+(`research()`: Gemini or Claude web research if chosen in Connectors; else/fallback `research_web()`, which searches
+without a key (`sources.search_web()`: DuckDuckGo's plain page, Bing RSS as backup), reads up to four pages from
+different sites and uses their text as notes; Wikipedia via the local LLM is the last resort, or the only step when the
+channel's `research_from` is "wikipedia") →
 answer check for questions (`find_answer` / `ensure_answered`, local model, quote-grounded) → `write_script`
 (length loop + fact-check) → `pick_visuals` (per sentence: Wikipedia lead image, Commons, Openverse, then WordPress
 Photos and Pexels/Pixabay as fallbacks) → **manual mode stops here as a draft** → `produce()`: TTS (Kokoro, cloned

@@ -479,6 +479,11 @@ body[data-vtype=clips] [data-for=explainer], body[data-vtype=explainer] [data-fo
               <label class="radio"><input type="radio" name="ideaSrc" value="trending"> Trending in your topics only (Google News and Google Trends)</label>
               <label class="radio"><input type="radio" name="ideaSrc" value="wikipedia"> Random Wikipedia pages</label>
             </div>
+            <div data-for="explainer" style="display:grid;gap:6px"><span class="hint" style="margin:0">Facts for a question or topic come from</span>
+              <label class="radio"><input type="radio" name="researchFrom" value="web"> <b>The web</b>: search, then read a few pages from different sites. Wikipedia only if they don't answer the question</label>
+              <label class="radio"><input type="radio" name="researchFrom" value="wikipedia"> Wikipedia only</label>
+              <span class="hint" style="margin:0">If Gemini or Claude is chosen in Connectors, it researches first and this is the fallback. Every source read is listed in the video's description.</span>
+            </div>
             <span class="hint" data-for="explainer" style="margin:0">Trending ideas skip tragedies, politics, sports results and gossip, and are phrased as questions about the lasting idea behind the news. Every idea is researched when it's made.</span>
             <label data-for="explainer" style="max-width:320px">Minimum interest score <small>ideas scoring lower are not made</small> <output id="scoreOut"></output><input type="range" name="min_score" min="1" max="10" step="1"></label>
           </fieldset>
@@ -1657,6 +1662,7 @@ async function loadSettings() {
   $("#cloneConsent").checked = !!S.clone_consent;
   document.querySelectorAll("[name=mode]").forEach(r => r.checked = r.value === (S.mode || "auto"));
   document.querySelectorAll("[name=vtype]").forEach(r => r.checked = r.value === (S.video_type || "explainer"));
+  document.querySelectorAll("[name=researchFrom]").forEach(r => r.checked = r.value === (S.research_from || "web"));
   F("clip_sources").value = (S.clip_sources || []).join("\n"); F("clip_strip_voice").checked = !!S.clip_strip_voice;
   sampleState(j.voice_sample);
   if (!j.clone_ready) document.querySelector("[name=vEngine][value=clone]").disabled = true;
@@ -1706,7 +1712,7 @@ function collect() {
   S = {...S, channel: F("channel").value, tagline: F("tagline").value, outro_line: F("outro_line").value, logo_text: F("logo_text").value,
     hashtags: F("hashtags").value.split(",").map(x => x.trim()).filter(Boolean), voice: F("voice").value, voice_speed: +F("voice_speed").value,
     music_volume: +F("music_volume").value, voice_engine: document.querySelector("[name=vEngine]:checked")?.value || "kokoro",
-    clone_consent: $("#cloneConsent").checked, mode: document.querySelector("[name=mode]:checked")?.value || "auto", video_type: document.querySelector("[name=vtype]:checked")?.value || "explainer", clip_strip_voice: F("clip_strip_voice").checked, clip_sources: F("clip_sources").value.split("\n").map(x => x.trim()).filter(Boolean),
+    clone_consent: $("#cloneConsent").checked, mode: document.querySelector("[name=mode]:checked")?.value || "auto", video_type: document.querySelector("[name=vtype]:checked")?.value || "explainer", research_from: document.querySelector("[name=researchFrom]:checked")?.value || "web", clip_strip_voice: F("clip_strip_voice").checked, clip_sources: F("clip_sources").value.split("\n").map(x => x.trim()).filter(Boolean),
     topics: F("topics").value.split(",").map(x => x.trim()).filter(Boolean), idea_source: document.querySelector("[name=ideaSrc]:checked")?.value || "mix", min_score: +F("min_score").value, max_seconds: +F("max_seconds").value, llm: $("#llmSel").value, gemini_model: $("#gemSel").value, claude_model: $("#clSel").value,
     ai: document.querySelector("[name=aiPick]:checked")?.value || "local", publish_to: [...document.querySelectorAll("[data-pub]:checked")].map(c => c.dataset.pub),
     prompts: Object.fromEntries([...document.querySelectorAll("[data-prompt]")].map(t => [t.dataset.prompt, t.value])),

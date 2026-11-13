@@ -99,6 +99,22 @@ def fetch_web(url, extra_credit=""):
 
 
 # ---------- RSS / Atom feeds ----------
+def search_web(query, limit=10):
+    """Web search without a key -> [url]: DuckDuckGo's plain results page, else Bing's results as RSS (which handles
+    questions badly)."""
+    # ponytail: reads a page meant for people; if DuckDuckGo starts refusing, add a search API key (Brave, Tavily)
+    import xml.etree.ElementTree as ET
+    q = urllib.parse.quote_plus(query)
+    try:
+        page = fetch_page("https://lite.duckduckgo.com/lite/?q=" + q).decode("utf-8", "ignore")
+        urls = [urllib.parse.unquote(u) for u in re.findall(r'uddg=([^&"]+)', page)]
+    except SystemExit:
+        urls = []
+    if not urls:
+        urls = [i.findtext("link") or "" for i in ET.fromstring(fetch_page("https://www.bing.com/search?format=rss&q=" + q)).iter("item")]
+    return list(dict.fromkeys(u for u in urls if u.startswith("http")))[:limit]
+
+
 REDDIT_MEDIA = re.compile(r"//(www\.|old\.)?reddit\.com/|//(i|v|preview)\.redd\.it/|//redd\.it/")
 
 
