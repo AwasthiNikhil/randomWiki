@@ -89,7 +89,8 @@ TikTok tags/search, Facebook and Instagram listings and Reddit's API don't). The
 cut: only clips of `CLIP_SECONDS` (4-30 s) that fit `max_seconds` together, and not ones with text on screen
 (`has_text()`: 3 frames through `ocr.swift`, a macOS Vision helper compiled once into `.tools/ocr`; pasted single
 videos skip this check). They are downloaded into `media/video/`, each is fitted to 1080×1920 over a blurred copy
-with a rank badge, and the pieces are joined with their own sound. Used clip links are remembered in the channel's
+with a rank badge, and the pieces are joined with their own sound. With `clip_strip_voice` on, `strip_voice()`
+(Demucs `htdemucs`, CPU, model in `.cache/torch`) first removes human voices, speech and singing, from each clip. Used clip links are remembered in the channel's
 `data/clips_used.json`. On a clips channel, `run` and `auto` call it (no input = a random channel topic).
 **The owner chose to allow other people's clips here**, as an exception to the licence rule below; every clip is
 credited in the description, and publishing rights are theirs to sort out.

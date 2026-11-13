@@ -2567,6 +2567,36 @@ def has_text(path, dur):
     return sum(int(n) >= 4 for n in found) >= 2
 
 
+_demucs = None
+
+
+def strip_voice(src, dest):
+    """Save src's sound to dest (wav) without the human voices: Demucs splits it into voice, drums, bass and the
+    rest, and we keep everything but the voice. Singing counts as voice too."""
+    # ponytail: runs on the CPU (about real time); Demucs on Apple's GPU is unreliable. Revisit if it's too slow.
+    import subprocess, imageio_ffmpeg, soundfile as sf, torch
+    global _demucs
+    try:
+        from demucs.apply import apply_model
+        from demucs.pretrained import get_model
+    except ImportError:
+        raise SystemExit("removing voices needs Demucs: run ./setup.sh once, or turn the option off in Settings") from None
+    if _demucs is None:
+        _demucs = get_model("htdemucs").eval()  # downloaded once into .cache/torch
+    if subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(), "-y", "-loglevel", "error", "-i", str(src), "-vn", "-ac", "2",
+                       "-ar", str(_demucs.samplerate), str(dest)]).returncode:
+        raise RuntimeError(f"couldn't read the sound of {src}")
+    wav, sr = sf.read(dest, dtype="float32", always_2d=True)
+    mix = torch.from_numpy(wav.T.copy())
+    ref = mix.mean(0)
+    mean, std = ref.mean(), ref.std() + 1e-8
+    with torch.no_grad():
+        parts = apply_model(_demucs, ((mix - mean) / std)[None], device="cpu", split=True)[0]
+    keep = sum(parts[k] for k, name in enumerate(_demucs.sources) if name != "vocals") * std + mean
+    sf.write(dest, keep.T.numpy(), sr)
+    return dest
+
+
 CLIP_SECONDS = (4, 30)  # a clip is used whole, so it has to be this short
 
 
@@ -2639,6 +2669,9 @@ def make_clips(con, text, count=5):
         badge.save(work / f"badge{k}.png")
         probe = subprocess.run([ff, "-hide_banner", "-i", c["path"]], capture_output=True, text=True).stderr
         sound = ["-map", "0:a"] if "Audio:" in probe else ["-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo", "-map", "2:a"]
+        if BRAND.get("clip_strip_voice") and "Audio:" in probe:
+            print(f"  removing voices from clip {k + 1} of {len(clips)}…")
+            sound = ["-i", str(strip_voice(c["path"], work / f"novoice{k}.wav")), "-map", "2:a"]
         seg = work / f"seg{k}.mp4"
         r = subprocess.run([ff, "-y", "-loglevel", "error", "-i", c["path"], "-loop", "1", "-i", str(work / f"badge{k}.png"), *sound[:-2],
                             "-filter_complex",

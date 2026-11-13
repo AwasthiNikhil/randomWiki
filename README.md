@@ -143,7 +143,8 @@ and/or links from TikTok, Instagram, Facebook, YouTube or Reddit (one video, a p
 clips are joined, number 1 last, with their own sound and a rank badge. Each clip plays whole (only clips of 4 to 30
 seconds are taken, as many as fit the channel's maximum video length), clips with captions or a channel stamp on
 screen are left out (macOS only), search results must name the subject in their title, and a clip is never used twice
-on a channel. Settings also takes a list of accounts to draw from every time (TikTok accounts, YouTube channels or
+on a channel. "Remove human voices from clips" takes talking, narration and singing out of each clip's sound and
+keeps the music and other sounds. Settings also takes a list of accounts to draw from every time (TikTok accounts, YouTube channels or
 playlists); Facebook and Instagram can't be browsed, so paste single video links from them. From the command line: `./rw clips "funny cats" --count 5`. These are other people's videos:
 each is credited in the description, but credit is not permission, and platforms can remove or demonetise reposts.
 

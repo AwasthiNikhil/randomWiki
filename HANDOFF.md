@@ -60,7 +60,9 @@ Not tested: links from TikTok / Instagram / Facebook / Reddit, a profile or play
 scheduled runs on a clips channel, uploading one.
 Since then: clips play whole (4-30 s), text-on-screen clips are dropped (ocr.swift), hashtag results must name the
 subject in the title, and channels have a `clip_sources` list (a TikTok account was listed and downloaded in a test;
-its clips were then dropped for on-screen text). Known gaps: topic match is by title words only; small or brief
+its clips were then dropped for on-screen text). Voice removal (Demucs, `clip_strip_voice`) was tested with a known sentence mixed over a clip's music: recognised
+before, only music after; about a quarter of a clip's length to process. Nobody has listened to the result.
+Known gaps: topic match is by title words only; small or brief
 stamps and emoji overlays pass the text check; letting Gemini watch and rate candidates is the real fix. The video's dialog still shows the explainer editor (narration,
 visuals), which doesn't apply; re-render is refused. No per-clip trimming or reordering yet; each clip is its first
 N seconds. Only YouTube is searched by words; other sites have no usable search in yt-dlp, so they need links.

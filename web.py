@@ -70,6 +70,8 @@ def save_brand(new):
         b["topics"] = [str(t).strip()[:40] for t in new["topics"] if str(t).strip()][:12]
     if new.get("idea_source") in ("mix", "topics", "trending", "wikipedia"):
         b["idea_source"] = new["idea_source"]
+    if "clip_strip_voice" in new:
+        b["clip_strip_voice"] = bool(new["clip_strip_voice"])
     if "clip_sources" in new:
         b["clip_sources"] = [u for u in (str(x).strip()[:300] for x in new["clip_sources"]) if re.match(r"https?://", u)][:20]
     if new.get("video_type") in ("explainer", "clips"):

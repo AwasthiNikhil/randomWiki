@@ -450,6 +450,7 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
               <label class="radio"><input type="radio" name="vtype" value="clips"> <b>Clip countdowns</b>: type what to search YouTube Shorts for, or paste links to videos from TikTok, Facebook, Instagram, YouTube or Reddit. The most viewed clips are joined, number 1 last, with their own sound. Each clip plays whole (4 to 30 seconds), and clips with captions or a channel stamp on screen are left out.</label>
             </div>
             <label>Accounts to take clips from <small>one link per line: TikTok accounts, YouTube channels or playlists. Their latest videos are considered every time. Facebook and Instagram can't be browsed, only single video links pasted in the Make box.</small><textarea name="clip_sources" rows="3" placeholder="https://www.tiktok.com/@someaccount"></textarea></label>
+            <label class="check"><input type="checkbox" name="clip_strip_voice"> Remove human voices from clips <span class="hint" style="margin:0">talking, narration and singing are taken out; music and other sounds stay. Adds roughly the clip's length in processing time.</span></label>
             <span class="hint" style="margin:0">Clip countdowns use other people's videos. Each is credited in the description, but that is not permission: platforms can remove or demonetise reposted clips.</span>
             <label style="max-width:320px">Minimum interest score <output id="scoreOut"></output><input type="range" name="min_score" min="1" max="10" step="1"></label>
             <label style="max-width:320px">Maximum video length <small>seconds</small><input type="number" name="max_seconds" min="20" max="175"></label>
@@ -1520,7 +1521,7 @@ async function loadSettings() {
   $("#cloneConsent").checked = !!S.clone_consent;
   document.querySelectorAll("[name=mode]").forEach(r => r.checked = r.value === (S.mode || "auto"));
   document.querySelectorAll("[name=vtype]").forEach(r => r.checked = r.value === (S.video_type || "explainer"));
-  F("clip_sources").value = (S.clip_sources || []).join("\n");
+  F("clip_sources").value = (S.clip_sources || []).join("\n"); F("clip_strip_voice").checked = !!S.clip_strip_voice;
   sampleState(j.voice_sample);
   if (!j.clone_ready) document.querySelector("[name=vEngine][value=clone]").disabled = true;
   syncEngine();
@@ -1569,7 +1570,7 @@ function collect() {
   S = {...S, channel: F("channel").value, tagline: F("tagline").value, outro_line: F("outro_line").value, logo_text: F("logo_text").value,
     hashtags: F("hashtags").value.split(",").map(x => x.trim()).filter(Boolean), voice: F("voice").value, voice_speed: +F("voice_speed").value,
     music_volume: +F("music_volume").value, voice_engine: document.querySelector("[name=vEngine]:checked")?.value || "kokoro",
-    clone_consent: $("#cloneConsent").checked, mode: document.querySelector("[name=mode]:checked")?.value || "auto", video_type: document.querySelector("[name=vtype]:checked")?.value || "explainer", clip_sources: F("clip_sources").value.split("\n").map(x => x.trim()).filter(Boolean),
+    clone_consent: $("#cloneConsent").checked, mode: document.querySelector("[name=mode]:checked")?.value || "auto", video_type: document.querySelector("[name=vtype]:checked")?.value || "explainer", clip_strip_voice: F("clip_strip_voice").checked, clip_sources: F("clip_sources").value.split("\n").map(x => x.trim()).filter(Boolean),
     topics: F("topics").value.split(",").map(x => x.trim()).filter(Boolean), idea_source: document.querySelector("[name=ideaSrc]:checked")?.value || "mix", min_score: +F("min_score").value, max_seconds: +F("max_seconds").value, llm: $("#llmSel").value, gemini_model: $("#gemSel").value, claude_model: $("#clSel").value,
     ai: document.querySelector("[name=aiPick]:checked")?.value || "local", publish_to: [...document.querySelectorAll("[data-pub]:checked")].map(c => c.dataset.pub),
     prompts: Object.fromEntries([...document.querySelectorAll("[data-prompt]")].map(t => [t.dataset.prompt, t.value])),
