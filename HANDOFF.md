@@ -1,0 +1,82 @@
+# Handoff: state as of 2026-11-13, and what's next
+
+Read `CLAUDE.md` first (layout, rules, pipeline). This file is the snapshot of where things stand and the two
+projects the owner wants next. Everything below is committed on `main`; the last push was `aa60906`.
+
+## What exists today
+- **One box to make a video** from a question, topic, paragraph or link; **auto or manual mode** (manual stops at a
+  draft: edit script, per-visual timing, motion, callouts (arrows/circles/labels), sound effects, per-video music;
+  then render).
+- **Ideas:** ideabank with drag order; when empty, a mix of fresh angles on the channel's topics and questions behind
+  this week's news in them (Google News + Google Trends RSS, filtered in code by category and fit). Random Wikipedia
+  is still an option, no longer the default.
+- **Research:** Gemini (Google Search, or reads pages it picks) or Claude (web search), else Wikipedia via the local
+  model. Two-step answer check for questions.
+- **Voices:** Kokoro presets, a cloned voice (Chatterbox, consent required), or the owner's own recording.
+- **Media tab:** download video/audio (yt-dlp) and images (direct link, Commons page, a page's og:image), or upload
+  from device; use any of it in a video. Free music and sound effects search via Openverse.
+- **Connectors:** AI model choice (local / Gemini / Claude); stock keys (Pexels, Pixabay); publishing to YouTube,
+  Facebook Page, Instagram (Reels via Meta Graph API), TikTok (inbox upload).
+- **Automation:** macOS launchd job (Settings → Automation) makes and optionally publishes on a schedule.
+- **Studio:** routes for every view, Settings split into Brand / Voice & music / Ideas & videos / Automation, paging
+  and posters for thousands of items.
+
+## Untested or open
+- **Never tried with real accounts or keys:** Claude (only the bad-key path), Facebook, Instagram, TikTok publishing,
+  Pexels and Pixabay (the owner has since saved a stock key in `secrets/stock.json`, so one of those can be tried).
+  The code follows current docs (Graph API v27.0; TikTok Content Posting API, desktop OAuth with hex PKCE on
+  `http://127.0.0.1:8766/callback/`).
+- **Images from galleries/social posts** (Instagram carousels, Reddit galleries, Flickr albums) aren't supported;
+  suggested adding `gallery-dl`, owner hasn't decided.
+- **Still Wikipedia-coupled:** topic brainstorms verify each idea against a Wikipedia intro; research falls back to
+  Wikipedia; auto-picked visuals try Wikipedia lead images first; non-Wikipedia ideas get neutral demand numbers in
+  scoring. Proposed but not approved: a local "web reading" research step (local model suggests URLs, we fetch and
+  read them with trafilatura) as a fallback before Wikipedia, optionally Ollama's web search API.
+- Gemini on the owner's key: Google Search grounding returns quota 429 (falls back to url_context); models are often
+  "high demand" (503), so runs regularly fall back to the local model.
+- The owner rotated (or was told to rotate) their Gemini key after it was once printed in a session.
+
+## Next project 1: workspaces (several YouTube channels, different themes)
+Goal: manage multiple channels from one studio: add a channel, switch between them, each with its own theme.
+
+What is per channel today, as single global files, and must become one set per workspace:
+- `brand.json` (name, colours, fonts, voice, topics, idea source, schedule, publish targets, mode…)
+- `data/randomwiki.db` (ideabank, log, episodes, Queue order), `work/`, `out/`
+- `secrets/token.json` (YouTube sign-in: one Google account can own several channels, each needs its own token),
+  `secrets/meta.json`, `secrets/tiktok.json`
+- the launchd automation job (`com.shortsmachine.auto`), `data/auto.log`
+- brand assets in `brand/` (logo, music, voice sample, fonts)
+
+Probably shared across workspaces: AI keys (Gemini, Claude), stock keys, the YouTube OAuth *client* file
+(`client_secret.json`), the local toolchain, Google Fonts cache, and maybe the Media library (or per workspace with a
+"shared" option — ask the owner).
+
+Main obstacle: `rw.py` builds every path and loads `BRAND` at import time (`ROOT / ...` constants, `BRAND`, `C`).
+A workable route: a workspace root (e.g. `workspaces/<slug>/` holding brand.json, data/, work/, out/, secrets/, brand/)
+selected by `RW_WORKSPACE` env / `--workspace`, resolved once at import; web.py passes it to every subprocess and the
+studio gets a channel switcher (and "New channel" wizard: name, theme/colours, topics, connect YouTube). Migrate the
+current root data into `workspaces/random-wiki/` on first run (like `library/` → `media/` was migrated). One launchd
+job per workspace, or one job that iterates workspaces with their own schedules.
+
+## Next project 2: make it scalable (the owner suggested Next.js)
+Be clear about what's being scaled before choosing tech: one creator with many channels on one Mac, or a hosted
+product for many users? The answer changes everything below, so ask the owner.
+
+What Next.js would and wouldn't replace:
+- It's a good fit for the **studio UI** (`web.html` is one 1.7k-line file of plain JS) and an API layer.
+- The **heavy work must stay Python**: Kokoro/Chatterbox TTS, faster-whisper alignment, PIL+ffmpeg rendering,
+  yt-dlp, trafilatura, the LLM orchestration. A sensible shape is Next.js (UI) → a Python API (e.g. FastAPI) → a job
+  queue → Python workers. Today `web.py` runs one CLI subprocess at a time; that single-job runner and SQLite are the
+  real limits, more than the UI.
+- For a hosted product on top: Postgres instead of SQLite, object storage for media/videos, auth and per-user
+  workspaces, render workers (CPU/GPU), and per-user OAuth with Google's app verification and the YouTube API audit
+  (unaudited apps keep uploads private and are capped at 100 users), plus Meta App Review and TikTok's audit.
+- Suggested order: workspaces first (needed either way, and it's where the path/config assumptions get untangled),
+  then split `rw.py` into modules behind a small Python API with a jobs table/queue, then build the new UI against
+  that API, keeping feature parity with the current studio.
+
+## Useful context
+- The owner works in English but some sites they test are Nepali (e.g. sujitapandey.com.np).
+- The full transcript of the long session that built most of this is in
+  `~/.claude/projects/-Users-nikhilcodewing-projects-randomwiki/86a5ac6d-608e-4d97-93a0-5e3c6f19e265.jsonl` if a
+  detail is missing here (large; search it rather than reading it whole).
