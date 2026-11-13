@@ -7,6 +7,7 @@ data/
 work/
 out/
 library/
+workspaces/
 media/
 
 # local toolchain and model caches (recreated by ./setup.sh)

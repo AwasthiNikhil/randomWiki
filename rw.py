@@ -20,15 +20,31 @@ ROOT = Path(__file__).resolve().parent
 for k, sub in [("HF_HOME", "hf"), ("TORCH_HOME", "torch"), ("XDG_CACHE_HOME", "xdg")]:
     os.environ.setdefault(k, str(ROOT / ".cache" / sub))  # keep every download inside the project
 
-BRAND_FILE = ROOT / "brand.json"  # your settings (git-ignored); seeded from brand.example.json on first run
+# Channels: the first one lives in the project root, the others in workspaces/<slug>/. Each has its own brand.json,
+# data/, work/, out/, brand/ (logo, music, voice sample) and sign-ins; tools, fonts, media/ and API keys are shared.
+# RW_WORKSPACE picks one ("" = the first); the studio remembers the one it last had open.
+ACTIVE_FILE = ROOT / "data" / "active_workspace"
+WS_NAME = os.environ.get("RW_WORKSPACE")
+if WS_NAME is None:
+    WS_NAME = ACTIVE_FILE.read_text().strip() if sys.argv[1:2] == ["web"] and ACTIVE_FILE.exists() else ""
+    if not (ROOT / "workspaces" / WS_NAME).is_dir():
+        WS_NAME = ""  # that channel's folder is gone
+if WS_NAME and not (re.fullmatch(r"[a-z0-9-]+", WS_NAME) and (ROOT / "workspaces" / WS_NAME).is_dir()):
+    raise SystemExit(f"no channel called '{WS_NAME}' (see workspaces/)")
+os.environ["RW_WORKSPACE"] = WS_NAME  # every command we start works on the same channel
+WS = ROOT / "workspaces" / WS_NAME if WS_NAME else ROOT
+BRAND_FILE = WS / "brand.json"  # this channel's settings (git-ignored); seeded from brand.example.json on first run
 if not BRAND_FILE.exists():
     import shutil
     shutil.copy(ROOT / "brand.example.json", BRAND_FILE)
 BRAND = json.loads(BRAND_FILE.read_text())
 C = BRAND["colors"]
-DB = ROOT / "data" / "randomwiki.db"
-WORK, OUT, SECRETS = ROOT / "work", ROOT / "out", ROOT / "secrets"
-MEDIA = ROOT / "media"  # your downloads, kept apart from the videos we make: media/video, media/audio, media/image
+DB = WS / "data" / "shorts.db"
+if (WS / "data" / "randomwiki.db").exists() and not DB.exists():  # the file's name from before the project was renamed
+    (WS / "data" / "randomwiki.db").rename(DB)
+WORK, OUT = WS / "work", WS / "out"
+SECRETS, WS_SECRETS = ROOT / "secrets", WS / "secrets"  # shared keys and the YouTube client file; this channel's sign-ins
+MEDIA = ROOT / "media"  # shared by every channel: your downloads, kept apart from the videos we make: media/video, media/audio, media/image
 MEDIA_KINDS = ("video", "audio", "image")
 LIBRARY = MEDIA / "video"
 if (ROOT / "library").is_dir() and not MEDIA.exists():  # it was library/ (videos only) before audio and images
@@ -1630,7 +1646,7 @@ def tts(text, dest):
 def tts_clone(text, dest):
     """Your cloned voice (Chatterbox, in .venv-clone), then timings from the audio itself."""
     import subprocess, numpy as np, soundfile as sf
-    sample = ROOT / BRAND.get("voice_sample", "brand/voice_sample.wav")
+    sample = WS / BRAND.get("voice_sample", "brand/voice_sample.wav")
     if not sample.exists() or not BRAND.get("clone_consent"):
         raise SystemExit("cloned voice needs a voice sample and your confirmation in Settings → Voice")
     spoken, _ = speakable_map(text)
@@ -1710,7 +1726,7 @@ KOKORO_VOICES = {  # English voices bundled with Kokoro-82M: a* = American, b* =
 
 def google_fonts():
     """The Google Fonts catalogue (family, category, popularity), cached for a week in data/."""
-    cache = DB.parent / "google_fonts.json"
+    cache = ROOT / "data" / "google_fonts.json"
     if not cache.exists() or time.time() - cache.stat().st_mtime > 7 * 86400:
         d = get_json("https://fonts.google.com/metadata/fonts")
         cache.write_text(json.dumps([{"family": f["family"], "category": f["category"], "popularity": f["popularity"]}
@@ -1814,7 +1830,7 @@ def render(meta, words, audio_path, duration, out_path, frame_at=None):
     bg = Image.new("RGB", (W, H), C["bg"])
     d = ImageDraw.Draw(bg)
     d.rounded_rectangle((60, 66, 150, 156), 20, fill=C["accent"])
-    logo, mark = ROOT / BRAND.get("logo", "brand/logo.png"), BRAND.get("logo_text", "?")[:2]
+    logo, mark = WS / BRAND.get("logo", "brand/logo.png"), BRAND.get("logo_text", "?")[:2]
     if BRAND.get("logo") and logo.exists():  # uploaded logo image, fitted into the mark
         lm = Image.open(logo).convert("RGBA")
         lm.thumbnail((78, 78), Image.LANCZOS)
@@ -2020,7 +2036,7 @@ def render(meta, words, audio_path, duration, out_path, frame_at=None):
 
     ff = imageio_ffmpeg.get_ffmpeg_exe()
     work = WORK / str(meta.get("pageid", ""))
-    music = {"none": None, "own": work / "music.m4a"}.get(meta.get("music"), ROOT / BRAND["music"])
+    music = {"none": None, "own": work / "music.m4a"}.get(meta.get("music"), WS / BRAND["music"])
     sfx = [(work / srcs[k][1]["sfx"], starts[k]) for k in range(n) if srcs[k][1].get("sfx") and (work / srcs[k][1]["sfx"]).is_file()]
     cmd = [ff, "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}",
            "-r", str(FPS), "-i", "-", "-i", str(audio_path)]
@@ -2466,7 +2482,7 @@ def download_picture(url):
 SCHEDULE_DEFAULTS = {"enabled": False, "times": ["09:00"], "days": [0, 1, 2, 3, 4, 5, 6], "upload": True,
                      "publish": "private", "publish_time": "15:00", "fallback": "wikipedia", "fallback_arg": "",
                      "pick": "order"}  # pick: "order" = top of the Queue (ready videos), "newest" = the video this run made
-LAUNCH_LABEL = "com.shortsmachine.auto"
+LAUNCH_LABEL = "com.shortsmachine.auto" + (f".{WS_NAME}" if WS_NAME else "")  # one job per channel
 LAUNCH_PLIST = Path.home() / "Library" / "LaunchAgents" / f"{LAUNCH_LABEL}.plist"
 AUTO_LOG = DB.parent / "auto.log"
 
@@ -2478,7 +2494,7 @@ def schedule_settings():
 def notify(msg):
     import subprocess
     safe = msg.replace("\\", "").replace('"', "'")[:200]
-    subprocess.run(["osascript", "-e", f'display notification "{safe}" with title "Shorts Machine"'], capture_output=True)
+    subprocess.run(["osascript", "-e", f'display notification "{safe}" with title "{BRAND["channel"].replace(chr(34), "")[:40]}"'], capture_output=True)
 
 
 def schedule_apply():
@@ -2499,7 +2515,7 @@ def schedule_apply():
         plistlib.dump({"Label": LAUNCH_LABEL, "ProgramArguments": ["/bin/bash", str(ROOT / "rw"), "auto"],
                        "WorkingDirectory": str(ROOT), "StartCalendarInterval": intervals,
                        "StandardOutPath": str(AUTO_LOG), "StandardErrorPath": str(AUTO_LOG),
-                       "EnvironmentVariables": {"PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"}}, f)
+                       "EnvironmentVariables": {"RW_WORKSPACE": WS_NAME, "PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"}}, f)
     r = subprocess.run(["launchctl", "bootstrap", domain, str(LAUNCH_PLIST)], capture_output=True, text=True)
     if r.returncode:
         raise SystemExit(f"launchctl refused the job: {r.stderr.strip()}")
@@ -2531,6 +2547,8 @@ def auto(con, dry_run=False):
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
         raise SystemExit("another automated run is still going; skipping this one")
+    turn = open(ROOT / "data" / "render.lock", "w")
+    fcntl.flock(turn, fcntl.LOCK_EX)  # channels scheduled for the same minute take turns instead of rendering at once
     sch = schedule_settings()
     print(f"=== automated run {time.strftime('%Y-%m-%d %H:%M')}" + (" (dry run)" if dry_run else ""))
     try:
@@ -2621,7 +2639,7 @@ def youtube(scope):
     from google.oauth2.credentials import Credentials
     from google_auth_oauthlib.flow import InstalledAppFlow
     from googleapiclient.discovery import build
-    tok = SECRETS / "token.json"
+    tok = WS_SECRETS / "token.json"
     creds = Credentials.from_authorized_user_file(tok) if tok.exists() else None
     if creds and not creds.has_scopes([scope]):
         print("  YouTube needs an extra permission; a browser window will ask you to allow it")
@@ -2640,7 +2658,7 @@ def youtube(scope):
 
 def youtube_status():
     """'none' (no client file), 'client' (ready to connect) or 'connected'."""
-    return ("connected" if (SECRETS / "token.json").exists() else "client") if (SECRETS / "client_secret.json").exists() else "none"
+    return ("connected" if (WS_SECRETS / "token.json").exists() else "client") if (SECRETS / "client_secret.json").exists() else "none"
 
 
 def save_youtube_client(text):
@@ -2664,7 +2682,7 @@ def save_youtube_client(text):
 
 def youtube_disconnect():
     """Revoke the app's access at Google and forget the sign-in."""
-    tok = SECRETS / "token.json"
+    tok = WS_SECRETS / "token.json"
     if tok.exists():
         t = json.loads(tok.read_text())
         try:
@@ -2712,8 +2730,8 @@ def unpublish(con, ep, keep_local=False):
 
 # ---------- publishing: YouTube, Facebook, Instagram, TikTok ----------
 GRAPH = "https://graph.facebook.com/v27.0/"
-META_FILE = SECRETS / "meta.json"  # {token, page_id, page_name, ig_id, ig_user}: a Page token doesn't expire
-TIKTOK_FILE = SECRETS / "tiktok.json"  # {client_key, client_secret, access_token, expires, refresh_token, user}
+META_FILE = WS_SECRETS / "meta.json"  # {token, page_id, page_name, ig_id, ig_user}: a Page token doesn't expire
+TIKTOK_FILE = WS_SECRETS / "tiktok.json"  # {client_key, client_secret, access_token, expires, refresh_token, user}
 TIKTOK_API = "https://open.tiktokapis.com/v2/"
 TIKTOK_REDIRECT = "http://127.0.0.1:8766/callback/"  # register exactly this in the TikTok app
 PLATFORMS = {"youtube": "YouTube", "facebook": "Facebook", "instagram": "Instagram", "tiktok": "TikTok"}
@@ -2723,7 +2741,7 @@ def secret(path, data=None):
     """Read (or write, owner-only) a JSON file in secrets/."""
     if data is None:
         return json.loads(path.read_text()) if path.exists() else {}
-    SECRETS.mkdir(exist_ok=True)
+    path.parent.mkdir(exist_ok=True)
     path.write_text(json.dumps(data))
     path.chmod(0o600)
 
@@ -3093,7 +3111,7 @@ def main():
     sc = sub.add_parser("score"); sc.add_argument("--all", action="store_true")
     wb = sub.add_parser("web"); wb.add_argument("--port", type=int, default=8765); wb.add_argument("--no-open", action="store_true")
     args = ap.parse_args()
-    for d in (DB.parent, WORK, OUT, SECRETS):
+    for d in (ROOT / "data", DB.parent, WORK, OUT, SECRETS, WS_SECRETS, WS / "brand"):
         d.mkdir(exist_ok=True)
     con = db()
     if args.cmd == "web":

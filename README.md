@@ -123,9 +123,18 @@ A local web UI. It's bound to 127.0.0.1 and runs the same commands as the CLI, s
 - **Connectors:** the AI model that writes (local, Gemini, Claude) and where videos are published (YouTube, Facebook, Instagram, TikTok).
 - **Settings:** Brand (channel, colours, Google Fonts, with a real-frame preview), Voice & music, Videos (thresholds) and Automation.
 
-Every view has its own address, so refreshing or bookmarking keeps your place: `#/ideabank`, `#/settings/voice`, `#/video/<id>` and so on.
+Every view has its own address, so refreshing or bookmarking keeps your place: `/ideabank`, `/settings/voice`, `/video/<id>` and so on.
 
 It stays quick with thousands of videos: lists show 60 at a time and load more as you scroll, cards use small poster images (`out/.posters/`, made once per video), the list data is trimmed and gzipped, and a video's full details load only when you open it.
+
+## Several channels
+The menu next to the channel name switches between channels and has "New channel…". Each channel has its own brand,
+voice, topics, ideabank, videos, schedule and platform sign-ins (connect YouTube once per channel and pick that channel
+on Google's screen). AI keys, stock keys, the YouTube client file, fonts and the Media tab are shared. The studio shows
+one channel at a time and restarts itself when you switch (not while a command is running); scheduled runs happen in
+the background for every channel whichever one is open, taking turns if they fall on the same minute. Your first
+channel lives in the project folder itself, later ones in `workspaces/<name>/`; deleting a channel means deleting its
+folder (turn its schedule off first). On the command line, `RW_WORKSPACE=<name> ./rw …` works on that channel.
 
 ## CLI
 ```
@@ -202,11 +211,12 @@ In the studio go to **Settings → Automation**: turn it on, pick up to 4 times 
 | `setup.sh` | builds the local toolchain |
 | `PRIVACY.md` | privacy policy (served by GitHub Pages for the OAuth screen) |
 | `brand/` | fonts, logo, music (git-ignored) |
-| `data/randomwiki.db` | page log (git-ignored) |
+| `data/shorts.db` | page log (git-ignored) |
 | `work/<pageid>/` | images, voice, `meta.json` with script, title, description and credits (git-ignored) |
 | `out/NNN-slug.mp4` | finished videos (git-ignored) |
 | `media/` | video, audio and images you downloaded (`video/`, `audio/`, `image/`), each with a `.json` of its source (git-ignored; was `library/`) |
 | `secrets/` | API keys, OAuth files and platform tokens (git-ignored) |
+| `workspaces/<name>/` | every channel after the first: its own `brand.json`, `data/`, `work/`, `out/`, `brand/` and sign-ins (git-ignored) |
 
 ## Licences of what gets used
 Wikipedia text is CC BY-SA 4.0. Images come from Wikimedia Commons and Openverse (CC/public domain), NASA (public domain) and The Met (CC0), and each one is credited in the YouTube description, along with the text sources. Fonts come from Google Fonts (SIL OFL or Apache, with the licence saved next to each font). The Kokoro voice model is Apache-2.0.

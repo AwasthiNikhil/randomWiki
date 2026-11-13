@@ -25,6 +25,8 @@ header { grid-column: 1 / -1; display: flex; align-items: center; gap: 14px; pad
 .logo { width: 34px; height: 34px; border-radius: 8px; background: var(--accent); color: var(--bg); display: grid; place-items: center; font: 24px Anton; }
 .brand { font: 24px Anton; letter-spacing: .5px; }
 .brand small { font: 500 13px Inter; color: var(--muted); margin-left: 8px; letter-spacing: 0; }
+#wsSel { color: var(--text); max-width: 220px; }
+#wsName { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
 .stats { margin-left: auto; display: flex; gap: 18px; color: var(--muted); font-size: 13px; }
 .stats b { color: var(--text); font-weight: 600; }
 
@@ -305,18 +307,20 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
   <header>
     <div class="logo">?</div>
     <div class="brand" id="brand">RANDOM WIKI<small>studio</small></div>
+    <select id="wsSel" class="btn" aria-label="Channel"></select>
+    <form id="wsNew" hidden><input id="wsName" placeholder="Name of the new channel" maxlength="40" required> <button class="btn primary">Create</button></form>
     <div class="stats" id="stats"></div>
   </header>
 
   <main>
     <nav class="tabs" aria-label="Sections">
-      <a class="tab on" href="#/episodes" data-route="episodes">Episodes</a>
-      <a class="tab" href="#/ideabank" data-route="ideabank" id="queueTab">Ideabank</a>
-      <a class="tab" href="#/queue" data-route="queue" id="publishTab">Queue</a>
-      <a class="tab" href="#/media" data-route="media" id="libraryTab">Media</a>
-      <a class="tab" href="#/log" data-route="log">Log</a>
-      <a class="tab" href="#/connectors" data-route="connectors">Connectors</a>
-      <a class="tab" href="#/settings" data-route="settings">Settings</a>
+      <a class="tab on" href="/episodes" data-route="episodes">Episodes</a>
+      <a class="tab" href="/ideabank" data-route="ideabank" id="queueTab">Ideabank</a>
+      <a class="tab" href="/queue" data-route="queue" id="publishTab">Queue</a>
+      <a class="tab" href="/media" data-route="media" id="libraryTab">Media</a>
+      <a class="tab" href="/log" data-route="log">Log</a>
+      <a class="tab" href="/connectors" data-route="connectors">Connectors</a>
+      <a class="tab" href="/settings" data-route="settings">Settings</a>
     </nav>
     <section id="episodes">
       <div class="toolbar">
@@ -357,10 +361,10 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
     <section id="settings" hidden>
       <div class="settings">
         <nav class="snav" aria-label="Settings">
-          <a href="#/settings/brand" data-group="brand">Brand</a>
-          <a href="#/settings/voice" data-group="voice">Voice &amp; music</a>
-          <a href="#/settings/content" data-group="content">Ideas &amp; videos</a>
-          <a href="#/settings/automation" data-group="automation">Automation</a>
+          <a href="/settings/brand" data-group="brand">Brand</a>
+          <a href="/settings/voice" data-group="voice">Voice &amp; music</a>
+          <a href="/settings/content" data-group="content">Ideas &amp; videos</a>
+          <a href="/settings/automation" data-group="automation">Automation</a>
         </nav>
         <form class="sform" id="sform" onsubmit="return false" autocomplete="off">
           <div class="savebar"><button class="btn primary" id="sSave" type="button">Save</button><span class="hint" id="sState"></span></div>
@@ -449,7 +453,7 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
                 <label style="flex:1;min-width:min(220px,100%)">If the ideabank is empty, find an idea from
                   <input id="schArg" placeholder="A topic or a link. Empty = your channel topics and what's trending in them"></label>
               </div>
-              <label class="check"><input type="checkbox" id="schUp"> Publish after making <span class="hint" style="margin:0">to the platforms ticked in <a href="#/connectors">Connectors</a></span></label>
+              <label class="check"><input type="checkbox" id="schUp"> Publish after making <span class="hint" style="margin:0">to the platforms ticked in <a href="/connectors">Connectors</a></span></label>
               <div id="schPick" style="display:grid;gap:6px;padding-left:24px">
                 <span class="hint">Each run publishes</span>
                 <label class="radio"><input type="radio" name="schPick" value="order"> the next video in your <b>Queue</b> (top first)</label>
@@ -601,9 +605,9 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
     <section id="library" hidden>
       <div class="mediawrap">
         <nav class="snav" aria-label="Media">
-          <a href="#/media/video" data-kind="video">Video <span class="count" id="mc_video"></span></a>
-          <a href="#/media/audio" data-kind="audio">Audio <span class="count" id="mc_audio"></span></a>
-          <a href="#/media/image" data-kind="image">Images <span class="count" id="mc_image"></span></a>
+          <a href="/media/video" data-kind="video">Video <span class="count" id="mc_video"></span></a>
+          <a href="/media/audio" data-kind="audio">Audio <span class="count" id="mc_audio"></span></a>
+          <a href="/media/image" data-kind="image">Images <span class="count" id="mc_image"></span></a>
         </nav>
         <div style="min-width:0">
           <div class="explore">
@@ -710,9 +714,28 @@ function termLine(text, cls) {
   if (atBottom) out.scrollTop = out.scrollHeight;
 }
 
-let channelName = "Shorts Machine", brandMusicVolume = 0.08;
+let channelName = "Shorts Machine", brandMusicVolume = 0.08, wsSlug = null;
+// ---------------- channels: each has its own brand, ideas, videos and sign-ins; the studio shows one at a time ----------------
+async function switchChannel(body) {
+  if (!await post("/api/workspace", body)) { $("#wsSel").value = wsSlug; $("#wsNew").hidden = true; return; }
+  for (let i = 0; i < 40; i++) {  // the studio restarts on the other channel; wait until it answers as that one
+    await new Promise(r => setTimeout(r, 500));
+    try { if ((await (await fetch("/api/job?since=999999999")).json()).workspace !== wsSlug) break; } catch {}
+  }
+  location.href = body.name ? "/settings/brand" : "/episodes";
+}
+$("#wsSel").onchange = e => {
+  const v = e.target.value;
+  $("#wsNew").hidden = v !== "+";
+  if (v === "+") $("#wsName").focus(); else switchChannel({slug: v});
+};
+$("#wsNew").onsubmit = e => { e.preventDefault(); switchChannel({name: $("#wsName").value}); };
 async function loadPages() {
   const j = await (await fetch("/api/pages")).json();
+  if (wsSlug !== null && wsSlug !== j.workspace) return location.reload();  // the channel was changed in another tab
+  wsSlug = j.workspace;
+  if (document.activeElement !== $("#wsSel"))
+    $("#wsSel").innerHTML = j.workspaces.map(w => `<option value="${esc(w.slug)}"${w.slug === wsSlug ? " selected" : ""}>${esc(w.name)}</option>`).join("") + `<option value="+">＋ New channel…</option>`;
   pages = j.pages;
   $("#brand").innerHTML = esc(j.brand.channel.toUpperCase()) + "<small>studio</small>";
   brandOutro = j.brand.outro_line || ""; brandMusicVolume = j.brand.music_volume ?? 0.08;
@@ -1266,7 +1289,7 @@ document.addEventListener("click", async e => {
     renderLog();
   }
   else if (t.dataset.ef) { epFilter = t.dataset.ef; renderEpisodes(); }
-  else if (t.dataset.id) location.hash = "#/video/" + t.dataset.id;
+  else if (t.dataset.id) go("/video/" + t.dataset.id);
   else if (t.dataset.cmd) exec(t.dataset.cmd);
   else if (t.dataset.upload) { dlg.close(); exec(`upload --ep ${+t.dataset.upload}` + publishArg()); }
   else if (t.dataset.make) exec(`run ${quote(t.dataset.make)}`);
@@ -1364,22 +1387,28 @@ $("#stop").onclick = () => post("/api/stop");
 $("#prompt").onsubmit = e => { e.preventDefault(); const c = $("#cmd").value.trim(); if (c) exec(c.replace(/^(\.\/)?rw\s+/, "")).then(ok => ok && ($("#cmd").value = "")); };
 dlg.addEventListener("close", () => {
   const v = dlg.querySelector("video"); if (v) v.pause();
-  if (location.hash.startsWith("#/video/")) history.replaceState(null, "", tabHash);  // closing a video goes back to its tab
+  if (location.pathname.startsWith("/video/")) history.replaceState(null, "", tabPath);  // closing a video goes back to its tab
 });
 
-// ---------------- routes: #/episodes, #/ideabank, #/queue, #/library, #/log, #/connectors, #/settings/<group>, #/video/<pageid> ----------------
+// ---------------- routes: /episodes, /ideabank, /queue, /media/<kind>, /log, /connectors, /settings/<group>, /video/<pageid> ----------------
 const ROUTES = {episodes: "episodes", ideabank: "queue", queue: "publish", media: "library", log: "log", connectors: "connectors", settings: "settings"};
-let tabHash = "#/episodes";
+let tabPath = "/episodes";
+if (location.hash.startsWith("#/")) history.replaceState(null, "", location.hash.slice(1));  // old #/ bookmarks
+function go(path) { history.pushState(null, "", path); route(); }
+document.addEventListener("click", e => {  // in-app links change the address without reloading the page
+  const a = e.target.closest("a[href^='/']");
+  if (!a || a.target || e.metaKey || e.ctrlKey || e.shiftKey || e.button) return;
+  e.preventDefault(); go(a.getAttribute("href"));
+});
 function route() {
-  let [name, arg] = location.hash.replace(/^#\/?/, "").split("/");
-  if (name === "library") { name = "media"; arg = "video"; }  // the old address
+  let [name, arg] = location.pathname.slice(1).split("/");
   if (name === "video") {
-    if (pages.some(p => p.pageid == arg)) openDetail(arg); else history.replaceState(null, "", tabHash);
+    if (pages.some(p => p.pageid == arg)) openDetail(arg); else history.replaceState(null, "", tabPath);
     return;
   }
   if (dlg.open) dlg.close();
   const r = ROUTES[name] ? name : "episodes";
-  tabHash = location.hash && ROUTES[name] ? location.hash : "#/episodes";
+  tabPath = ROUTES[name] ? location.pathname : "/episodes";
   document.querySelectorAll(".tab").forEach(a => { a.classList.toggle("on", a.dataset.route === r); a.toggleAttribute("aria-current", a.dataset.route === r); });
   Object.entries(ROUTES).forEach(([k, id]) => $("#" + id).hidden = k !== r);
   if ((r === "settings" || r === "connectors") && !S) loadSettings();
@@ -1399,7 +1428,7 @@ function route() {
   }
   document.title = `${$(".tab.on").textContent.replace(/ \(\d+\)$/, "")} · ${channelName} studio`;
 }
-window.addEventListener("hashchange", route);
+window.addEventListener("popstate", route);
 
 
 // ---------------- microphone recording (narration and voice samples) ----------------

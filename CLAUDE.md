@@ -1,9 +1,10 @@
 # Shorts Machine
 
 A local, self-hosted tool that turns anything (a question, a topic, a paragraph, a link) into a branded, narrated
-YouTube Short, and publishes it. One creator, one Mac, runs offline except for the services it calls. The owner's
-channel is "Random Wiki" (repo: github.com/AwasthiNikhil/shorts-machine). See `HANDOFF.md` for current state and
-what's next; `README.md` is the user-facing manual.
+YouTube Short, and publishes it. One creator, one Mac, several channels, runs offline except for the services it
+calls. The project is "Shorts Machine"; "Random Wiki" is only the brand of the owner's first channel (repo:
+github.com/AwasthiNikhil/shorts-machine). See `HANDOFF.md` for current state and what's next; `README.md` is the
+user-facing manual.
 
 ## Rules from the owner (always)
 - **Git author is AwasthiNikhil only.** No `Co-Authored-By: Claude` or any Claude attribution in commits or PRs, even
@@ -30,16 +31,28 @@ what's next; `README.md` is the user-facing manual.
 | `rw.py` (~3.2k lines) | everything: CLI, pipeline, LLM calls, sources, rendering, publishing, automation. Sections are marked `# ---------- name ----------` |
 | `sources.py` | non-Wikipedia text sources: web pages (trafilatura), RSS/Atom, Hacker News, arXiv, NASA APOD, link discovery |
 | `web.py` | the studio server (stdlib `ThreadingHTTPServer`, 127.0.0.1:8765). Runs CLI commands as subprocesses (`ALLOWED`), one at a time, and streams their output |
-| `web.html` | the whole studio UI: one file, plain JS, no build step. Hash routes (`#/episodes`, `#/ideabank`, `#/queue`, `#/media/<kind>`, `#/log`, `#/connectors`, `#/settings/<group>`, `#/video/<pageid>`) |
+| `web.html` | the whole studio UI: one file, plain JS, no build step. Real paths via the History API (`/episodes`, `/ideabank`, `/queue`, `/media/<kind>`, `/log`, `/connectors`, `/settings/<group>`, `/video/<pageid>`); web.py serves the page for each of them, and one click handler turns `<a href="/…">` into `go(path)` |
 | `clone_tts.py` | Chatterbox voice cloning, run in its own `.venv-clone` (it pins its own torch) |
 | `rw` | wrapper: runs `rw.py` with `.venv/bin/python` |
 | `setup.sh` | builds the local toolchain (uv, Python 3.12, deps; `--clone` adds Chatterbox) |
 | `brand.json` | the owner's settings (git-ignored), seeded from `brand.example.json` |
-| `data/randomwiki.db` | SQLite, one table `pages` (every idea/page seen; see below) |
+| `data/shorts.db` | SQLite, one table `pages` (every idea/page seen; see below) |
 | `work/<pageid>/` | per video: `meta.json` (script, title, images with timing/motion/overlays/sfx, music, credits, description), images, voice, music, sfx |
 | `out/NNN-slug.mp4` | rendered videos; `out/.posters/` small JPEG stills for the grids |
 | `media/{video,audio,image}/` | the owner's downloads and uploads, each with a `.json` sidecar (was `library/`; migrated automatically) |
+| `workspaces/<slug>/` | every channel after the first (see Channels below) |
 | `secrets/` | OAuth and keys: `client_secret.json`, `token.json` (YouTube), `gemini_api_key`, `anthropic_api_key`, `stock.json`, `meta.json`, `tiktok.json` |
+
+## Channels (workspaces)
+The first channel lives in the project root (`WS == ROOT`; its DB and `meta.json` files hold absolute paths, so it was
+never moved); others live in `workspaces/<slug>/`. `RW_WORKSPACE` picks one ("" = the first); rw.py resolves it once at
+import into `WS_NAME` / `WS`. Per channel (under `WS`): `brand.json`, `data/` (DB, `auto.log`, previews), `work/`,
+`out/`, `brand/` (logo, music, voice sample), `secrets/` (`WS_SECRETS`: `token.json`, `meta.json`, `tiktok.json`), and
+its own launchd job (`com.shortsmachine.auto[.<slug>]`). Shared (under `ROOT`): toolchain, caches, `brand/fonts/`,
+`media/`, `secrets/` (AI and stock keys, `client_secret.json`), `data/gemini_usage.json`, `data/google_fonts.json`.
+The studio shows one channel: `POST /api/workspace` (`switch_workspace()` in web.py) writes `data/active_workspace`
+and re-execs the server, refusing while a job runs; `rw web` starts on the remembered channel. Scheduled runs of
+different channels queue on `data/render.lock`. To test, make a throwaway channel folder and delete it after.
 
 `pages` columns: pageid, title, url, source, status, score, reason, ep, video_path, video_id (YouTube), created,
 updated, potential, rank (ideabank order), via, origin, ref, upload_rank (Queue order), posts (JSON: other platforms).
@@ -78,6 +91,5 @@ yes/no judgements and at obeying "skip X" instructions: make it quote or label, 
   `pkill -f "rw.py web"; (export GEMINI_API_KEY="$(zsh -ic 'printf %s "$GEMINI_API_KEY"' | tail -n1)"; nohup ./rw web --no-open > <scratch>/web.log 2>&1 &)`
 - After editing `web.html`, syntax-check the script: extract `<script>…</script>` and `node --check` it. A broken
   script blanks the whole studio.
-- Verify UI changes in the browser (Claude in Chrome); reload with a changed query string (`/?v=2#/…`), since a
-  hash-only navigation keeps the old page.
+- Verify UI changes in the browser (Claude in Chrome) with a full page load of the path (`/settings/brand`).
 - Ollama must be running for anything that calls the local model.

@@ -1,7 +1,7 @@
 # Handoff: state as of 2026-11-13, and what's next
 
-Read `CLAUDE.md` first (layout, rules, pipeline). This file is the snapshot of where things stand and the two
-projects the owner wants next. Everything below is committed on `main`; the last push was `aa60906`.
+Read `CLAUDE.md` first (layout, rules, pipeline). This file is the snapshot of where things stand and the
+project the owner wants next. Everything below is committed on `main`; the last push was `aa60906`.
 
 ## What exists today
 - **One box to make a video** from a question, topic, paragraph or link; **auto or manual mode** (manual stops at a
@@ -18,7 +18,8 @@ projects the owner wants next. Everything below is committed on `main`; the last
 - **Connectors:** AI model choice (local / Gemini / Claude); stock keys (Pexels, Pixabay); publishing to YouTube,
   Facebook Page, Instagram (Reels via Meta Graph API), TikTok (inbox upload).
 - **Automation:** macOS launchd job (Settings → Automation) makes and optionally publishes on a schedule.
-- **Studio:** routes for every view, Settings split into Brand / Voice & music / Ideas & videos / Automation, paging
+- **Channels:** several channels, one open at a time, each with its own brand, ideas, videos, schedule and sign-ins.
+- **Studio:** a real address for every view, Settings split into Brand / Voice & music / Ideas & videos / Automation, paging
   and posters for thousands of items.
 
 ## Untested or open
@@ -36,29 +37,25 @@ projects the owner wants next. Everything below is committed on `main`; the last
   "high demand" (503), so runs regularly fall back to the local model.
 - The owner rotated (or was told to rotate) their Gemini key after it was once printed in a session.
 
-## Next project 1: workspaces (several YouTube channels, different themes)
-Goal: manage multiple channels from one studio: add a channel, switch between them, each with its own theme.
+## Done: channels (workspaces) and real routes
+Several channels from one studio; see "Channels" in `CLAUDE.md` for how it works. Routes are real paths now
+(`/episodes`, not `#/episodes`). `data/randomwiki.db` was renamed `data/shorts.db`.
 
-What is per channel today, as single global files, and must become one set per workspace:
-- `brand.json` (name, colours, fonts, voice, topics, idea source, schedule, publish targets, mode…)
-- `data/randomwiki.db` (ideabank, log, episodes, Queue order), `work/`, `out/`
-- `secrets/token.json` (YouTube sign-in: one Google account can own several channels, each needs its own token),
-  `secrets/meta.json`, `secrets/tiktok.json`
-- the launchd automation job (`com.shortsmachine.auto`), `data/auto.log`
-- brand assets in `brand/` (logo, music, voice sample, fonts)
+Tested: routes (click, back, reload, old `#/` bookmarks, video dialog), creating a channel and switching both ways in
+the browser, isolation of the new channel's folder, `RW_WORKSPACE` on the CLI, selftest.
+Not tested: a second channel's YouTube sign-in, making a video in a second channel, per-channel launchd jobs and the
+shared `render.lock` (only the job label and paths were checked), refusing to switch while a job runs.
 
-Probably shared across workspaces: AI keys (Gemini, Claude), stock keys, the YouTube OAuth *client* file
-(`client_secret.json`), the local toolchain, Google Fonts cache, and maybe the Media library (or per workspace with a
-"shared" option — ask the owner).
+Open:
+- The project folder is still `~/projects/randomwiki`. Renaming it breaks the absolute paths in the first channel's DB
+  (`video_path`) and `work/*/meta.json` (image paths), `.venv` scripts, and the launchd job; it needs a path rewrite
+  and `./setup.sh` again. Owner to decide.
+- No "delete channel" in the studio (delete `workspaces/<slug>/` by hand, after turning its schedule off).
+- AI model choice (`ai`, `llm`, `gemini_model`) sits in `brand.json`, so it is per channel.
+- Replacing the shared YouTube client file signs out only the open channel; other channels' tokens go stale and need
+  Connect again.
 
-Main obstacle: `rw.py` builds every path and loads `BRAND` at import time (`ROOT / ...` constants, `BRAND`, `C`).
-A workable route: a workspace root (e.g. `workspaces/<slug>/` holding brand.json, data/, work/, out/, secrets/, brand/)
-selected by `RW_WORKSPACE` env / `--workspace`, resolved once at import; web.py passes it to every subprocess and the
-studio gets a channel switcher (and "New channel" wizard: name, theme/colours, topics, connect YouTube). Migrate the
-current root data into `workspaces/random-wiki/` on first run (like `library/` → `media/` was migrated). One launchd
-job per workspace, or one job that iterates workspaces with their own schedules.
-
-## Next project 2: make it scalable (the owner suggested Next.js)
+## Next project: make it scalable (the owner suggested Next.js)
 Be clear about what's being scaled before choosing tech: one creator with many channels on one Mac, or a hosted
 product for many users? The answer changes everything below, so ask the owner.
 
@@ -71,8 +68,7 @@ What Next.js would and wouldn't replace:
 - For a hosted product on top: Postgres instead of SQLite, object storage for media/videos, auth and per-user
   workspaces, render workers (CPU/GPU), and per-user OAuth with Google's app verification and the YouTube API audit
   (unaudited apps keep uploads private and are capped at 100 users), plus Meta App Review and TikTok's audit.
-- Suggested order: workspaces first (needed either way, and it's where the path/config assumptions get untangled),
-  then split `rw.py` into modules behind a small Python API with a jobs table/queue, then build the new UI against
+- Suggested order (workspaces are done): split `rw.py` into modules behind a small Python API with a jobs table/queue, then build the new UI against
   that API, keeping feature parity with the current studio.
 
 ## Useful context

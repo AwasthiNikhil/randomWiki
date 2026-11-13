@@ -57,7 +57,7 @@ def save_brand(new):
     if b["voice_engine"] not in ("kokoro", "clone"):
         raise ValueError("unknown voice engine")
     b["clone_consent"] = bool(new.get("clone_consent"))
-    if b["voice_engine"] == "clone" and not (b["clone_consent"] and (rw.ROOT / "brand" / "voice_sample.wav").exists()):
+    if b["voice_engine"] == "clone" and not (b["clone_consent"] and (rw.WS / "brand" / "voice_sample.wav").exists()):
         raise ValueError("to use your cloned voice, record or upload a voice sample and tick the confirmation")
     b["voice_sample"] = "brand/voice_sample.wav"
     b["music_volume"], b["min_score"], b["max_seconds"] = num("music_volume", 0, 0.5), num("min_score", 1, 10, int), num("max_seconds", 20, 175, int)
@@ -95,6 +95,42 @@ def save_brand(new):
                      "fallback_arg": str(sch.get("fallback_arg", "")).strip()[:300], "pick": sch.get("pick", "order")}
     BRAND_FILE.write_text(json.dumps(b, indent=2) + "\n")
     return b
+
+
+def workspaces():
+    """Every channel as {slug, name}; the first one (in the project root, slug "") on top."""
+    def name(d):
+        try:
+            return json.loads((d / "brand.json").read_text())["channel"]
+        except (OSError, ValueError, KeyError):
+            return d.name
+    return [{"slug": "", "name": name(rw.ROOT)}] + [{"slug": f.parent.name, "name": name(f.parent)}
+                                                     for f in sorted((rw.ROOT / "workspaces").glob("*/brand.json"))]
+
+
+def switch_workspace(body):
+    """Open another channel ({"slug"}) or start a new one ({"name"}), then restart the studio on it: rw.py reads its
+    paths and brand once at import, so a fresh process is the simple, safe way to change them."""
+    if job["proc"] and job["proc"].poll() is None:
+        raise RuntimeError("wait for the running command to finish before changing channel")
+    slug = str(body.get("slug", ""))
+    if body.get("name"):
+        name = str(body["name"]).strip()[:40]
+        slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or f"channel-{len(workspaces()) + 1}"
+        d = rw.ROOT / "workspaces" / slug
+        if d.exists():
+            raise ValueError("there is already a channel with that name")
+        d.mkdir(parents=True)
+        b = json.loads((rw.ROOT / "brand.example.json").read_text())
+        (d / "brand.json").write_text(json.dumps(b | {"channel": name}, indent=2) + "\n")
+    elif slug not in [w["slug"] for w in workspaces()]:
+        raise ValueError("no such channel")
+    rw.ACTIVE_FILE.write_text(slug)
+    os.environ["RW_WORKSPACE"] = slug
+    again = [sys.executable, "-W", "ignore", str(rw.ROOT / "rw.py"), "web", "--no-open", "--port", str(PORT)]
+    threading.Timer(0.3, lambda: os.execv(sys.executable, again)).start()  # after this request has been answered
+
+
 NOISE = re.compile(r"Redirects are currently not supported|warn\(|HF_TOKEN|torch/|WeightNorm|dropout option")
 job = {"proc": None, "cmd": "", "lines": [], "code": None}
 lock = threading.Lock()
@@ -135,7 +171,7 @@ def poster(video):
 def store_audio(raw, kind, pid=None):
     """Convert audio bytes for its use and save it; checks first, so a bad file never replaces a good one."""
     import imageio_ffmpeg, tempfile, uuid
-    dest = {"sample": rw.ROOT / "brand" / "voice_sample.wav", "narration": rw.WORK / str(pid) / "voice_recorded.wav",
+    dest = {"sample": rw.WS / "brand" / "voice_sample.wav", "narration": rw.WORK / str(pid) / "voice_recorded.wav",
             "music": rw.WORK / str(pid) / "music.m4a", "sfx": rw.WORK / str(pid) / f"sfx-{uuid.uuid4().hex[:8]}.m4a"}[kind]
     staged = dest.with_suffix(".new" + dest.suffix)
     enc = ["-ac", "1", "-ar", "24000"] if kind in ("sample", "narration") else ["-vn", "-ac", "2", "-ar", "48000", "-c:a", "aac", "-b:a", "160k", "-f", "mp4"]
@@ -319,24 +355,24 @@ class H(BaseHTTPRequestHandler):
             except Exception:
                 return self.send(400, {"error": "not an image"})
             im.thumbnail((512, 512))
-            im.save(rw.ROOT / "brand" / "logo.png")
+            im.save(rw.WS / "brand" / "logo.png")
             b["logo"] = "brand/logo.png"
             BRAND_FILE.write_text(json.dumps(b, indent=2) + "\n")
         else:
             if raw[:3] != b"ID3" and raw[:2] not in (b"\xff\xfb", b"\xff\xf3", b"\xff\xf2"):
                 return self.send(400, {"error": "music must be an MP3 file"})
-            (rw.ROOT / b["music"]).write_bytes(raw)
+            (rw.WS / b["music"]).write_bytes(raw)
         return self.send(200, {"ok": True})
 
     def do_GET(self):
         path, _, query = self.path.partition("?")
-        if path == "/":
+        if re.fullmatch(r"/((episodes|ideabank|queue|media|log|connectors|settings)(/[\w-]*)?|video/\d+)?", path):  # every studio page
             return self.send(200, (rw.ROOT / "web.html").read_bytes(), "text/html; charset=utf-8")
         if path == "/api/page":  # ?id=N: one video with everything the editor needs
             got = pages(int((re.search(r"id=(\d+)", query) or [0, 0])[1]))
             return self.send(200, got[0]) if got else self.send(404, {"error": "no such page"})
         if path == "/api/pages":
-            return self.send(200, {"pages": pages(), "brand": brand()})
+            return self.send(200, {"pages": pages(), "brand": brand(), "workspace": rw.WS_NAME, "workspaces": workspaces()})
         if path == "/api/settings":
             try:
                 models = sorted(m["name"] for m in rw.get_json(brand()["ollama_url"] + "/api/tags")["models"])
@@ -365,9 +401,9 @@ class H(BaseHTTPRequestHandler):
                                    "stock": {n: "shell" if os.environ.get(f"{n.upper()}_API_KEY", "").strip() else "saved" if rw.stock_key(n) else "" for n in rw.STOCK},
                                    "schedule": rw.SCHEDULE_DEFAULTS | b.get("schedule", {}), "schedule_loaded": rw.schedule_loaded(),
                                    "auto_log": [l for l in log if l.startswith(("===", "make:", "queue empty", "  done", "  uploaded", "  upload failed", "  publishing failed", "  YouTube", "  Facebook", "  Instagram", "  TikTok"))][-12:],
-                                   "music": (rw.ROOT / b["music"]).is_file(), "voice_sample": (rw.ROOT / "brand" / "voice_sample.wav").is_file(),
+                                   "music": (rw.WS / b["music"]).is_file(), "voice_sample": (rw.WS / "brand" / "voice_sample.wav").is_file(),
                                    "clone_ready": (rw.ROOT / ".venv-clone" / "bin" / "python").exists(),
-                                   "logo": bool(b.get("logo")) and (rw.ROOT / b["logo"]).is_file()})
+                                   "logo": bool(b.get("logo")) and (rw.WS / b["logo"]).is_file()})
         if path == "/api/fonts":
             from urllib.parse import parse_qs
             qs = {k: v[0] for k, v in parse_qs(query).items()}
@@ -381,9 +417,9 @@ class H(BaseHTTPRequestHandler):
         if m and (rw.WORK / m[1] / "voice_recorded.wav").is_file():
             return self.send_file(rw.WORK / m[1] / "voice_recorded.wav", "audio/wav")
         m = re.fullmatch(r"/(data|brand)/(preview\.png|voice_preview\.wav|logo\.png|music\.mp3|voice_sample\.wav)", path)
-        if m and (rw.ROOT / m[1] / m[2]).is_file():
+        if m and (rw.WS / m[1] / m[2]).is_file():
             types = {"png": "image/png", "wav": "audio/wav", "mp3": "audio/mpeg"}
-            return self.send_file(rw.ROOT / m[1] / m[2], types[m[2].rsplit(".", 1)[1]])
+            return self.send_file(rw.WS / m[1] / m[2], types[m[2].rsplit(".", 1)[1]])
         if path == "/api/library":  # ?kind=video|audio|image, plus how many of each
             kind = (re.search(r"kind=(video|audio|image)", query) or [0, "video"])[1]
             return self.send(200, {"items": rw.library_items(kind), "counts": {k: len(rw.library_items(k)) for k in rw.MEDIA_KINDS}})
@@ -395,7 +431,7 @@ class H(BaseHTTPRequestHandler):
         if path == "/api/job":
             since = int((re.search(r"since=(\d+)", query) or [0, 0])[1])
             running = bool(job["proc"] and job["proc"].poll() is None)
-            return self.send(200, {"running": running, "cmd": job["cmd"], "code": job["code"],
+            return self.send(200, {"running": running, "cmd": job["cmd"], "code": job["code"], "workspace": rw.WS_NAME,
                                    "lines": job["lines"][since:], "next": len(job["lines"])})
         if path == "/api/audio/search":  # ?kind=music|sfx&q=…: free tracks and sounds via Openverse
             from urllib.parse import parse_qs
@@ -469,6 +505,8 @@ class H(BaseHTTPRequestHandler):
         try:
             if self.path == "/api/exec":
                 start(str(body.get("cmd", "")))
+            elif self.path == "/api/workspace":  # body: {"slug"} to open a channel, {"name"} to start a new one
+                switch_workspace(body)
             elif self.path == "/api/clear":  # wipe stored terminal output (only the screen while a job runs)
                 with lock:
                     if not (job["proc"] and job["proc"].poll() is None):
@@ -611,9 +649,9 @@ class H(BaseHTTPRequestHandler):
             elif self.path == "/api/remove_brand":  # body: {"kind": "music"|"logo"}
                 b = brand()
                 if body.get("kind") == "music":
-                    (rw.ROOT / b["music"]).unlink(missing_ok=True)
+                    (rw.WS / b["music"]).unlink(missing_ok=True)
                 elif body.get("kind") == "logo":
-                    (rw.ROOT / "brand" / "logo.png").unlink(missing_ok=True)
+                    (rw.WS / "brand" / "logo.png").unlink(missing_ok=True)
                     b.pop("logo", None)
                     BRAND_FILE.write_text(json.dumps(b, indent=2) + "\n")
             elif self.path == "/api/delete_video":  # body: {"pageid"}; keeps the page in the log as skipped
@@ -661,6 +699,8 @@ class H(BaseHTTPRequestHandler):
 
 
 def serve(port=8765, open_browser=True):
+    global PORT
+    PORT = port
     srv = ThreadingHTTPServer(("127.0.0.1", port), H)
     url = f"http://127.0.0.1:{port}"
     print(f"Shorts Machine studio: {url}  (Ctrl+C to stop)")
