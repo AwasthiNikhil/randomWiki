@@ -10,7 +10,7 @@ from pathlib import Path
 import rw
 
 ALLOWED = {"run", "add", "download", "connect", "discover", "upload", "unpublish", "rerender", "log", "score", "selftest", "preview", "voicetest",
-           "auto", "schedule", "clips"}
+           "auto", "schedule", "clips", "clipadd"}
 HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 BRAND_FILE = rw.BRAND_FILE
 HEX = re.compile(r"^#[0-9a-fA-F]{6}$")
@@ -253,7 +253,7 @@ def set_audio_credit(pid, file, item):
 _meta_cache = {}  # path -> (mtime, summary): thousands of videos shouldn't mean thousands of JSON reads per refresh
 
 
-HEAVY = ("images", "yt_description", "potential_info", "audio_credits")  # only the open video needs these
+HEAVY = ("images", "yt_description", "potential_info", "audio_credits", "clips")  # only the open video needs these
 
 
 def pages(pageid=None):
@@ -277,6 +277,7 @@ def pages(pageid=None):
         r["video"] = v.name if r["video_path"] and v.exists() else None
         if not pageid and "images" in r:
             r["cover"] = (r["images"] or [{}])[0].get("file")
+            r["clip_cover"] = next((Path(c["file"]).stem + ".jpg" for c in r.get("clips") or [] if c["use"]), None)
             for k in HEAVY:
                 r.pop(k, None)
     return rows
@@ -287,6 +288,9 @@ def meta_summary(pid, m):
                      narration=m.get("narration", "kokoro"), music=m.get("music", "brand"), music_volume=m.get("music_volume"),
                      ai=m.get("ai") or m.get("gemini"),
                      audio_credits=m.get("audio_credits") or {},
+                     clips=[dict(file=Path(c["path"]).name, title=c.get("title", ""), uploader=c.get("uploader", ""), site=c.get("site", ""),
+                                 url=c.get("url", ""), seconds=c.get("seconds") or c.get("duration") or 0, views=c.get("views", 0),
+                                 use=c.get("use", True)) for c in m.get("clips") or []],
                      images=[{k: v for k, v in i.items() if k != "path"} | {"credit": rw.credit(i), "file": Path(i["path"]).name}
                              for i in m["images"]])
 
@@ -561,6 +565,16 @@ class H(BaseHTTPRequestHandler):
                 meta = rw.WORK / str(pid) / "meta.json"
                 m = json.loads(meta.read_text())
                 m.update(title=title, script=script)
+                meta.write_text(json.dumps(m, indent=2))
+            elif self.path == "/api/clips":  # body: {"pageid", "title", "clips": [{"file", "use"}] in playing order}; client then runs rerender
+                meta = rw.WORK / str(int(body["pageid"])) / "meta.json"
+                m = json.loads(meta.read_text())
+                have = {Path(c["path"]).name: c for c in m.get("clips") or []}
+                order = [have.pop(str(c["file"])) | {"use": bool(c.get("use"))} for c in body["clips"] if str(c.get("file")) in have]
+                title = str(body.get("title", "")).strip()
+                if not 0 < len(title) <= 100 or sum(c["use"] for c in order) < 2:
+                    raise ValueError("give it a title (up to 100 characters) and tick at least two clips")
+                m.update(title=title, clips=order + list(have.values()))  # any clip the page didn't list is kept, at the end
                 meta.write_text(json.dumps(m, indent=2))
             elif self.path == "/api/images":  # body: {"pageid", "images": [ordered list]}; downloads new picks
                 pid = int(body["pageid"])

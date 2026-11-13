@@ -2600,30 +2600,29 @@ def strip_voice(src, dest):
 CLIP_SECONDS = (4, 30)  # a clip is used whole, so it has to be this short
 
 
-def make_clips(con, text, count=5):
-    """Find clips (see clip_candidates) and join up to `count` of them as a countdown. Each is used whole, never cut,
-    so only short ones that fit the channel's maximum video length are taken, and ones with text on screen (captions,
-    channel stamps) are dropped. Each fills the frame over a blurred copy of itself, keeps its own sound and carries
-    its rank. Every clip is credited in the description."""
+CLIP_SPARES = 3  # extra clips fetched beyond the ones used, so you have something to swap in
+
+
+def make_clips(con, text, count=5, draft=None):
+    """Find clips (see clip_candidates) for a countdown. Each is used whole, never cut, so only short ones are taken,
+    and ones with text on screen (captions, channel stamps) are dropped. Up to `count` that fit the channel's maximum
+    video length are marked to use; a few more are kept as spares. Then the video is rendered (render_clips), or in
+    manual mode left as a draft so you can choose and order the clips first."""
     # ponytail: "best" = most viewed, since no model here watches video; let Gemini rate the clips if that isn't enough
-    import subprocess, imageio_ffmpeg
-    from PIL import Image, ImageDraw, ImageFont
-    ensure_fonts()
-    ff = imageio_ffmpeg.get_ffmpeg_exe()
+    import yt_dlp
     query = re.sub(r"https?://\S+", " ", text).strip()
     used_file = DB.parent / "clips_used.json"  # never show the same clip twice on a channel
     used = set(json.loads(used_file.read_text())) if used_file.exists() else set()
     print(f"looking for clips: {text[:80]}")
-    import yt_dlp
     cands = [c for c in clip_candidates(" ".join([text, *(BRAND.get("clip_sources") or [])])) if c["url"] not in used]
     lo, hi = CLIP_SECONDS
-    print(f"  {len(cands)} to choose from; taking up to {count} of the most viewed that are whole in {lo}-{hi}s, "
-          f"have no text on screen, and fit {BRAND['max_seconds']}s together")
+    print(f"  {len(cands)} to choose from; taking the most viewed that are whole in {lo}-{hi}s and have no text on screen: "
+          f"{count} to use (within {BRAND['max_seconds']}s together) and {CLIP_SPARES} spare")
     clips, total, why = [], 0, {"too long or too short": 0, "text on screen": 0, "couldn't be read": 0}
     quiet = type("Quiet", (), {"debug": print_nothing, "warning": print_nothing, "error": print_nothing})()
     with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "logger": quiet, "cachedir": False, "noplaylist": True}) as y:
         for c in cands[:80]:  # ponytail: a fixed cap on how many we look at per run; raise it if runs come up short
-            if len(clips) == count:
+            if len(clips) == count + CLIP_SPARES:
                 break
             try:
                 info = y.extract_info(c["url"], download=False)
@@ -2631,8 +2630,6 @@ def make_clips(con, text, count=5):
                 if not lo <= dur <= hi:
                     why["too long or too short"] += 1
                     used.add(c["url"])  # its length won't change: don't look again
-                    continue
-                if total + dur > BRAND["max_seconds"]:
                     continue
                 path = download(c["url"])
             except (SystemExit, Exception):
@@ -2645,63 +2642,117 @@ def make_clips(con, text, count=5):
                     f.unlink(missing_ok=True)
                 print("  dropped it: text on screen")
                 continue
+            use = sum(x["use"] for x in clips) < count and total + dur <= BRAND["max_seconds"]
+            total += dur * use
             clips.append(c | json.loads(path.with_suffix(".json").read_text())
-                         | {"path": str(path), "found": c["url"], "seconds": dur, "views": c["views"] or info.get("view_count") or 0})
-            total += dur
+                         | {"path": str(path), "found": c["url"], "seconds": dur, "use": use,
+                            "views": c["views"] or info.get("view_count") or 0})
     print("  passed over: " + ", ".join(f"{n} {k}" for k, n in why.items() if n))
-    used_file.write_text(json.dumps(sorted(used)))
-    if len(clips) < 2:
+    used_file.write_text(json.dumps(sorted(used | {c["found"] for c in clips})))
+    if sum(c["use"] for c in clips) < 2:
         raise SystemExit("found fewer than two clips that are short, whole and free of text; try other words, paste links, "
                          "or add accounts to take clips from in Settings")
-    clips.sort(key=lambda c: c["views"])  # count down: the most viewed plays last as number 1
-    title = (f"Top {len(clips)} {query}" if query else f"Top {len(clips)} clips")[:60]
+    clips.sort(key=lambda c: (not c["use"], c["views"]))  # count down: the most viewed plays last as number 1; spares after
+    n = sum(c["use"] for c in clips)
+    title = (f"Top {n} {query}" if query else f"Top {n} clips")[:60]
     pid = sources_id(f"clips:{title}:{time.time()}")
     ep = con.execute("select coalesce(max(ep), 0) + 1 from pages").fetchone()[0]
-    work, out = WORK / str(pid), video_out(ep, title)
-    work.mkdir(parents=True, exist_ok=True)
+    (WORK / str(pid)).mkdir(parents=True, exist_ok=True)
+    m = dict(ep=ep, pageid=pid, origin="clips", article_title=query or title, description="", title=title, script=title + ".",
+             tags=[w for w in re.findall(r"[a-z0-9]+", query.lower()) if len(w) > 2][:5], images=[], url="",
+             narration="none", music="none", clips=clips, yt_description="")
+    (WORK / str(pid) / "meta.json").write_text(json.dumps(m, indent=2))
+    upsert(con, pid, title=title, url="", source="curated", origin="clips", ref=text, reason="clip countdown", status="draft", ep=ep)
+    if BRAND.get("mode") == "manual" if draft is None else draft:
+        print(f"  draft ready: open EP {ep:03d} in the studio to choose and order the clips, then click Render")
+        return pid
+    render_clips(con, m)
+    return pid
+
+
+def clip_add(con, ep, url):
+    """Add one video you chose (any site yt-dlp reads) to a clip countdown; it is used on the next render."""
+    row = con.execute("select * from pages where ep=? and origin='clips'", (ep,)).fetchone()
+    if not row:
+        raise SystemExit(f"episode {ep} is not a clip countdown")
+    meta = WORK / str(row["pageid"]) / "meta.json"
+    m = json.loads(meta.read_text())
+    path = download(url)
+    side = json.loads(path.with_suffix(".json").read_text())
+    if any(c["path"] == str(path) for c in m["clips"]):
+        raise SystemExit("that clip is already in this video")
+    if not side.get("duration") or side["duration"] > 90:
+        raise SystemExit(f"that video is {side.get('duration') or '?'}s long; clips play whole, so add ones under 90 seconds")
+    m["clips"].append(side | {"path": str(path), "found": url, "seconds": side["duration"], "use": True, "views": 0, "picked": True})
+    meta.write_text(json.dumps(m, indent=2))
+    print(f"  added to EP {ep:03d}; open it to set the order, then click Render")
+
+
+def render_clips(con, m):
+    """Join the clips marked `use`, in their saved order (the last one is number 1), into the video. Each fills the
+    frame over a blurred copy of itself, keeps its own sound (or loses its voices, if the channel says so) and
+    carries its rank. Every clip is credited in the description. Pieces are kept, so a reorder re-renders quickly."""
+    import subprocess, imageio_ffmpeg
+    from PIL import Image, ImageDraw, ImageFont
+    ensure_fonts()
+    ff = imageio_ffmpeg.get_ffmpeg_exe()
+    clips = [c for c in m["clips"] if c.get("use", True) and Path(c["path"]).exists()]
+    if len(clips) < 2:
+        raise SystemExit("a countdown needs at least two clips ticked")
+    work = WORK / str(m["pageid"])
+    m["title"] = re.sub(r"^Top \d+ ", f"Top {len(clips)} ", m["title"])  # the title follows the number of clips
+    title, strip = m["title"], bool(BRAND.get("clip_strip_voice"))
     big = ImageFont.truetype(str(ROOT / BRAND["fonts"]["display"]), 150)
     segs = []
     for k, c in enumerate(clips):
+        label, secs = f"#{len(clips) - k}", c.get("seconds") or c.get("duration")
+        seg = work / f"seg-{Path(c['path']).stem}-{len(clips) - k}{'-novoice' if strip else ''}-{C['accent'][1:]}.mp4"
+        segs.append(seg)
+        print(f"  {label}: {c['title'][:60]}")
+        if seg.exists():
+            continue
         badge = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-        d, label = ImageDraw.Draw(badge), f"#{len(clips) - k}"
+        d = ImageDraw.Draw(badge)
         d.rounded_rectangle((40, 130, 40 + int(big.getlength(label)) + 60, 330), 28, fill=C["accent"])
         d.text((70, 230), label, font=big, fill=C["bg"], anchor="lm")
-        badge.save(work / f"badge{k}.png")
+        badge.save(work / "badge.png")
         probe = subprocess.run([ff, "-hide_banner", "-i", c["path"]], capture_output=True, text=True).stderr
         sound = ["-map", "0:a"] if "Audio:" in probe else ["-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo", "-map", "2:a"]
-        if BRAND.get("clip_strip_voice") and "Audio:" in probe:
-            print(f"  removing voices from clip {k + 1} of {len(clips)}…")
-            sound = ["-i", str(strip_voice(c["path"], work / f"novoice{k}.wav")), "-map", "2:a"]
-        seg = work / f"seg{k}.mp4"
-        r = subprocess.run([ff, "-y", "-loglevel", "error", "-i", c["path"], "-loop", "1", "-i", str(work / f"badge{k}.png"), *sound[:-2],
+        if strip and "Audio:" in probe:
+            clean = work / f"novoice-{Path(c['path']).stem}.wav"
+            if not clean.exists():
+                print("    removing voices…")
+                strip_voice(c["path"], clean)
+            sound = ["-i", str(clean), "-map", "2:a"]
+        tmp = seg.with_suffix(".part.mp4")
+        r = subprocess.run([ff, "-y", "-loglevel", "error", "-i", c["path"], "-loop", "1", "-i", str(work / "badge.png"), *sound[:-2],
                             "-filter_complex",
                             f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},boxblur=24[bg];"
                             f"[0:v]scale={W}:{H}:force_original_aspect_ratio=decrease[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2[v0];"
                             f"[v0][1:v]overlay=0:0:shortest=1,fps={FPS},format=yuv420p[v]",
-                            "-map", "[v]", *sound[-2:], "-t", str(c["seconds"]), "-shortest", "-c:v", "libx264", "-preset", "medium", "-crf", "20",
-                            "-c:a", "aac", "-ar", "48000", "-ac", "2", "-b:a", "192k", str(seg)], capture_output=True, text=True)
+                            "-map", "[v]", *sound[-2:], "-t", str(secs), "-shortest", "-c:v", "libx264", "-preset", "medium", "-crf", "20",
+                            "-c:a", "aac", "-ar", "48000", "-ac", "2", "-b:a", "192k", str(tmp)], capture_output=True, text=True)
         if r.returncode:
             raise RuntimeError(f"ffmpeg failed on {c['url']}: {r.stderr[-300:]}")
-        segs.append(seg)
-        print(f"  #{len(clips) - k}: {c['title'][:60]}")
+        tmp.rename(seg)
+    for f in work.glob("seg-*.mp4"):  # pieces no longer in the video
+        if f not in segs:
+            f.unlink()
     (work / "list.txt").write_text("".join(f"file '{s}'\n" for s in segs))
+    row = con.execute("select video_path from pages where pageid=?", (m["pageid"],)).fetchone()
+    out = Path(row["video_path"]) if row and row["video_path"] else video_out(m["ep"], title)
     OUT.mkdir(exist_ok=True)
     if subprocess.run([ff, "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", str(work / "list.txt"),
                        "-c", "copy", "-movflags", "+faststart", str(out)]).returncode:
         raise RuntimeError("ffmpeg could not join the clips")
-    tags = [w for w in re.findall(r"[a-z0-9]+", query.lower()) if len(w) > 2][:5]
     credits = [f"#{len(clips) - k}: \"{c['title'][:80]}\" by {c.get('uploader') or 'unknown'} ({c.get('site') or 'web'}): {c['url']}"
                for k, c in enumerate(clips)]
-    m = dict(ep=ep, pageid=pid, origin="clips", article_title=query or title, description="", title=title, script=title + ".",
-             tags=tags, images=[], url="", narration="none", music="none", clips=clips,
-             yt_description="\n".join([title + ".", "", f"{BRAND['channel']}: {BRAND['tagline']}", "", "CLIPS", *credits, "",
-                                       " ".join("#" + re.sub(r"\W", "", t) for t in BRAND["hashtags"] + tags[:3])])[:4900])
+    m["script"] = title + "."
+    m["yt_description"] = "\n".join([title + ".", "", f"{BRAND['channel']}: {BRAND['tagline']}", "", "CLIPS", *credits, "",
+                                     " ".join("#" + re.sub(r"\W", "", t) for t in BRAND["hashtags"] + m["tags"][:3])])[:4900]
     (work / "meta.json").write_text(json.dumps(m, indent=2))
-    used_file.write_text(json.dumps(sorted(used | {c["found"] for c in clips})))
-    upsert(con, pid, title=title, url="", source="curated", origin="clips", ref=text, reason="clip countdown",
-           status="rendered", ep=ep, video_path=str(out))
+    upsert(con, m["pageid"], title=title, status="rendered", video_path=str(out))
     print(f"  done: {out}")
-    return pid
 
 
 def sources_id(key):
@@ -2804,7 +2855,7 @@ def auto(con, dry_run=False):
         if dry_run:
             return
         if clips_channel():
-            pid = make_clips(con, sch["fallback_arg"] or random_topic())
+            pid = make_clips(con, sch["fallback_arg"] or random_topic(), draft=False)  # nobody is there to pick clips
         elif row:
             pid = row["pageid"]
         elif not sch["fallback_arg"]:  # nothing set for empty runs: your topics and what's trending in them
@@ -2853,7 +2904,7 @@ def rerender(con, ep, repick_images=False, narration=None):
     if row["status"] == "uploaded":
         raise SystemExit(f"episode {ep} is already on YouTube; a re-render can't replace it there")
     if row["origin"] == "clips":
-        raise SystemExit("a clip countdown can't be edited and re-rendered yet; make a new one instead")
+        return render_clips(con, json.loads((WORK / str(row["pageid"]) / "meta.json").read_text()))
     m = json.loads((WORK / str(row["pageid"]) / "meta.json").read_text())
     print(f"[{ep:03d}] re-rendering {m['article_title']}")
     m.pop("potential", None)
@@ -3339,6 +3390,8 @@ def main():
     lg = sub.add_parser("log"); lg.add_argument("n", nargs="?", type=int, default=30)
     sub.add_parser("selftest")
     sub.add_parser("preview")
+    ca = sub.add_parser("clipadd", help="add one video (a link) to a clip countdown")
+    ca.add_argument("url"); ca.add_argument("--ep", type=int, required=True)
     cl = sub.add_parser("clips", help="a countdown of clips: words to search YouTube for, and/or links from any site")
     cl.add_argument("items", nargs="+"); cl.add_argument("--count", type=int, default=5, choices=range(2, 11))
     au = sub.add_parser("auto"); au.add_argument("--dry-run", action="store_true")
@@ -3432,6 +3485,8 @@ def main():
             print("everything is scored (use --all to rescore)")
     elif args.cmd == "upload":
         upload_pending(con, args.publish_at, args.ep)
+    elif args.cmd == "clipadd":
+        clip_add(con, args.ep, args.url)
     elif args.cmd == "clips" or (args.cmd == "run" and clips_channel()):
         make_clips(con, " ".join(args.items) if args.cmd == "clips" else args.input or random_topic(), getattr(args, "count", 5))
         if getattr(args, "upload", False):

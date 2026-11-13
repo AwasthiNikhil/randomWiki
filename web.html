@@ -231,12 +231,39 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
 .snav a { color: var(--muted); padding: 8px 12px; border-radius: 8px; font-weight: 500; }
 .snav a:hover { text-decoration: none; color: var(--text); background: var(--panel); }
 .snav a.on { color: var(--text); background: var(--panel2); box-shadow: inset 2px 0 0 var(--accent); }
-.savebar { position: sticky; top: -20px; z-index: 2; display: flex; gap: 12px; align-items: center; background: var(--bg); padding: 8px 0 12px; }
+.savebar { position: sticky; top: -20px; z-index: 2; display: flex; gap: 12px; align-items: center; background: var(--bg); padding: 8px 0 10px; }
+.savebar .shead { flex: 1; min-width: 0; }
+.sform > .ch-sub { margin: -4px 0 14px; }
 .savebar .hint { margin: 0; }
-.conn { display: grid; gap: 14px; max-width: 1180px; }
+.conn { display: grid; gap: 14px; max-width: 760px; min-width: 0; }
+.shead { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.shead .ch { margin: 0; }
+.scope { font-size: 11px; font-weight: 600; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+.scope.all { border-style: dashed; }
+.snav h6 { margin: 10px 12px 2px; font-size: 10px; letter-spacing: 1px; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); gap: 10px; }
+.sform label.tile { position: relative; display: grid; gap: 4px; align-content: start; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; cursor: pointer; color: var(--text); font-size: 14px; }
+.tile input { position: absolute; opacity: 0; pointer-events: none; }
+.tile:has(input:checked) { border-color: var(--accent); background: var(--panel); box-shadow: inset 3px 0 0 var(--accent); }
+.tile:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+.tile small { color: var(--muted); font-size: 12.5px; line-height: 1.45; opacity: 1 !important; }
+body[data-vtype=clips] [data-for=explainer], body[data-vtype=explainer] [data-for=clips], body:not([data-vtype]) [data-for=clips] { display: none !important; }
+.note { border: 1px dashed var(--line); border-radius: 10px; padding: 10px 14px; color: var(--muted); font-size: 13px; }
+.cliplist { display: grid; gap: 6px; }
+.cliprow { display: grid; grid-template-columns: 34px 46px minmax(0, 1fr) auto auto auto; gap: 10px; align-items: center; padding: 6px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); cursor: grab; }
+.cliprow.off { opacity: .55; }
+.cliprow.over { border-color: var(--accent); }
+.cliprow .rank { font: 20px Anton; color: var(--accent); text-align: center; }
+.cliprow .play { padding: 0; border: 0; background: var(--bg); cursor: pointer; width: 46px; height: 64px; border-radius: 6px; overflow: hidden; }
+.cliprow .play img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cinfo { display: grid; gap: 2px; min-width: 0; }
+.cinfo b { font-weight: 600; font-size: 13px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.cinfo .hint { margin: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.cliprow label { display: flex; gap: 6px; align-items: center; font-size: 13px; cursor: pointer; }
+.cliprow label input { accent-color: var(--accent); width: 16px; height: 16px; }
 .ch { font: 22px Anton; letter-spacing: .4px; margin: 10px 0 0; }
 .ch-sub { margin: -8px 0 0; max-width: 760px; }
-.cgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); gap: 14px; align-items: start; }
+.cgrid { display: grid; gap: 12px; }
 .ccard { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; display: grid; gap: 10px; min-width: 0; }
 .ccard.chosen { border-color: var(--accent); }
 .ccard label { display: grid; gap: 5px; font-size: 13px; color: var(--muted); }
@@ -361,18 +388,19 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
     <section id="settings" hidden>
       <div class="settings">
         <nav class="snav" aria-label="Settings">
-          <a href="/settings/brand" data-group="brand">Brand</a>
-          <a href="/settings/voice" data-group="voice">Voice &amp; music</a>
-          <a href="/settings/content" data-group="content">Ideas &amp; videos</a>
-          <a href="/settings/prompts" data-group="prompts">Prompts</a>
-          <a href="/settings/automation" data-group="automation">Automation</a>
+          <a href="/settings/brand" data-group="brand">Channel</a>
+          <a href="/settings/content" data-group="content">Videos</a>
+          <a href="/settings/voice" data-group="voice" data-for="explainer">Voice &amp; music</a>
+          <a href="/settings/prompts" data-group="prompts" data-for="explainer">Prompts</a>
+          <a href="/settings/automation" data-group="automation">Schedule</a>
         </nav>
         <form class="sform" id="sform" onsubmit="return false" autocomplete="off">
-          <div class="savebar"><button class="btn primary" id="sSave" type="button">Save</button><span class="hint" id="sState"></span></div>
-          <fieldset class="scard" data-group="brand"><legend>Channel</legend>
+          <div class="savebar"><div class="shead"><h2 class="ch" id="sTitle"></h2><span class="scope">Only for <span class="chanName"></span></span></div>
+            <span class="hint" id="sState"></span><button class="btn primary" id="sSave" type="button">Save</button></div>
+          <p class="hint ch-sub" id="sSub"></p>
+          <fieldset class="scard" data-group="brand"><legend>Name and words</legend>
             <label>Channel name<input name="channel" maxlength="40"></label>
             <label>Tagline <small>appears in every YouTube description</small><input name="tagline" maxlength="120"></label>
-            <label>Closing line <small>spoken at the end of every video</small><textarea name="outro_line" maxlength="200" rows="2"></textarea></label>
             <label>Hashtags <small>comma separated, added to every upload</small><input name="hashtags"></label>
             <div class="inline">
               <label style="width:120px">Logo mark <small>1–2 characters</small><input name="logo_text" maxlength="2"></label>
@@ -395,6 +423,7 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
             </div>
           </fieldset>
           <fieldset class="scard" data-group="voice"><legend>Voice</legend>
+            <label>Closing line <small>spoken at the end of every video</small><textarea name="outro_line" maxlength="200" rows="2"></textarea></label>
             <div style="display:grid;gap:6px">
               <label class="radio"><input type="radio" name="vEngine" value="kokoro"> Preset AI voice (Kokoro): fast</label>
               <label class="radio"><input type="radio" name="vEngine" value="clone"> <b>My voice</b>: cloned from a sample (Chatterbox, a few minutes per video)</label>
@@ -425,8 +454,8 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
             <label style="max-width:320px">Volume under the voice <output id="volOut"></output><input type="range" name="music_volume" min="0" max="0.5" step="0.01"></label>
             <audio id="musicAudio" controls hidden></audio>
           </fieldset>
-          <fieldset class="scard" data-group="prompts"><legend>Prompts</legend>
-            <span class="hint" style="margin:0">The instructions this channel sends to the AI model (Gemini, Claude or the local one, whichever is chosen in Connectors). Change them to change what the channel is about and how it sounds. Under each one is a fixed part that adds the material and asks for the reply in a set shape; the rest of the app reads that shape, so it can't be edited. Scripts are still kept to about 100 to 120 words and fact-checked against what was read.</span>
+          <fieldset class="scard" data-group="prompts"><legend>Themes and prompts</legend>
+            <span class="hint" style="margin:0">Change these to change what the channel is about and how it sounds. Under each one is a fixed part that adds the material and asks for the reply in a set shape; the app reads that shape, so it can't be edited. Scripts are still kept to about 100 to 120 words and fact-checked against what was read.</span>
             <div class="inline" style="flex-wrap:wrap">
               <select id="themeSel" aria-label="Saved themes"></select> <button class="btn" id="themeLoad" type="button">Load</button>
               <input id="themeName" placeholder="Name for a new theme" maxlength="40" style="max-width:220px"> <button class="btn" id="themeSave" type="button">Save as theme</button>
@@ -434,32 +463,47 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
             <span class="hint" style="margin:0">A theme is a saved set of these prompts that any channel can load. Loading only fills the boxes; press Save to use them in this channel.</span>
             <div id="promptList" style="display:grid;gap:14px"></div>
           </fieldset>
-          <fieldset class="scard" data-group="content"><legend>Ideas</legend>
-            <label>Channel topics <small>comma separated: what your channel is about</small><input name="topics" placeholder="science, history, technology, nature"></label>
-            <div style="display:grid;gap:6px"><span class="hint" style="margin:0">When the ideabank is empty, new ideas come from</span>
+          <fieldset class="scard" data-group="content"><legend>What this channel makes</legend>
+            <div class="tiles">
+              <label class="tile"><input type="radio" name="vtype" value="explainer"><b>Narrated explainers</b><small>A question, topic, paragraph or link becomes a researched, voiced video with pictures and captions.</small></label>
+              <label class="tile"><input type="radio" name="vtype" value="clips"><b>Clip countdowns</b><small>Short clips from YouTube, TikTok and other sites, joined as a ranked countdown with their own sound.</small></label>
+            </div>
+          </fieldset>
+          <fieldset class="scard" data-group="content"><legend>Topics</legend>
+            <label><span data-for="explainer">What this channel is about <small>comma separated</small></span>
+              <span data-for="clips">What to search for <small>comma separated. Each is looked up as a YouTube Shorts hashtag: "funny cats" looks in #funnycats. A run with nothing typed picks one of these.</small></span>
+              <input name="topics" placeholder="science, history, technology, nature"></label>
+            <div data-for="explainer" style="display:grid;gap:6px"><span class="hint" style="margin:0">When the ideabank is empty, new ideas come from</span>
               <label class="radio"><input type="radio" name="ideaSrc" value="mix"> <b>A mix</b>: fresh angles on your topics, and questions behind this week's news in them</label>
               <label class="radio"><input type="radio" name="ideaSrc" value="topics"> Your topics only (evergreen)</label>
               <label class="radio"><input type="radio" name="ideaSrc" value="trending"> Trending in your topics only (Google News and Google Trends)</label>
               <label class="radio"><input type="radio" name="ideaSrc" value="wikipedia"> Random Wikipedia pages</label>
             </div>
-            <span class="hint" style="margin:0">Trending ideas skip tragedies, politics, sports results and gossip, and are phrased as questions about the lasting idea behind the news. Every idea is researched when it's made.</span>
+            <span class="hint" data-for="explainer" style="margin:0">Trending ideas skip tragedies, politics, sports results and gossip, and are phrased as questions about the lasting idea behind the news. Every idea is researched when it's made.</span>
+            <label data-for="explainer" style="max-width:320px">Minimum interest score <small>ideas scoring lower are not made</small> <output id="scoreOut"></output><input type="range" name="min_score" min="1" max="10" step="1"></label>
           </fieldset>
-          <fieldset class="scard" data-group="content"><legend>Videos</legend>
-            <div style="display:grid;gap:6px"><span class="hint" style="margin:0">What this channel makes</span>
-              <label class="radio"><input type="radio" name="vtype" value="explainer"> <b>Narrated explainers</b>: researched, scripted, voiced, with pictures and captions</label>
-              <label class="radio"><input type="radio" name="vtype" value="clips"> <b>Clip countdowns</b>: type what to search YouTube Shorts for, or paste links to videos from TikTok, Facebook, Instagram, YouTube or Reddit. The most viewed clips are joined, number 1 last, with their own sound. Each clip plays whole (4 to 30 seconds), and clips with captions or a channel stamp on screen are left out.</label>
-            </div>
-            <label>Accounts to take clips from <small>one link per line: TikTok accounts, YouTube channels or playlists. Their latest videos are considered every time. Facebook and Instagram can't be browsed, only single video links pasted in the Make box.</small><textarea name="clip_sources" rows="3" placeholder="https://www.tiktok.com/@someaccount"></textarea></label>
-            <label class="check"><input type="checkbox" name="clip_strip_voice"> Remove human voices from clips <span class="hint" style="margin:0">talking, narration and singing are taken out; music and other sounds stay. Adds roughly the clip's length in processing time.</span></label>
-            <span class="hint" style="margin:0">Clip countdowns use other people's videos. Each is credited in the description, but that is not permission: platforms can remove or demonetise reposted clips.</span>
-            <label style="max-width:320px">Minimum interest score <output id="scoreOut"></output><input type="range" name="min_score" min="1" max="10" step="1"></label>
-            <label style="max-width:320px">Maximum video length <small>seconds</small><input type="number" name="max_seconds" min="20" max="175"></label>
-            <div style="display:grid;gap:6px"><span class="hint" style="margin:0">When a video is made</span>
-              <label class="radio"><input type="radio" name="mode" value="auto"> <b>Auto</b>: research, script, visuals, voice and render in one go</label>
-              <label class="radio"><input type="radio" name="mode" value="manual"> <b>Manual</b>: stop at a draft so you can edit the script, visuals, motion and sound, then click Render</label>
+          <fieldset class="scard" data-group="content" data-for="clips"><legend>Clips</legend>
+            <label>Accounts to take clips from <small>one link per line: TikTok accounts, YouTube channels or playlists. Their latest videos are considered on every run.</small><textarea name="clip_sources" rows="3" placeholder="https://www.tiktok.com/@someaccount"></textarea></label>
+            <label class="check"><input type="checkbox" name="clip_strip_voice"> Remove human voices from clips <span class="hint" style="margin:0">talking, narration and singing are taken out; music and other sounds stay</span></label>
+            <ul class="hint" style="margin:0;padding-left:18px;display:grid;gap:3px">
+              <li>Clips play whole, so only clips of 4 to 30 seconds are taken.</li>
+              <li>Clips with captions or a channel stamp on screen are left out.</li>
+              <li>Facebook and Instagram can't be browsed: paste links to single videos in the Make box, or add them to a video.</li>
+              <li>These are other people's videos. Each is credited in the description, but that is not permission: platforms can remove or demonetise reposts.</li>
+            </ul>
+          </fieldset>
+          <fieldset class="scard" data-group="content"><legend>Making a video</legend>
+            <label style="max-width:320px">Longest video <small>seconds</small><input type="number" name="max_seconds" min="20" max="175"></label>
+            <div class="tiles">
+              <label class="tile"><input type="radio" name="mode" value="auto"><b>In one go</b>
+                <small data-for="explainer">Research, script, visuals, voice and render without stopping.</small>
+                <small data-for="clips">Take the most viewed clips and render straight away. You can still change the clips afterwards.</small></label>
+              <label class="tile"><input type="radio" name="mode" value="manual"><b>Stop at a draft</b>
+                <small data-for="explainer">Edit the script, visuals, motion and sound first, then click Render.</small>
+                <small data-for="clips">Choose and order the clips yourself first, then click Render.</small></label>
             </div>
           </fieldset>
-          <fieldset class="scard" data-group="automation"><legend>Automation</legend>
+          <fieldset class="scard" data-group="automation"><legend>When to make videos</legend>
             <label class="check"><input type="checkbox" id="schOn"> Make videos automatically on a schedule</label>
             <div id="schBody" style="display:grid;gap:12px">
               <div><div class="hint" style="margin-bottom:6px">Times · up to 4 a day</div>
@@ -467,10 +511,10 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
               <div><div class="hint" style="margin-bottom:6px">Days</div>
                 <div class="seg" id="schDays" role="group" aria-label="Days of the week"></div></div>
               <div class="inline">
-                <label style="flex:1;min-width:min(220px,100%)">If the ideabank is empty, find an idea from
-                  <input id="schArg" placeholder="A topic or a link. Empty = your channel topics and what's trending in them"></label>
+                <label style="flex:1;min-width:min(220px,100%)"><span data-for="explainer">If the ideabank is empty, find an idea from</span><span data-for="clips">Search words or links for every run</span>
+                  <input id="schArg" placeholder="Empty = your channel's topics"></label>
               </div>
-              <label class="check"><input type="checkbox" id="schUp"> Publish after making <span class="hint" style="margin:0">to the platforms ticked in <a href="/connectors">Connectors</a></span></label>
+              <label class="check"><input type="checkbox" id="schUp"> Publish after making <span class="hint" style="margin:0">to the platforms ticked in <a href="/connectors/publishing">Connectors</a></span></label>
               <div id="schPick" style="display:grid;gap:6px;padding-left:24px">
                 <span class="hint">Each run publishes</span>
                 <label class="radio"><input type="radio" name="schPick" value="order"> the next video in your <b>Queue</b> (top first)</label>
@@ -486,20 +530,28 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
             <div class="hint" id="schStatus"></div>
             <div class="inline"><button class="btn sm" type="button" id="schDry">Dry run: what would happen now?</button></div>
             <pre class="schlog" id="schLog" hidden></pre>
-            <div class="hint">Runs as a macOS launchd job, even when the studio is closed. If the Mac is asleep at that time, it runs when it wakes. Keep Ollama running. You get a notification if a run fails. Saving installs or removes <code>~/Library/LaunchAgents/com.shortsmachine.auto.plist</code>.</div>
+            <div class="hint">Runs as a macOS launchd job, even when the studio is closed. If the Mac is asleep at that time, it runs when it wakes. Keep Ollama running. You get a notification if a run fails. Each channel has its own job; saving installs or removes this channel's in <code>~/Library/LaunchAgents/</code>.</div>
           </fieldset>
         </form>
         <div class="spreview">
           <div class="inline"><button class="btn" id="sPreview">Save &amp; preview</button></div>
-          <img id="previewImg" alt="Preview frame using the saved settings">
+          <img id="previewImg" alt="Preview frame using the saved settings" onerror="this.hidden = true" onload="this.hidden = false">
           <div class="hint">Preview draws a real frame from your latest episode. New settings apply to new renders; use <b>Save &amp; re-render</b> on a video to update it.</div>
         </div>
       </div>
     </section>
     <section id="connectors" hidden>
+      <div class="settings nopreview">
+        <nav class="snav" aria-label="Connectors">
+          <a href="/connectors/publishing" data-cgroup="publishing">Publishing</a>
+          <a href="/connectors/ai" data-cgroup="ai">AI model</a>
+          <a href="/connectors/media" data-cgroup="media">Media sources</a>
+        </nav>
       <div class="conn">
-        <h2 class="ch">AI models</h2>
-        <p class="hint ch-sub">Choose the model that researches questions and writes scripts. Scoring ideas always runs on this Mac, so it stays free. If the chosen model fails during a run, the local model takes over.</p>
+       <div class="conn" data-cgroup="ai">
+        <div class="shead"><h2 class="ch">AI model</h2><span class="scope all">Keys: all channels</span><span class="scope">Choice: only for <span class="chanName"></span></span></div>
+        <p class="hint ch-sub">The model that researches questions and writes scripts. Scoring ideas always runs on this Mac, so it stays free. If the chosen model fails during a run, the local model takes over.</p>
+        <div class="note" data-for="clips">Clip countdowns don't use an AI model, so nothing here affects this channel.</div>
         <div class="cgrid">
           <div class="ccard" data-ai="local">
             <div class="chead"><b>On this Mac</b><span class="cstate" id="localState"></span></div>
@@ -530,8 +582,11 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
         </div>
         <span class="hint">Keys from your shell (<code>GEMINI_API_KEY</code>, <code>ANTHROPIC_API_KEY</code>) are used first. Saved keys stay in <code>secrets/</code> on this computer, which scheduled runs need.</span>
 
-        <h2 class="ch">Stock media</h2>
-        <p class="hint ch-sub">Where visuals, music and sound effects come from. The free libraries need no key. With a stock key, its photos and videos appear in the video editor's search and fill in when auto-pick finds nothing in the free libraries.</p>
+       </div>
+       <div class="conn" data-cgroup="media">
+        <div class="shead"><h2 class="ch">Media sources</h2><span class="scope all">All channels</span></div>
+        <div class="note" data-for="clips">Clip countdowns take their clips from the sites you search or link, not from these libraries.</div>
+        <p class="hint ch-sub">Where pictures, music and sound effects for narrated videos come from. The free libraries need no key. With a stock key, its photos and videos appear in the video editor's search and fill in when auto-pick finds nothing in the free libraries.</p>
         <div class="cgrid">
           <div class="ccard">
             <div class="chead"><b>Pexels</b><span class="cstate" id="st_pexels"></span></div>
@@ -559,12 +614,14 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
           </div>
         </div>
 
-        <h2 class="ch">Publishing</h2>
-        <p class="hint ch-sub">Tick where your videos go. <b>Publish</b>, <b>Upload pending</b> and scheduled runs post to every ticked platform at once. If one fails, publishing again retries only that one.</p>
+       </div>
+       <div class="conn" data-cgroup="publishing">
+        <div class="shead"><h2 class="ch">Publishing</h2><span class="scope">Only for <span class="chanName"></span></span></div>
+        <p class="hint ch-sub">Each channel signs in to its own accounts. Tick where this channel's videos go. <b>Publish</b>, <b>Upload pending</b> and scheduled runs post to every ticked platform at once. If one fails, publishing again retries only that one.</p>
         <div class="cgrid">
           <div class="ccard">
             <div class="chead"><b>YouTube</b><span class="cstate" id="ytState"></span></div>
-            <label class="check use"><input type="checkbox" data-pub="youtube"> Publish here <span class="hint" style="margin:0">· uploads private, or public at the time set in Automation</span></label>
+            <label class="check use"><input type="checkbox" data-pub="youtube"> Publish here <span class="hint" style="margin:0">· uploads private, or public at the time set in Settings → Schedule</span></label>
             <div class="hint" id="ytStatus"></div>
             <details id="ytHelp"><summary class="hint" style="cursor:pointer">How to get the client file (about 5 minutes, once)</summary>
               <ol class="hint" style="margin:8px 0 0;padding-left:18px;display:grid;gap:4px">
@@ -616,7 +673,9 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
             <div class="inline"><button class="btn sm primary" type="button" id="ttConnect" hidden>Connect TikTok</button><button class="btn sm danger" type="button" id="ttOff" hidden>Disconnect</button></div>
           </div>
         </div>
-        <span class="hint">Everything here is saved in <code>secrets/</code> on this computer only. Disconnect removes it (and revokes access where the platform allows).</span>
+        <span class="hint">Sign-ins are saved on this computer only, separately for each channel. Disconnect removes them (and revokes access where the platform allows). The YouTube client file is shared by all channels; each channel still signs in on its own.</span>
+       </div>
+      </div>
       </div>
     </section>
     <section id="library" hidden>
@@ -662,9 +721,10 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
         <textarea id="input" class="make" rows="4" placeholder="Ask a question, name a topic, paste a paragraph or a link" aria-label="What to make a video from"></textarea>
         <div class="row" style="margin-top:8px">
           <button class="btn primary" id="makeNow" title="Make it now. Empty: the next idea in the ideabank, else a random page">Make now</button>
-          <button class="btn" id="saveIdea" title="Save it to the ideabank for later">Save idea</button>
+          <button class="btn" id="saveIdea" data-for="explainer" title="Save it to the ideabank for later">Save idea</button>
         </div>
-        <div class="hint">Questions and topics are researched, a paragraph becomes the script, and a link is made into a video. Paste several links, one per line, to save each as an idea. A feed, site or category link fills the ideabank instead. Leave it empty to make the next idea.</div>
+        <div class="hint" data-for="explainer">Questions and topics are researched, a paragraph becomes the script, and a link is made into a video. Paste several links, one per line, to save each as an idea. A feed, site or category link fills the ideabank instead. Leave it empty to make the next idea.</div>
+        <div class="hint" data-for="clips">Words are looked up as a YouTube Shorts hashtag. Links can be single videos (always used) or accounts and playlists, from TikTok, Instagram, Facebook, YouTube or Reddit. Leave it empty to use one of this channel's topics.</div>
       </div>
       <div>
         <h4>Publish</h4>
@@ -731,7 +791,7 @@ function termLine(text, cls) {
   if (atBottom) out.scrollTop = out.scrollHeight;
 }
 
-let channelName = "Shorts Machine", brandMusicVolume = 0.08, wsSlug = null;
+let channelName = "Shorts Machine", brandMusicVolume = 0.08, wsSlug = null, maxSeconds = 58;
 // ---------------- channels: each has its own brand, ideas, videos and sign-ins; the studio shows one at a time ----------------
 async function switchChannel(body) {
   if (!await post("/api/workspace", body)) { $("#wsSel").value = wsSlug; $("#wsNew").hidden = true; return; }
@@ -756,7 +816,9 @@ async function loadPages() {
   pages = j.pages;
   $("#brand").innerHTML = esc(j.brand.channel.toUpperCase()) + "<small>studio</small>";
   brandOutro = j.brand.outro_line || ""; brandMusicVolume = j.brand.music_volume ?? 0.08;
-  channelName = j.brand.channel;
+  channelName = j.brand.channel; maxSeconds = j.brand.max_seconds || 58;
+  document.querySelectorAll(".chanName").forEach(e => e.textContent = channelName);
+  setVtype(j.brand.video_type);
   $(".logo").innerHTML = j.brand.logo ? `<img src="/brand/logo.png?t=${Date.now()}" alt="" style="width:26px;height:26px;object-fit:contain">` : esc(j.brand.logo_text || "?");
   document.documentElement.style.setProperty("--accent", j.brand.colors.accent);
   const n = s => pages.filter(p => p.status === s).length;
@@ -783,7 +845,8 @@ function renderEpisodes() {
     : !shown.length ? `<div class="empty">No videos match.</div>` : `<div class="grid">${shown.map(p => `
     <button class="card" data-id="${p.pageid}">
       <div class="thumb">${p.video ? `<img class="poster" src="/poster/${encodeURIComponent(p.video)}.jpg" alt="" loading="lazy">`
-        : p.cover ? `<img class="poster" src="/work/${p.pageid}/${encodeURIComponent(p.cover)}" alt="" loading="lazy">` : "?"}</div>
+        : p.cover ? `<img class="poster" src="/work/${p.pageid}/${encodeURIComponent(p.cover)}" alt="" loading="lazy">`
+        : p.clip_cover ? `<img class="poster" src="/media/video/${encodeURIComponent(p.clip_cover)}" alt="" loading="lazy">` : "?"}</div>
       <div class="body"><div class="top"><span class="ep">${p.ep ? "EP " + String(p.ep).padStart(3, "0") : "—"}</span>${potBadge(p)}</div>
       <h3>${esc(p.yt_title || p.title)}</h3><span class="chip s-${p.status}">${statusLabel(p.status)}</span></div>
     </button>`).join("")}${moreBtn("ep", matched.length)}</div>`;
@@ -802,10 +865,10 @@ function potDetail(p) {
     <div class="hint">${esc(i.why)} · ${i.views60.toLocaleString()} article views in 60 days · ${i.languages} languages · ${i.seconds}s</div>`;
 }
 
-const ORIGIN_NAMES = {wikipedia: "Wikipedia", web: "Article", hackernews: "Hacker News", arxiv: "arXiv", apod: "NASA APOD", question: "Researched", text: "Your text"};
+const ORIGIN_NAMES = {wikipedia: "Wikipedia", web: "Article", hackernews: "Hacker News", arxiv: "arXiv", apod: "NASA APOD", question: "Researched", text: "Your text", clips: "Clip countdown"};
 const STATUS_LABEL = {queued: "idea", rendered: "in queue", draft: "draft"};
 const statusLabel = st => STATUS_LABEL[st] || st;
-const makeArg = p => ["question", "text"].includes(p.origin) ? p.ref : p.url;  // what `run` needs to make it again
+const makeArg = p => ["question", "text", "clips"].includes(p.origin) ? p.ref : p.url;  // what `run` needs to make it again
 const kTokens = n => n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1) + "k" : String(n);
 const originName = p => ORIGIN_NAMES[p.origin || "wikipedia"] || p.origin;
 
@@ -1093,6 +1156,59 @@ function postLinks(p) {
   let posts = {}; try { posts = JSON.parse(p.posts || "{}"); } catch (e) {}
   return Object.entries(posts).map(([k, v]) => v.url ? ` · <a href="${esc(v.url)}" target="_blank" rel="noopener">${PLATFORM_NAMES[k] || k} ↗</a>` : ` · ${PLATFORM_NAMES[k] || k}: ${esc(v.note || "sent")}`).join("");
 }
+// ---------------- clip countdowns: choose which clips go in and in what order ----------------
+const views = n => n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? Math.round(n / 1e3) + "K" : String(n);
+function clipEditor(p) {
+  return `
+    <h5>YouTube title</h5><input class="edit" id="edTitle" maxlength="100" value="${esc(p.yt_title)}">
+    <h5>Clips <span style="text-transform:none;letter-spacing:0">· tick the ones to use and put them in playing order. The last one ticked is number 1.</span></h5>
+    <div class="cliplist" id="clipList"></div>
+    <div class="hint" id="clipTotal"></div>
+    <div class="vsearch"><input id="clipUrl" placeholder="Add a clip: paste a link to one video (TikTok, Instagram, Facebook, YouTube, Reddit…)" aria-label="Link to a video to add" style="flex:1;min-width:0">
+      <button class="btn" id="clipAdd" type="button">Add clip</button></div>
+    <div class="btns" style="margin-top:12px"><button class="btn primary" id="clipRender" type="button">${p.status === "draft" ? "Render video" : "Save &amp; re-render"}</button>
+    <span class="hint" style="align-self:center">Joins the ticked clips in this order. Clips already prepared are reused, so a reorder is quick.</span></div>`;
+}
+function wireClips(p) {
+  const cl = p.clips.map(c => ({...c})), stem = f => f.replace(/\.[^.]+$/, "");
+  let from = null;
+  const move = (i, j) => { if (j >= 0 && j < cl.length && i !== j) { cl.splice(j, 0, cl.splice(i, 1)[0]); draw(); } };
+  function draw() {
+    const used = cl.filter(c => c.use), total = used.reduce((a, c) => a + c.seconds, 0);
+    let rank = used.length;
+    $("#clipList").innerHTML = cl.map((c, i) => `<div class="cliprow${c.use ? "" : " off"}" draggable="true" data-i="${i}">
+      <span class="rank">${c.use ? "#" + rank-- : "–"}</span>
+      <button class="play" type="button" data-play="${i}" title="Play this clip" aria-label="Play this clip"><img src="/media/video/${encodeURIComponent(stem(c.file))}.jpg" alt="" loading="lazy"></button>
+      <div class="cinfo"><b title="${esc(c.title)}">${esc(c.title || c.file)}</b><span class="hint">${esc([c.uploader, c.site, mmss(c.seconds), c.views ? views(c.views) + " views" : ""].filter(Boolean).join(" · "))}${c.url ? ` · <a href="${esc(c.url)}" target="_blank" rel="noopener">source ↗</a>` : ""}</span></div>
+      <button class="btn icon" type="button" data-up="${i}" ${i ? "" : "disabled"} title="Play earlier" aria-label="Play earlier">↑</button>
+      <button class="btn icon" type="button" data-down="${i}" ${i < cl.length - 1 ? "" : "disabled"} title="Play later" aria-label="Play later">↓</button>
+      <label><input type="checkbox" data-use="${i}" ${c.use ? "checked" : ""}> Use</label></div>`).join("");
+    $("#clipTotal").innerHTML = `${used.length} clip${used.length === 1 ? "" : "s"} ticked, ${mmss(total)} in total`
+      + (total > maxSeconds ? ` · <span style="color:var(--bad)">longer than this channel's longest video, ${maxSeconds}s (Settings → Videos)</span>` : "")
+      + (used.length < 2 ? ` · <span style="color:var(--bad)">tick at least two</span>` : "");
+    $("#clipRender").disabled = running || used.length < 2;
+  }
+  const list = $("#clipList");
+  list.onclick = e => {
+    const d = e.target.closest("button")?.dataset; if (!d) return;
+    if (d.up) move(+d.up, +d.up - 1);
+    else if (d.down) move(+d.down, +d.down + 1);
+    else if (d.play) { const v = $("#dlgBody video"); v.src = "/media/video/" + encodeURIComponent(cl[+d.play].file); v.play(); }
+  };
+  list.onchange = e => { if (e.target.dataset.use) { cl[+e.target.dataset.use].use = e.target.checked; draw(); } };
+  list.ondragstart = e => { from = +e.target.closest(".cliprow").dataset.i; e.dataTransfer.effectAllowed = "move"; };
+  list.ondragover = e => { if (from !== null && e.target.closest(".cliprow")) e.preventDefault(); };
+  list.ondrop = e => { const row = e.target.closest(".cliprow"); if (row && from !== null) { e.preventDefault(); move(from, +row.dataset.i); } from = null; };
+  const save = () => post("/api/clips", {pageid: p.pageid, title: $("#edTitle").value, clips: cl.map(c => ({file: c.file, use: c.use}))});
+  $("#clipRender").onclick = async () => { if (await save()) { dlg.close(); exec(`rerender --ep ${p.ep}`); } };
+  $("#clipAdd").onclick = async () => {
+    const url = $("#clipUrl").value.trim();
+    if (!/^https?:\/\/\S+$/.test(url)) { $("#clipUrl").focus(); return; }
+    if (await save()) { dlg.close(); exec(`clipadd --ep ${p.ep} ${quote(url)}`); termLine("when it's added, open the video again to place it", ""); }
+  };
+  draw();
+}
+
 async function openDetail(id) {
   const p = pages.find(x => x.pageid == id);
   const r = await fetch("/api/page?id=" + p.pageid);  // the list is light; the editor needs the full record
@@ -1101,11 +1217,12 @@ async function openDetail(id) {
   $("#dlgBody").innerHTML = `<div class="detail">
     ${p.video ? `<video src="/video/${encodeURIComponent(p.video)}" controls autoplay playsinline></video>`
       : p.images?.[0]?.file ? `<div class="thumb" style="position:relative"><img src="/work/${p.pageid}/${encodeURIComponent(p.images[0].file)}" alt="" style="width:100%;height:100%;object-fit:cover">
-          <span class="chip s-draft" style="position:absolute;left:12px;top:12px;background:#1f1430">${p.status === "draft" ? "draft · not rendered yet" : "not rendered"}</span></div>` : `<div class="thumb">?</div>`}
+          <span class="chip s-draft" style="position:absolute;left:12px;top:12px;background:#1f1430">${p.status === "draft" ? "draft · not rendered yet" : "not rendered"}</span></div>`
+      : p.clips?.length ? `<video src="/media/video/${encodeURIComponent(p.clips[0].file)}" controls playsinline></video>` : `<div class="thumb">?</div>`}
     <div class="info">
       <div class="ep">${p.ep ? "EP " + String(p.ep).padStart(3, "0") : ""} &nbsp;<span class="chip s-${p.status}">${statusLabel(p.status)}</span></div>
       <h2>${esc(p.yt_title || p.title)}</h2>
-      <div class="sub">${esc(p.title)} · <a href="${esc(p.url)}" target="_blank" rel="noopener">${originName(p)} ↗</a>${yt ? ` · <a href="${yt}" target="_blank" rel="noopener">YouTube ↗</a>` : ""}${postLinks(p)}${p.ai ? ` · AI: ${p.ai.requests} requests, ${kTokens(p.ai.tokens)} tokens` : ""}</div>
+      <div class="sub">${esc(p.title)} · ${p.url ? `<a href="${esc(p.url)}" target="_blank" rel="noopener">${originName(p)} ↗</a>` : originName(p)}${yt ? ` · <a href="${yt}" target="_blank" rel="noopener">YouTube ↗</a>` : ""}${postLinks(p)}${p.ai ? ` · AI: ${p.ai.requests} requests, ${kTokens(p.ai.tokens)} tokens` : ""}</div>
       <div class="btns">
         ${p.status === "rendered" ? `<button class="btn primary" data-upload="${p.ep}">Publish</button>` : ""}
         ${p.status !== "uploaded" ? `<button class="btn" data-remake="${esc(makeArg(p))}">Remake</button>` : ""}
@@ -1115,7 +1232,7 @@ async function openDetail(id) {
       </div>
       ${potDetail(p)}
       ${p.status === "failed" ? `<h5>Error</h5><div class="box">${esc(p.reason)}</div>` : ""}
-      ${p.script && p.status !== "uploaded" ? `
+      ${p.origin === "clips" && p.clips?.length && p.status !== "uploaded" ? clipEditor(p) : p.script && p.status !== "uploaded" ? `
         <h5>YouTube title</h5><input class="edit" id="edTitle" maxlength="100" value="${esc(p.yt_title)}">
         <h5>Narration <span id="edCount" style="text-transform:none;letter-spacing:0"></span></h5>
         <textarea id="edScript">${esc(p.script)}</textarea>
@@ -1170,6 +1287,7 @@ async function openDetail(id) {
   dlg.showModal();
   if ($("#vStrip")) wireVisuals(p);
   if ($("#recOpen")) wireRecorder(p);
+  if ($("#clipList")) wireClips(p);
   const ed = $("#edScript");
   if (ed) { const n = () => $("#edCount").textContent = `· ${ed.value.trim().split(/\s+/).length} words (aim 85–128)`; ed.oninput = n; n(); }
 }
@@ -1183,7 +1301,7 @@ async function poll() {
     $("#dot").className = "dot" + (running ? " run" : "");
     $("#jobLabel").textContent = running ? j.cmd : (j.cmd ? `idle · last: ${j.cmd}` : "idle");
     $("#jobLabel").title = $("#jobLabel").textContent;
-    document.querySelectorAll("[data-cmd], #makeNow, #saveIdea, #upload, #qFind, #libGo, [data-remake], [data-upload], [data-make], [data-rerender], [data-unpubgo]").forEach(b => b.disabled = running);
+    document.querySelectorAll("[data-cmd], #makeNow, #saveIdea, #upload, #qFind, #libGo, [data-remake], [data-upload], [data-make], [data-rerender], [data-unpubgo], #clipRender, #clipAdd").forEach(b => b.disabled = running);
     $("#stop").disabled = !running;
     if (was && !running) {
       loadPages(); if (!$("#library").hidden) loadLibrary();  // e.g. a download just finished
@@ -1429,11 +1547,18 @@ function route() {
   document.querySelectorAll(".tab").forEach(a => { a.classList.toggle("on", a.dataset.route === r); a.toggleAttribute("aria-current", a.dataset.route === r); });
   Object.entries(ROUTES).forEach(([k, id]) => $("#" + id).hidden = k !== r);
   if ((r === "settings" || r === "connectors") && !S) loadSettings();
+  const clipsChannel = document.body.dataset.vtype === "clips";
   if (r === "settings") {
-    const g = ["brand", "voice", "content", "prompts", "automation"].includes(arg) ? arg : "brand";
+    const g = SETTINGS_PAGES[arg] && !(clipsChannel && ["voice", "prompts"].includes(arg)) ? arg : "brand";
     document.querySelectorAll("#sform [data-group]").forEach(f => f.hidden = f.dataset.group !== g);
     document.querySelectorAll(".snav [data-group]").forEach(a => { a.classList.toggle("on", a.dataset.group === g); a.toggleAttribute("aria-current", a.dataset.group === g); });
-    $(".settings").classList.toggle("nopreview", g !== "brand");
+    [$("#sTitle").textContent, $("#sSub").textContent] = SETTINGS_PAGES[g];
+    $("#settings .settings").classList.toggle("nopreview", g !== "brand");
+  }
+  if (r === "connectors") {
+    const g = ["publishing", "ai", "media"].includes(arg) ? arg : "publishing";
+    document.querySelectorAll("#connectors .conn[data-cgroup]").forEach(f => f.hidden = f.dataset.cgroup !== g);
+    document.querySelectorAll(".snav [data-cgroup]").forEach(a => { a.classList.toggle("on", a.dataset.cgroup === g); a.toggleAttribute("aria-current", a.dataset.cgroup === g); });
   }
   if (r === "media") {
     mediaKind = MEDIA_COPY[arg] ? arg : "video";
@@ -1485,8 +1610,19 @@ const COLOR_LABELS = {bg: "Background", panel: "Panels", accent: "Accent", text:
 const FONT_ROLES = {display: "Display · titles, logo, captions", body: "Body · descriptions, credits"};
 const VOICE_GROUPS = {af: "American female", am: "American male", bf: "British female", bm: "British male"};
 const F = n => $("#sform").elements[n];
+$("#sform").addEventListener("change", e => { if (e.target.name === "vtype") setVtype(e.target.value); });  // show that type's settings right away
 function setDirty(d) { $("#sState").innerHTML = d ? `<span class="dirty">Unsaved changes</span>` : "All changes saved"; }
 // ---------------- prompts: this channel's instructions to the model, and themes (saved sets any channel can load) ----------------
+// what the channel makes decides which settings, connectors and Make-box words are shown (CSS: [data-for])
+function setVtype(t) {
+  document.body.dataset.vtype = t === "clips" ? "clips" : "explainer";
+  $("#input").placeholder = t === "clips" ? "Type what to search for (funny cats), or paste video links" : "Ask a question, name a topic, paste a paragraph or a link";
+}
+const SETTINGS_PAGES = {brand: ["Channel", "The name, look and words that go on every video."],
+  content: ["Videos", "What this channel makes, what it's about, and how a video gets made."],
+  voice: ["Voice & music", "Who narrates, and what plays underneath."],
+  prompts: ["Prompts", "The instructions sent to the AI model when it finds ideas and writes scripts."],
+  automation: ["Schedule", "Make and publish videos on their own, even when the studio is closed."]};
 let PROMPTS = [], THEMES = {};
 const fillPrompts = vals => PROMPTS.forEach(p => $(`[data-prompt="${p.key}"]`).value = vals[p.key] || p.default);
 const renderThemes = pick => $("#themeSel").innerHTML = `<option value="">Default prompts</option>` + Object.keys(THEMES).map(n => `<option${n === pick ? " selected" : ""}>${esc(n)}</option>`).join("");

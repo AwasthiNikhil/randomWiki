@@ -31,7 +31,7 @@ user-facing manual.
 | `rw.py` (~3.2k lines) | everything: CLI, pipeline, LLM calls, sources, rendering, publishing, automation. Sections are marked `# ---------- name ----------` |
 | `sources.py` | non-Wikipedia text sources: web pages (trafilatura), RSS/Atom, Hacker News, arXiv, NASA APOD, link discovery |
 | `web.py` | the studio server (stdlib `ThreadingHTTPServer`, 127.0.0.1:8765). Runs CLI commands as subprocesses (`ALLOWED`), one at a time, and streams their output |
-| `web.html` | the whole studio UI: one file, plain JS, no build step. Real paths via the History API (`/episodes`, `/ideabank`, `/queue`, `/media/<kind>`, `/log`, `/connectors`, `/settings/<group>`, `/video/<pageid>`); web.py serves the page for each of them, and one click handler turns `<a href="/…">` into `go(path)` |
+| `web.html` | the whole studio UI: one file, plain JS, no build step. Real paths via the History API (`/episodes`, `/ideabank`, `/queue`, `/media/<kind>`, `/log`, `/connectors/<group>`, `/settings/<group>`, `/video/<pageid>`); web.py serves the page for each of them, and one click handler turns `<a href="/…">` into `go(path)` |
 | `clone_tts.py` | Chatterbox voice cloning, run in its own `.venv-clone` (it pins its own torch) |
 | `rw` | wrapper: runs `rw.py` with `.venv/bin/python` |
 | `setup.sh` | builds the local toolchain (uv, Python 3.12, deps; `--clone` adds Chatterbox) |
@@ -92,6 +92,11 @@ videos skip this check). They are downloaded into `media/video/`, each is fitted
 with a rank badge, and the pieces are joined with their own sound. With `clip_strip_voice` on, `strip_voice()`
 (Demucs `htdemucs`, CPU, model in `.cache/torch`) first removes human voices, speech and singing, from each clip. Used clip links are remembered in the channel's
 `data/clips_used.json`. On a clips channel, `run` and `auto` call it (no input = a random channel topic).
+Three steps: `make_clips()` gathers (the ones to use plus `CLIP_SPARES`, each with `use`; manual mode stops here as a
+draft), `clip_add()` (`./rw clipadd --ep N <link>`) appends one video, `render_clips()` joins the clips marked `use` in
+their saved order (last = number 1) and is what `rerender` runs for these videos. Rendered pieces are kept per clip
+and rank in `work/<id>/seg-*.mp4`, so a reorder is quick. The studio's clip editor (`clipEditor`/`wireClips` in
+web.html) saves order and ticks through `POST /api/clips`.
 **The owner chose to allow other people's clips here**, as an exception to the licence rule below; every clip is
 credited in the description, and publishing rights are theirs to sort out.
 
@@ -101,6 +106,9 @@ credited in the description, and publishing rights are theirs to sort out.
 - **Licences:** only public domain, CC0, CC BY, CC BY-SA (never ND/NC) for anything auto-picked; every image, clip,
   track and sound used is credited in the YouTube description (`description()`), not on screen.
 - AI voice clones need the owner's consent tick; descriptions say "AI voice clone".
+- Settings and Connectors share one layout (left nav, page title with a scope pill saying "Only for <channel>" or
+  "All channels"). Anything that applies to one kind of channel carries `data-for="explainer"` or `data-for="clips"`
+  and is hidden by CSS from `body[data-vtype]` (`setVtype()`); add that attribute to new type-specific controls.
 - UI copy is plain and concrete; no jargon for features. The studio must stay fast with thousands of videos:
   lists render 60 at a time (`paged()`/`moreBtn()`), `/api/pages` is trimmed (heavy fields come from `/api/page?id=`),
   gzipped, and `meta.json` reads are cached by mtime.
