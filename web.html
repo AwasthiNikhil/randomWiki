@@ -364,6 +364,7 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
           <a href="/settings/brand" data-group="brand">Brand</a>
           <a href="/settings/voice" data-group="voice">Voice &amp; music</a>
           <a href="/settings/content" data-group="content">Ideas &amp; videos</a>
+          <a href="/settings/prompts" data-group="prompts">Prompts</a>
           <a href="/settings/automation" data-group="automation">Automation</a>
         </nav>
         <form class="sform" id="sform" onsubmit="return false" autocomplete="off">
@@ -423,6 +424,15 @@ dialog::backdrop { background: #000a; backdrop-filter: blur(3px); }
               <button class="btn sm danger" type="button" id="musicRm">Remove</button></div>
             <label style="max-width:320px">Volume under the voice <output id="volOut"></output><input type="range" name="music_volume" min="0" max="0.5" step="0.01"></label>
             <audio id="musicAudio" controls hidden></audio>
+          </fieldset>
+          <fieldset class="scard" data-group="prompts"><legend>Prompts</legend>
+            <span class="hint" style="margin:0">The instructions this channel sends to the AI model (Gemini, Claude or the local one, whichever is chosen in Connectors). Change them to change what the channel is about and how it sounds. Under each one is a fixed part that adds the material and asks for the reply in a set shape; the rest of the app reads that shape, so it can't be edited. Scripts are still kept to about 100 to 120 words and fact-checked against what was read.</span>
+            <div class="inline" style="flex-wrap:wrap">
+              <select id="themeSel" aria-label="Saved themes"></select> <button class="btn" id="themeLoad" type="button">Load</button>
+              <input id="themeName" placeholder="Name for a new theme" maxlength="40" style="max-width:220px"> <button class="btn" id="themeSave" type="button">Save as theme</button>
+            </div>
+            <span class="hint" style="margin:0">A theme is a saved set of these prompts that any channel can load. Loading only fills the boxes; press Save to use them in this channel.</span>
+            <div id="promptList" style="display:grid;gap:14px"></div>
           </fieldset>
           <fieldset class="scard" data-group="content"><legend>Ideas</legend>
             <label>Channel topics <small>comma separated: what your channel is about</small><input name="topics" placeholder="science, history, technology, nature"></label>
@@ -1413,7 +1423,7 @@ function route() {
   Object.entries(ROUTES).forEach(([k, id]) => $("#" + id).hidden = k !== r);
   if ((r === "settings" || r === "connectors") && !S) loadSettings();
   if (r === "settings") {
-    const g = ["brand", "voice", "content", "automation"].includes(arg) ? arg : "brand";
+    const g = ["brand", "voice", "content", "prompts", "automation"].includes(arg) ? arg : "brand";
     document.querySelectorAll("#sform [data-group]").forEach(f => f.hidden = f.dataset.group !== g);
     document.querySelectorAll(".snav [data-group]").forEach(a => { a.classList.toggle("on", a.dataset.group === g); a.toggleAttribute("aria-current", a.dataset.group === g); });
     $(".settings").classList.toggle("nopreview", g !== "brand");
@@ -1469,9 +1479,28 @@ const FONT_ROLES = {display: "Display · titles, logo, captions", body: "Body ·
 const VOICE_GROUPS = {af: "American female", am: "American male", bf: "British female", bm: "British male"};
 const F = n => $("#sform").elements[n];
 function setDirty(d) { $("#sState").innerHTML = d ? `<span class="dirty">Unsaved changes</span>` : "All changes saved"; }
+// ---------------- prompts: this channel's instructions to the model, and themes (saved sets any channel can load) ----------------
+let PROMPTS = [], THEMES = {};
+const fillPrompts = vals => PROMPTS.forEach(p => $(`[data-prompt="${p.key}"]`).value = vals[p.key] || p.default);
+const renderThemes = pick => $("#themeSel").innerHTML = `<option value="">Default prompts</option>` + Object.keys(THEMES).map(n => `<option${n === pick ? " selected" : ""}>${esc(n)}</option>`).join("");
+$("#themeLoad").onclick = () => { fillPrompts(THEMES[$("#themeSel").value] || {}); setDirty(true); };
+$("#themeSave").onclick = async () => {
+  const name = $("#themeName").value.trim() || $("#themeSel").value, prompts = collect().prompts;
+  if (!name) { $("#themeName").focus(); return; }
+  if (await post("/api/prompt_theme", {name, prompts})) { THEMES[name] = prompts; renderThemes(name); $("#themeName").value = ""; termLine(`theme saved: ${name}`, "good"); }
+};
+$("#promptList").onclick = e => {
+  const k = e.target.dataset.pdef; if (!k) return;
+  $(`[data-prompt="${k}"]`).value = PROMPTS.find(p => p.key === k).default; setDirty(true);
+};
 async function loadSettings() {
   const j = await (await fetch("/api/settings")).json();
   S = j.brand;
+  PROMPTS = j.prompts; THEMES = j.themes;
+  $("#promptList").innerHTML = PROMPTS.map(p => `<div><label>${esc(p.label)} <small>${esc(p.hint)}</small><textarea data-prompt="${p.key}" rows="9"></textarea></label>
+    <details class="hint"><summary>Fixed part, added after your text</summary><pre style="white-space:pre-wrap;margin:6px 0">${esc(p.fixed)}</pre></details>
+    <button class="btn sm" type="button" data-pdef="${p.key}">Back to the default</button></div>`).join("");
+  fillPrompts(S.prompts || {}); renderThemes();
   ["channel", "tagline", "outro_line", "logo_text", "voice_speed", "music_volume", "min_score", "max_seconds"].forEach(k => F(k).value = S[k] ?? "");
   F("logo_text").value = S.logo_text ?? "?";
   F("hashtags").value = (S.hashtags || []).join(", ");
@@ -1535,6 +1564,7 @@ function collect() {
     clone_consent: $("#cloneConsent").checked, mode: document.querySelector("[name=mode]:checked")?.value || "auto",
     topics: F("topics").value.split(",").map(x => x.trim()).filter(Boolean), idea_source: document.querySelector("[name=ideaSrc]:checked")?.value || "mix", min_score: +F("min_score").value, max_seconds: +F("max_seconds").value, llm: $("#llmSel").value, gemini_model: $("#gemSel").value, claude_model: $("#clSel").value,
     ai: document.querySelector("[name=aiPick]:checked")?.value || "local", publish_to: [...document.querySelectorAll("[data-pub]:checked")].map(c => c.dataset.pub),
+    prompts: Object.fromEntries([...document.querySelectorAll("[data-prompt]")].map(t => [t.dataset.prompt, t.value])),
     fonts: {...S.fonts, display_weight: F("display_weight").value}};
   readSchedule();
   return S;

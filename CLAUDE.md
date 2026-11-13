@@ -70,6 +70,11 @@ voice, or the owner's recording; Whisper aligns captions) → `render()` (PIL fr
 at (40,440); Ken Burns/motion, overlays, captions; `audio_mix()` for music and sfx) → `score_video()` → Queue →
 `upload()` publishes to every platform in `publish_to`, remembering each success in `posts`.
 
+Prompts: seven theme-defining prompts are editable per channel (`PROMPTS` in rw.py; Settings → Prompts; saved as
+`prompts` in `brand.json`; themes = saved sets in `prompts/<name>.json`, shared by all channels). `prompt_for(key, …)`
+joins the channel's instructions (or the default) with the constant's fixed part (material + reply format), which is
+never editable because code reads that JSON. The checks (`CHECK_PROMPT`, `ANSWER_PROMPT`, …) are fixed.
+
 LLM layer: `llm(prompt, temperature, local=False)` returns parsed JSON. `writer()` picks gemini/claude/local from
 Connectors; bulk scoring and all checks pass `local=True` (free Ollama, `llama3.1:8b`). The 8B model is unreliable at
 yes/no judgements and at obeying "skip X" instructions: make it quote or label, then decide in code (see

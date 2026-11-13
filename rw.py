@@ -256,6 +256,36 @@ def llm(prompt, temperature=0.7, local=False):
     return json.loads(r["message"]["content"])
 
 
+# The prompts a channel can rewrite in Settings → Prompts (saved as "prompts" in its brand.json):
+# key -> (name, what it is for, the constant holding the default, where that constant's fixed part starts).
+# The fixed part adds the material and the reply format the code reads, so it is shown but never edited.
+PROMPTS = {
+    "script": ("Script from an article", "how a video is written from a Wikipedia page, news article or web page", "SCRIPT_PROMPT", "Article title:"),
+    "question": ("Script that answers a question", "how a video is written from a question or topic and its research; {answer} is the answer found in the research", "QUESTION_PROMPT", "Question or topic:"),
+    "text": ("Script from your own text", "how a video is written from a paragraph you paste", "TEXT_PROMPT", "Title: {title}"),
+    "brainstorm": ("Finding ideas in your topics", "what kind of ideas are suggested when the ideabank is empty", "BRAINSTORM_PROMPT", 'Topic: "{topic}"'),
+    "trend": ("Finding ideas in the news", "how this week's headlines become ideas; {topics} is your channel topics", "TREND_PROMPT", "For each, also say"),
+    "score": ("Which articles are worth a video", "how articles and links are scored 1-10 against your minimum interest score", "SCORE_PROMPT", "{context}"),
+    "visual": ("Choosing what to show", "what the image search looks for, sentence by sentence", "VISUAL_PROMPT", "Main subject:"),
+}
+
+
+def prompt_parts(key):
+    """(default instructions, fixed part) of one editable prompt."""
+    text, mark = globals()[PROMPTS[key][2]], PROMPTS[key][3]
+    i = text.index(mark)
+    return text[:i].strip(), text[i:]
+
+
+def prompt_for(key, **kw):
+    """The text sent to the model: this channel's instructions (or the default), then the fixed part."""
+    head, tail = prompt_parts(key)
+    head = (BRAND.get("prompts") or {}).get(key) or head
+    for k, v in kw.items():  # plain replace: braces the owner types can't break anything
+        head = head.replace("{" + k + "}", str(v))
+    return head + "\n\n" + tail.format(**kw)
+
+
 SCORE_PROMPT = """You choose topics for a YouTube Shorts channel that turns articles (Wikipedia, news, papers, blogs) into 50-second stories.
 Rate how likely this article is to make a viewer think "wait, what?".
 Most random articles (minor species, small villages, obscure athletes, routine politicians, ordinary companies, albums) score 1-4.
@@ -340,7 +370,7 @@ def evaluate(con, p, source, via=None, seed=None):
         return False
     context = (f"\nThe channel is currently exploring topics connected to {seed}. "
                f"The article must still be fascinating on its own, not just related.\n") if seed else ""
-    s = llm(SCORE_PROMPT.format(title=p["title"], text=p.get("extract", "")[:3000], context=context), 0.2, local=True)
+    s = llm(prompt_for("score", title=p["title"], text=p.get("extract", "")[:3000], context=context), 0.2, local=True)
     score = int(s.get("score", 0) or 0)
     ok = score >= BRAND["min_score"]
     upsert(con, p["pageid"], status="queued" if ok else "rejected", score=score,
@@ -400,7 +430,7 @@ def discover_source(con, origin, want=5, arg=None, cands=None):
             continue
         base = dict(title=a["title"], url=a["url"], source=origin if origin in ("rss", "link") else "random",
                     origin=a["origin"], ref=c["ref"], via=arg if origin == "link" else None)
-        s = llm(SCORE_PROMPT.format(title=a["title"], text=a["text"][:3000], context=""), 0.2, local=True)
+        s = llm(prompt_for("score", title=a["title"], text=a["text"][:3000], context=""), 0.2, local=True)
         score = int(s.get("score", 0) or 0)
         ok = score >= BRAND["min_score"]
         upsert(con, pid, status="queued" if ok else "rejected", score=score,
@@ -826,11 +856,13 @@ def question_id(question):
 
 
 BRAINSTORM_PROMPT = """You find ideas for a YouTube Shorts channel of 50-second explainers and surprising true stories.
+Each idea is one specific question or subject a curious viewer would click on: concrete, surprising, with a clear
+payoff. Mix "how", "why" and "what happened" ideas. Only well-documented subjects. Phrase them as open questions or
+subjects, never as claims, so nothing rests on a false premise.
+
 Topic: "{topic}"
 {closeness}
-Suggest {n} video ideas. Each is one specific question or subject a curious viewer would click on: concrete, surprising,
-with a clear payoff. Mix "how", "why" and "what happened" ideas. Only well-documented subjects. Phrase them as open
-questions or subjects, never as claims, so nothing rests on a false premise.
+Suggest {n} video ideas.
 Already covered (suggest different ones): {seen}
 Each idea must be about one real subject that has its own English Wikipedia article.
 Reply as JSON: {{"ideas": [{{"idea": "<question or subject, max 70 characters>", "article": "<exact Wikipedia article title>",
@@ -853,8 +885,8 @@ def brainstorm(con, topic, degree="any", want=5):
     research when the video is made, never from the model's memory."""
     seen = [r["title"] for r in con.execute("select title from pages where via like ? order by updated desc limit 40", (topic + "%",))]
     print(f"brainstorming ideas around '{topic}' with the local model…")
-    r = llm(BRAINSTORM_PROMPT.format(topic=topic, closeness=CLOSENESS.get(degree, CLOSENESS["any"]), n=want * 2,
-                                     seen="; ".join(seen) or "nothing yet"), 0.9, local=True)
+    r = llm(prompt_for("brainstorm", topic=topic, closeness=CLOSENESS.get(degree, CLOSENESS["any"]), n=want * 2,
+                          seen="; ".join(seen) or "nothing yet"), 0.9, local=True)
     score = lambda i: int(m[0]) if (m := re.match(r"\d+", str(i.get("score", "")))) else 0
     ideas = sorted((i for i in r.get("ideas") or [] if isinstance(i, dict) and str(i.get("idea", "")).strip()
                     and str(i.get("article", "")).strip()), key=lambda i: -score(i))[:20]
@@ -894,6 +926,7 @@ TREND_PROMPT = """You find ideas for a YouTube Shorts channel of 50-second expla
 Below are headlines people are reading this week. For the most promising ones, write one open question a curious viewer
 would click, about the lasting science, history or "how does that work" behind the news (e.g. "How do tornado warnings
 work?"), not the news event itself. Never assume claims from the headline are true.
+
 For each, also say what kind of story the HEADLINE is, and how well the question fits the channel's topics.
 
 Headlines:
@@ -941,8 +974,8 @@ def trending(con, want=1):
     items = headlines(topics)
     if not items:
         return []
-    picks = llm(TREND_PROMPT.format(topics=", ".join(topics), n=want + 2,  # a couple spare: some may be made already
-                                    headlines="\n".join(f"{k + 1}. {h}" for k, (h, _) in enumerate(items[:60]))), 0.4, local=True).get("ideas") or []
+    picks = llm(prompt_for("trend", topics=", ".join(topics), n=want + 2,  # a couple spare: some may be made already
+                           headlines="\n".join(f"{k + 1}. {h}" for k, (h, _) in enumerate(items[:60]))), 0.4, local=True).get("ideas") or []
     found = []
     picks = [pk for pk in picks if str(pk.get("kind", "")).lower() not in TREND_SKIP and int(pk.get("fit") or 0) >= 7]  # checked here, not trusted
     for pk in sorted(picks, key=lambda pk: -int(pk.get("fit") or 0)):
@@ -999,12 +1032,12 @@ def add_question(con, question, force=False):
     return pid
 
 
-def write_script(title, text, prompt=None, check=True, answer=""):
+def write_script(title, text, prompt="script", check=True, answer=""):
     s = {}
     for _ in range(6):
         n = len(str(s.get("script", "")).split())
         if n < 40:  # nothing usable yet: fresh draft
-            s = llm((prompt or SCRIPT_PROMPT).format(title=title, text=text[:12000], answer=answer))
+            s = llm(prompt_for(prompt, title=title, text=text[:12000], answer=answer))
         else:  # revise the draft we have; far more reliable than redrafting blind
             action = ("Cut the least important sentences and tighten the rest." if n > 128 else
                       "Add one or two more facts from the article." if n < 85 else "Keep the length.")
@@ -1349,7 +1382,7 @@ def pick_visuals(title, script, dest, own=None, pageimage=None, limit=6, topics=
     images, then Commons, then Openverse. Each image remembers its sentence so it appears when that is spoken."""
     sents = split_sentences(script)
     try:
-        qs = [str(q).strip() for q in llm(VISUAL_PROMPT.format(title=title, sentences="\n".join(
+        qs = [str(q).strip() for q in llm(prompt_for("visual", title=title, sentences="\n".join(
             f"{k + 1}. {x}" for k, x in enumerate(sents))), 0.2).get("queries", [])]
     except Exception:
         qs = []
@@ -2156,13 +2189,13 @@ def make(con, pageid, auto=False):
     upsert(con, pageid, ep=ep)
     try:
         origin = row["origin"] or "wikipedia"
-        prompt, answer = None, ""
+        prompt, answer = "script", ""
         if origin == "wikipedia":
             title, desc, text, pageimage = fetch_article(pageid)
             src = dict(url=page_url(title), own=None)
         elif origin == "question":
             a = research(row["ref"])
-            title, desc, text, pageimage, prompt = a["title"], a["description"], a["text"], None, QUESTION_PROMPT
+            title, desc, text, pageimage, prompt = a["title"], a["description"], a["text"], None, "question"
             answer = find_answer(title, text)
             if not answer and not a["credit"].startswith("Researched from the Wikipedia"):  # web research missed it: try Wikipedia
                 print("  the web research has no clear answer; trying Wikipedia")
@@ -2175,7 +2208,7 @@ def make(con, pageid, auto=False):
             src = dict(url=a["url"], own=None, credit=a["credit"], source_label=a["source_label"], popularity=None,
                        topics=a["titles"])
         elif origin == "text":
-            text, title, desc, pageimage, prompt = row["ref"], row["title"], "", None, TEXT_PROMPT
+            text, title, desc, pageimage, prompt = row["ref"], row["title"], "", None, "text"
             src = dict(url="", own=None, credit=f"Written by {BRAND['channel']}.", source_label=f"Written by {BRAND['channel']}",
                        popularity=None)
             if len(text.split()) < 150:  # a short text: add background notes so the narration has enough to say
@@ -3071,6 +3104,12 @@ def selftest():
     when = datetime.strptime(publish_time_utc("15:00"), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
     assert 2 * 3600 <= (when - datetime.now(timezone.utc)).total_seconds() <= 26 * 3600 + 60
     assert when.astimezone().strftime("%H:%M") == "15:00"
+    for k in PROMPTS:  # every editable prompt splits into instructions + a fixed part that still asks for JSON
+        head, tail = prompt_parts(k)
+        assert head and "Reply as JSON" in tail and "{" not in head.replace("{answer}", "").replace("{topics}", ""), k
+    saved, BRAND["prompts"] = BRAND.get("prompts"), {"script": "Be funny about {title} }{"}
+    assert prompt_for("script", title="T", text="X", answer="").startswith("Be funny about T }{\n\nArticle title: T")
+    BRAND["prompts"] = saved
     print("selftest ok")
 
 

@@ -8,6 +8,7 @@ work/
 out/
 library/
 workspaces/
+prompts/
 media/
 
 # local toolchain and model caches (recreated by ./setup.sh)

@@ -46,6 +46,14 @@ the browser, isolation of the new channel's folder, `RW_WORKSPACE` on the CLI, s
 Not tested: a second channel's YouTube sign-in, making a video in a second channel, per-channel launchd jobs and the
 shared `render.lock` (only the job label and paths were checked), refusing to switch while a job runs.
 
+Also done: Settings → Prompts (per-channel prompt editing with shared themes; tested in the browser on a throwaway
+channel: edit, reset, save theme, load theme, save; not tested: making a video with an edited prompt).
+Limits the owner knows: scripts are still forced to 85-128 words and fact-checked whatever the prompt says;
+`TREND_SKIP` still drops sports/celebrity/politics headlines in code; a prompt can't change the kind of video
+(narrated explainer). The owner's other theme ideas (compilations of funny clips, gameplay clips) need a new video
+type, not a prompt: find clips → rank → cut and join, no narration; and reposting other people's clips conflicts
+with the licence rule in CLAUDE.md. Not built; owner to decide.
+
 Open:
 - The project folder is still `~/projects/randomwiki`. Renaming it breaks the absolute paths in the first channel's DB
   (`video_path`) and `work/*/meta.json` (image paths), `.venv` scripts, and the launchd job; it needs a path rewrite

@@ -93,8 +93,29 @@ def save_brand(new):
     b["schedule"] = {"enabled": bool(sch.get("enabled")), "times": times, "days": days, "upload": bool(sch.get("upload")),
                      "publish": sch["publish"], "publish_time": sch["publish_time"], "fallback": sch["fallback"],
                      "fallback_arg": str(sch.get("fallback_arg", "")).strip()[:300], "pick": sch.get("pick", "order")}
+    if "prompts" in new:
+        b["prompts"] = clean_prompts(new["prompts"])
     BRAND_FILE.write_text(json.dumps(b, indent=2) + "\n")
     return b
+
+
+THEMES = rw.ROOT / "prompts"  # saved sets of prompts, one <name>.json each, shared by every channel
+
+
+def clean_prompts(d):
+    """Keep only known prompts that differ from the default, so defaults keep improving with the code."""
+    out = {k: str(d.get(k) or "").strip()[:6000] for k in rw.PROMPTS}
+    return {k: v for k, v in out.items() if v and v != rw.prompt_parts(k)[0]}
+
+
+def themes():
+    out = {}
+    for f in sorted(THEMES.glob("*.json")):
+        try:
+            out[f.stem] = clean_prompts(json.loads(f.read_text()))
+        except (ValueError, AttributeError):
+            pass
+    return out
 
 
 def workspaces():
@@ -396,7 +417,8 @@ class H(BaseHTTPRequestHandler):
                       "models": rw.CLAUDE_MODELS}
             b = brand()
             log = rw.AUTO_LOG.read_text(errors="ignore").splitlines()[-40:] if rw.AUTO_LOG.exists() else []
-            return self.send(200, {"brand": b, "voices": sorted(rw.KOKORO_VOICES), "models": models, "gemini": gemini, "claude": claude, "ai": b.get("ai") or "gemini", "publish": rw.publish_status(),
+            return self.send(200, {"brand": b, "themes": themes(), "prompts": [dict(zip(("default", "fixed"), rw.prompt_parts(k)), key=k, label=v[0], hint=v[1]) for k, v in rw.PROMPTS.items()],
+                                   "voices": sorted(rw.KOKORO_VOICES), "models": models, "gemini": gemini, "claude": claude, "ai": b.get("ai") or "gemini", "publish": rw.publish_status(),
                                    "publish_to": b.get("publish_to") or ["youtube"], "youtube": rw.youtube_status(),
                                    "stock": {n: "shell" if os.environ.get(f"{n.upper()}_API_KEY", "").strip() else "saved" if rw.stock_key(n) else "" for n in rw.STOCK},
                                    "schedule": rw.SCHEDULE_DEFAULTS | b.get("schedule", {}), "schedule_loaded": rw.schedule_loaded(),
@@ -505,6 +527,12 @@ class H(BaseHTTPRequestHandler):
         try:
             if self.path == "/api/exec":
                 start(str(body.get("cmd", "")))
+            elif self.path == "/api/prompt_theme":  # body: {"name", "prompts": {key: text}}: save a set of prompts to reuse in any channel
+                name = str(body.get("name", "")).strip()
+                if not re.fullmatch(r"\w[\w -]{0,39}", name):
+                    raise ValueError("give the theme a short name (letters, numbers, spaces)")
+                THEMES.mkdir(exist_ok=True)
+                (THEMES / f"{name}.json").write_text(json.dumps(clean_prompts(body.get("prompts") or {}), indent=2) + "\n")
             elif self.path == "/api/workspace":  # body: {"slug"} to open a channel, {"name"} to start a new one
                 switch_workspace(body)
             elif self.path == "/api/clear":  # wipe stored terminal output (only the screen while a job runs)

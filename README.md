@@ -136,6 +136,13 @@ the background for every channel whichever one is open, taking turns if they fal
 channel lives in the project folder itself, later ones in `workspaces/<name>/`; deleting a channel means deleting its
 folder (turn its schedule off first). On the command line, `RW_WORKSPACE=<name> ./rw …` works on that channel.
 
+## Prompts and themes
+Settings → Prompts shows the instructions each channel sends to the AI model: three for writing scripts (from an
+article, for a question, from your own text), three for ideas (in your topics, in the news, scoring articles) and one
+for choosing what to show. Edit them to change what a channel is about and how it sounds. Under each is its fixed part
+(the material and the reply format), which you can read but not change. "Save as theme" stores the current set under a
+name (`prompts/<name>.json`) so another channel can load it.
+
 ## CLI
 ```
 ./rw run ["anything"]         # a question, topic, paragraph or link; nothing = the next idea, else a random page
