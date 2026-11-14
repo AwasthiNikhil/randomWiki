@@ -252,6 +252,8 @@ body[data-vtype=clips] [data-for=explainer], body[data-vtype=explainer] [data-fo
 .cliplist { display: grid; gap: 6px; }
 .cliprow { display: grid; grid-template-columns: 34px 46px minmax(0, 1fr) auto auto auto; gap: 10px; align-items: center; padding: 6px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); cursor: grab; }
 .cliprow.off { opacity: .55; }
+.cliprow .ctrim { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 12px; color: var(--muted); margin-top: 4px; }
+.cliprow .ctrim input { width: 64px; padding: 2px 6px; } .cliprow .ctrim select { padding: 2px 6px; width: auto; }
 .cliprow.over { border-color: var(--accent); }
 .cliprow .rank { font: 20px Anton; color: var(--accent); text-align: center; }
 .cliprow .play { padding: 0; border: 0; background: var(--bg); cursor: pointer; width: 46px; height: 64px; border-radius: 6px; overflow: hidden; }
@@ -506,11 +508,20 @@ body[data-vtype=clips] [data-for=explainer], body[data-vtype=explainer] [data-fo
             <label data-for="explainer" style="max-width:320px">Minimum interest score <small>ideas scoring lower are not made</small> <output id="scoreOut"></output><input type="range" name="min_score" min="1" max="10" step="1"></label>
           </fieldset>
           <fieldset class="scard" data-group="content" data-for="clips"><legend>Clips</legend>
+            <label style="max-width:520px">Where to look <select name="clip_find">
+              <option value="shorts">YouTube Shorts under the words as a hashtag: short clips, used whole</option>
+              <option value="videos">YouTube videos of any length: a 15-second part of each long one (gameplay, streams)</option></select></label>
+            <label style="max-width:320px">How new <select name="clip_days">
+              <option value="0">Any age</option><option value="1">Uploaded in the last day</option><option value="7">Uploaded in the last week</option><option value="31">Uploaded in the last month</option></select></label>
+            <label style="max-width:520px">How a clip fills the screen <select name="clip_fit">
+              <option value="blur">Whole clip, over a blurred copy of itself</option>
+              <option value="zoom">Zoomed to fill the screen: the sides of wide clips are cut off</option></select>
+              <span class="hint" style="margin:0">You can change this for each clip in a video, and choose which side to keep.</span></label>
+            <label class="check"><input type="checkbox" name="clip_allow_text"> Keep clips with text on screen <span class="hint" style="margin:0">turn on for games: maps, subtitles and scores count as text. Captions and channel stamps get through too.</span></label>
             <label>Accounts to take clips from <small>one link per line: TikTok accounts, YouTube channels or playlists. Their latest videos are considered on every run.</small><textarea name="clip_sources" rows="3" placeholder="https://www.tiktok.com/@someaccount"></textarea></label>
             <label class="check"><input type="checkbox" name="clip_strip_voice"> Remove human voices from clips <span class="hint" style="margin:0">talking, narration and singing are taken out; music and other sounds stay</span></label>
             <ul class="hint" style="margin:0;padding-left:18px;display:grid;gap:3px">
-              <li>Clips play whole, so only clips of 4 to 30 seconds are taken.</li>
-              <li>Clips with captions or a channel stamp on screen are left out.</li>
+              <li>Short clips (4 to 30 seconds) play whole. From a longer video, the most replayed 15 seconds are taken; trim or widen that in the video's clip list.</li>
               <li>Facebook and Instagram can't be browsed: paste links to single videos in the Make box, or add them to a video.</li>
               <li>These are other people's videos. Each is credited in the description, but that is not permission: platforms can remove or demonetise reposts.</li>
             </ul>
@@ -1226,10 +1237,11 @@ const views = n => n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? Math.round
 function clipEditor(p) {
   return `
     <h5>YouTube title</h5><input class="edit" id="edTitle" maxlength="100" value="${esc(p.yt_title)}">
-    <h5>Clips <span style="text-transform:none;letter-spacing:0">· tick the ones to use and put them in playing order. The last one ticked is number 1.</span></h5>
+    <h5>Clips <span style="text-transform:none;letter-spacing:0">· tick the ones to use and put them in playing order. The last one ticked is number 1. Set where each starts and ends (seconds), and how it fills the screen.</span></h5>
     <div class="cliplist" id="clipList"></div>
     <div class="hint" id="clipTotal"></div>
-    <div class="vsearch"><input id="clipUrl" placeholder="Add a clip: paste a link to one video (TikTok, Instagram, Facebook, YouTube, Reddit…)" aria-label="Link to a video to add" style="flex:1;min-width:0">
+    <div class="vsearch"><input id="clipUrl" placeholder="Add a clip: paste a link to one video (YouTube, Twitch, TikTok, Reddit, X…)" aria-label="Link to a video to add" style="flex:1;min-width:0">
+      <input id="clipPart" placeholder="part, like 1:20-1:45" aria-label="Which part of the video, like 1:20-1:45 (needed for videos over 90 seconds)" title="Which part to take. Needed for videos over 90 seconds." style="width:150px">
       <button class="btn" id="clipAdd" type="button">Add clip</button></div>
     <div class="btns" style="margin-top:12px"><button class="btn primary" id="clipRender" type="button">${p.status === "draft" ? "Render video" : "Save &amp; re-render"}</button>
     <span class="hint" style="align-self:center">Joins the ticked clips in this order. Clips already prepared are reused, so a reorder is quick.</span></div>`;
@@ -1301,7 +1313,9 @@ function wireClips(p) {
     $("#clipList").innerHTML = cl.map((c, i) => `<div class="cliprow${c.use ? "" : " off"}" draggable="true" data-i="${i}">
       <span class="rank">${c.use ? "#" + rank-- : "–"}</span>
       <button class="play" type="button" data-play="${i}" title="Play this clip" aria-label="Play this clip"><img src="/media/video/${encodeURIComponent(stem(c.file))}.jpg" alt="" loading="lazy"></button>
-      <div class="cinfo"><b title="${esc(c.title)}">${esc(c.title || c.file)}</b><span class="hint">${esc([c.uploader, c.site, mmss(c.seconds), c.views ? views(c.views) + " views" : ""].filter(Boolean).join(" · "))}${c.url ? ` · <a href="${esc(c.url)}" target="_blank" rel="noopener">source ↗</a>` : ""}</span></div>
+      <div class="cinfo"><b title="${esc(c.title)}">${esc(c.title || c.file)}</b><span class="hint">${esc([c.uploader, c.site, mmss(c.seconds), c.views ? views(c.views) + " views" : ""].filter(Boolean).join(" · "))}${c.url ? ` · <a href="${esc(c.url)}" target="_blank" rel="noopener">source ↗</a>` : ""}</span>
+        <span class="ctrim">from <input type="number" data-start="${i}" min="0" max="${c.length}" step="0.5" value="${c.start}" aria-label="Start, seconds"> to <input type="number" data-end="${i}" min="0" max="${c.length}" step="0.5" value="${c.end}" aria-label="End, seconds"> of ${c.length}s
+          <select data-fit="${i}" aria-label="How it fills the screen">${[["", "Channel setting"], ["blur", "Blurred edges"], ["zoom", "Fill: middle"], ["zoom-left", "Fill: left side"], ["zoom-right", "Fill: right side"]].map(([v, t]) => `<option value="${v}" ${v === c.fit ? "selected" : ""}>${t}</option>`).join("")}</select></span></div>
       <button class="btn icon" type="button" data-up="${i}" ${i ? "" : "disabled"} title="Play earlier" aria-label="Play earlier">↑</button>
       <button class="btn icon" type="button" data-down="${i}" ${i < cl.length - 1 ? "" : "disabled"} title="Play later" aria-label="Play later">↓</button>
       <label><input type="checkbox" data-use="${i}" ${c.use ? "checked" : ""}> Use</label></div>`).join("");
@@ -1315,18 +1329,30 @@ function wireClips(p) {
     const d = e.target.closest("button")?.dataset; if (!d) return;
     if (d.up) move(+d.up, +d.up - 1);
     else if (d.down) move(+d.down, +d.down + 1);
-    else if (d.play) { const v = $("#dlgBody video"); v.src = "/media/video/" + encodeURIComponent(cl[+d.play].file); v.play(); }
+    else if (d.play) { const v = $("#dlgBody video"), c = cl[+d.play]; v.src = "/media/video/" + encodeURIComponent(c.file) + `#t=${c.start},${c.end}`; v.play(); }
   };
-  list.onchange = e => { if (e.target.dataset.use) { cl[+e.target.dataset.use].use = e.target.checked; draw(); } };
+  list.onchange = e => {
+    const d = e.target.dataset;
+    if (d.use) cl[+d.use].use = e.target.checked;
+    else if (d.fit) cl[+d.fit].fit = e.target.value;
+    else if (d.start || d.end) {  // keep the trim inside the clip and at least a second long
+      const c = cl[+(d.start || d.end)], n = Math.min(Math.max(+e.target.value || 0, 0), c.length);
+      if (d.start) c.start = Math.min(n, c.end - 1); else c.end = Math.max(n, c.start + 1);
+      c.seconds = Math.round((c.end - c.start) * 10) / 10;
+    }
+    draw();
+  };
   list.ondragstart = e => { from = +e.target.closest(".cliprow").dataset.i; e.dataTransfer.effectAllowed = "move"; };
   list.ondragover = e => { if (from !== null && e.target.closest(".cliprow")) e.preventDefault(); };
   list.ondrop = e => { const row = e.target.closest(".cliprow"); if (row && from !== null) { e.preventDefault(); move(from, +row.dataset.i); } from = null; };
-  const save = () => post("/api/clips", {pageid: p.pageid, title: $("#edTitle").value, clips: cl.map(c => ({file: c.file, use: c.use}))});
+  const save = () => post("/api/clips", {pageid: p.pageid, title: $("#edTitle").value, clips: cl.map(({file, use, start, end, fit}) => ({file, use, start, end, fit}))});
   $("#clipRender").onclick = async () => { if (await save()) { dlg.close(); exec(`rerender --ep ${p.ep}`); } };
   $("#clipAdd").onclick = async () => {
     const url = $("#clipUrl").value.trim();
     if (!/^https?:\/\/\S+$/.test(url)) { $("#clipUrl").focus(); return; }
-    if (await save()) { dlg.close(); exec(`clipadd --ep ${p.ep} ${quote(url)}`); termLine("when it's added, open the video again to place it", ""); }
+    const part = $("#clipPart").value.trim();
+    if (part && !/^[\d:.]+-[\d:.]+$/.test(part)) { $("#clipPart").focus(); return; }
+    if (await save()) { dlg.close(); exec(`clipadd --ep ${p.ep} ${quote(url)}${part ? " --part " + part : ""}`); termLine("when it's added, open the video again to place it", ""); }
   };
   draw();
 }
@@ -1813,6 +1839,7 @@ async function loadSettings() {
   document.querySelectorAll("[name=researchFrom]").forEach(r => r.checked = r.value === (S.research_from || "web"));
   document.querySelectorAll("[name=pictures]").forEach(r => r.checked = r.value === (S.pictures || "libraries")); F("picture_style").value = S.picture_style || "";
   F("clip_sources").value = (S.clip_sources || []).join("\n"); F("clip_strip_voice").checked = !!S.clip_strip_voice;
+  F("clip_find").value = S.clip_find || "shorts"; F("clip_days").value = S.clip_days || 0; F("clip_fit").value = S.clip_fit || "blur"; F("clip_allow_text").checked = !!S.clip_allow_text;
   sampleState(j.voice_sample);
   if (!j.clone_ready) document.querySelector("[name=vEngine][value=clone]").disabled = true;
   syncEngine();
@@ -1862,7 +1889,7 @@ function collect() {
     hashtags: F("hashtags").value.split(",").map(x => x.trim()).filter(Boolean), voice: F("voice").value, voice_speed: +F("voice_speed").value,
     music_volume: +F("music_volume").value, voice_engine: document.querySelector("[name=vEngine]:checked")?.value || "kokoro", edge_voice: $("#edgeSel").value || S.edge_voice,
     clone_consent: $("#cloneConsent").checked, mode: document.querySelector("[name=mode]:checked")?.value || "auto", video_type: document.querySelector("[name=vtype]:checked")?.value || "explainer", research_from: document.querySelector("[name=researchFrom]:checked")?.value || "web",
-    pictures: document.querySelector("[name=pictures]:checked")?.value || "libraries", picture_style: F("picture_style").value, clip_strip_voice: F("clip_strip_voice").checked, clip_sources: F("clip_sources").value.split("\n").map(x => x.trim()).filter(Boolean),
+    pictures: document.querySelector("[name=pictures]:checked")?.value || "libraries", picture_style: F("picture_style").value, clip_strip_voice: F("clip_strip_voice").checked, clip_find: F("clip_find").value, clip_days: +F("clip_days").value, clip_fit: F("clip_fit").value, clip_allow_text: F("clip_allow_text").checked, clip_sources: F("clip_sources").value.split("\n").map(x => x.trim()).filter(Boolean),
     topics: F("topics").value.split(",").map(x => x.trim()).filter(Boolean), idea_source: document.querySelector("[name=ideaSrc]:checked")?.value || "mix", min_score: +F("min_score").value, max_seconds: +F("max_seconds").value, llm: $("#llmSel").value, gemini_model: $("#gemSel").value, claude_model: $("#clSel").value,
     ...Object.fromEntries([...document.querySelectorAll("[data-provmodel]")].map(x => [x.dataset.provmodel + "_model", x.value])),
     ai: document.querySelector("[name=aiPick]:checked")?.value || "local", publish_to: [...document.querySelectorAll("[data-pub]:checked")].map(c => c.dataset.pub),

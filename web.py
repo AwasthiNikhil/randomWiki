@@ -77,6 +77,14 @@ def save_brand(new):
         b["idea_source"] = new["idea_source"]
     if "clip_strip_voice" in new:
         b["clip_strip_voice"] = bool(new["clip_strip_voice"])
+    if new.get("clip_find") in ("shorts", "videos"):
+        b["clip_find"] = new["clip_find"]
+    if "clip_days" in new:
+        b["clip_days"] = int(new["clip_days"]) if int(new["clip_days"] or 0) in rw.CLIP_AGE else 0
+    if "clip_allow_text" in new:
+        b["clip_allow_text"] = bool(new["clip_allow_text"])
+    if new.get("clip_fit") in ("blur", "zoom"):
+        b["clip_fit"] = new["clip_fit"]
     if "clip_sources" in new:
         b["clip_sources"] = [u for u in (str(x).strip()[:300] for x in new["clip_sources"]) if re.match(r"https?://", u)][:20]
     if new.get("pictures") in ("libraries", "ai"):
@@ -307,6 +315,8 @@ def meta_summary(pid, m):
                      parts=[[i["name"], i["text"]] for i in m.get("items") or []],  # guess / on this day: what it shows
                      clips=[dict(file=Path(c["path"]).name, title=c.get("title", ""), uploader=c.get("uploader", ""), site=c.get("site", ""),
                                  url=c.get("url", ""), seconds=c.get("seconds") or c.get("duration") or 0, views=c.get("views", 0),
+                                 start=c.get("start") or 0, end=c.get("end") or c.get("seconds") or c.get("duration") or 0,
+                                 length=max(c.get("duration") or 0, c.get("seconds") or 0), fit=c.get("fit", ""),
                                  use=c.get("use", True)) for c in m.get("clips") or [] if Path(c["path"]).exists()],
                      images=[{k: v for k, v in i.items() if k != "path"} | {"credit": rw.credit(i), "file": Path(i["path"]).name}
                              for i in m["images"]])
@@ -596,11 +606,20 @@ class H(BaseHTTPRequestHandler):
                 m = json.loads(meta.read_text())
                 m.update(title=title, script=script)
                 meta.write_text(json.dumps(m, indent=2))
-            elif self.path == "/api/clips":  # body: {"pageid", "title", "clips": [{"file", "use"}] in playing order}; client then runs rerender
+            elif self.path == "/api/clips":  # body: {"pageid", "title", "clips": [{"file", "use", "start", "end", "fit"}] in playing order}; client then runs rerender
                 meta = rw.WORK / str(int(body["pageid"])) / "meta.json"
                 m = json.loads(meta.read_text())
                 have = {Path(c["path"]).name: c for c in m.get("clips") or []}
-                order = [have.pop(str(c["file"])) | {"use": bool(c.get("use"))} for c in body["clips"] if str(c.get("file")) in have]
+                def clip(new):  # the saved clip with the page's tick, trim (seconds into the file) and fit
+                    c = have.pop(str(new["file"]))
+                    full = max(c.get("duration") or 0, c.get("seconds") or 0)
+                    a = min(max(float(new.get("start") or 0), 0), full)
+                    b = min(float(new.get("end") or full), full)
+                    if b - a < 1:
+                        raise ValueError(f"\"{c.get('title', '')[:40]}\": the end has to be at least a second after the start")
+                    return c | {"use": bool(new.get("use")), "start": a, "end": b, "seconds": round(b - a, 1),
+                                "fit": new.get("fit") if new.get("fit") in rw.CLIP_FITS else ""}
+                order = [clip(c) for c in body["clips"] if str(c.get("file")) in have]
                 title = str(body.get("title", "")).strip()
                 if not 0 < len(title) <= 100 or sum(c["use"] for c in order) < 2:
                     raise ValueError("give it a title (up to 100 characters) and tick at least two clips")

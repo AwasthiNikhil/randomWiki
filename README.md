@@ -208,6 +208,12 @@ keeps the music and other sounds. Settings also takes a list of accounts to draw
 playlists); Facebook and Instagram can't be browsed, so paste single video links from them. Open a clip video to choose its clips: tick the ones to use, move them into playing order (the last is number 1),
 play any of them, or add one by pasting a link; then re-render. A few spare clips are fetched with each video so
 there is something to swap in. With "Stop at a draft" (Settings → Videos) nothing is rendered until you have chosen.
+For gameplay and other footage that sits inside long videos, the channel's Clips settings have: **Where to look**
+(YouTube videos of any length: the most replayed 15 seconds of each long one are taken), **How new** (last day, week
+or month), **How a clip fills the screen** (whole over a blurred copy, or zoomed to fill) and **Keep clips with text
+on screen** (turn on for games). In a clip video, each clip has "from … to …" seconds to trim it and its own fill
+choice (blurred edges, or fill keeping the middle, left or right); to add part of a long video, paste its link and
+the part, like 1:20-1:45.
 From the command line: `./rw clips "funny cats" --count 5`. These are other people's videos:
 each is credited in the description, but credit is not permission, and platforms can remove or demonetise reposts.
 

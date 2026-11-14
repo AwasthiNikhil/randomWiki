@@ -105,6 +105,15 @@ copying, the editor on the other three formats. Weak spots: a countdown's order 
 model's reading of the research (the first try mixed "tallest by other measures" into one list before the prompt was
 tightened); only numbers are checked against the proof; the word format's meaning and example are the model's wording
 (only names and years in the origin are checked); Wiktionary's daily word is often obscure.
+Gameplay clips (2026-11-14, CLAUDE.md "Clip countdowns", last paragraph): a channel, Leonida Clips, with EP 001 "Top 5
+gta 6 gameplay" (five 15 s parts of the week's most viewed videos, zoomed to fill). Tested: that run from the command
+line; in the browser, trimming a clip, changing two clips' fill and re-rendering (72 s, frames checked), the trim
+limits, the four settings loading and saving; `clipadd --part` and the refusal of a long video without a part. Not
+tested: Make now and schedules on this channel, links from Twitch / Reddit / X, a video with no "most replayed" data
+(takes a third in), "last day". Weak spots: before the game is out the most viewed "gameplay" videos are commentary,
+trailers and fakes, and nothing here can tell; the most replayed moment may be a talking head or a web page; zoom
+cuts a wide clip to its middle third, so words and maps at the sides are lost; with the text check off, captions and
+channel stamps get through.
 Known gaps: topic match is by title words only; small or brief
 stamps and emoji overlays pass the text check; letting Gemini watch and rate candidates is the real fix. The video's dialog still shows the explainer editor (narration,
 visuals), which doesn't apply; re-render is refused. No per-clip trimming or reordering yet; each clip is its first

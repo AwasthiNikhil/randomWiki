@@ -2873,9 +2873,13 @@ CLIP_FILLER = {"funny", "funniest", "best", "top", "cute", "viral", "oddly", "vi
                "short", "shorts", "the", "and", "most", "crazy", "epic", "new"}
 
 
+CLIP_AGE = {0: "CAM%3D", 1: "CAMSAggC", 7: "CAMSAggD", 31: "CAMSAggE"}  # YouTube search, most viewed: ever / today / this week / this month
+
+
 def clip_candidates(text, limit=200):
-    """Short videos for a countdown, from words and/or links: YouTube Shorts under the words as a hashtag
-    ("funny cats" -> #funnycats), each link as a single
+    """Videos for a countdown, from words and/or links: YouTube Shorts under the words as a hashtag
+    ("funny cats" -> #funnycats) or, on a channel with clip_find "videos", YouTube's most viewed videos for the words
+    (of any length, from the last clip_days days); each link as a single
     video (always used: you picked it) or, for a profile or playlist, its latest videos.
     -> [{url, title, views, picked}], your picks first, then the most viewed."""
     import yt_dlp
@@ -2886,10 +2890,12 @@ def clip_candidates(text, limit=200):
     # ponytail: on topic = the title names the subject ("funny dogs" -> "dog"); clips with vague titles are lost.
     # A model that watches the clip (Gemini) is the upgrade.
     topic = [w.rstrip("s") for w in re.findall(r"[a-z0-9]+", query.lower()) if w not in CLIP_FILLER and len(w) > 2] or [""]
-    found = {}
+    found, videos = {}, BRAND.get("clip_find") == "videos"
+    search = (f"https://www.youtube.com/results?search_query={urllib.parse.quote_plus(query)}"
+              f"&sp={CLIP_AGE.get(int(BRAND.get('clip_days') or 0), CLIP_AGE[0])}" if videos else f"https://www.youtube.com/hashtag/{tag}/shorts")
     with yt_dlp.YoutubeDL({"extract_flat": True, "quiet": True, "no_warnings": True, "playlistend": limit,
                            "logger": quiet, "cachedir": False}) as y:
-        for src in links + ([f"https://www.youtube.com/hashtag/{tag}/shorts"] if tag else []):
+        for src in links + ([search] if tag else []):
             try:
                 info = y.extract_info(src, download=False)
             except yt_dlp.utils.DownloadError as e:
@@ -2898,9 +2904,9 @@ def clip_candidates(text, limit=200):
             many = info.get("_type") == "playlist"
             for e in (info.get("entries") or []) if many else [info]:
                 url = e.get("webpage_url") or e.get("url")
-                if src.endswith(f"/hashtag/{tag}/shorts") and not any(w in (e.get("title") or "").lower() for w in topic):
+                if src == search and not any(w in (e.get("title") or "").lower() for w in topic):
                     continue  # hashtag pages are full of unrelated videos tagged for reach
-                if url and url not in found and not (many and (e.get("duration") or 30) > 90):  # shorts, not long videos
+                if url and url not in found and not (many and not videos and (e.get("duration") or 30) > 90):  # shorts, not long videos
                     found[url] = dict(url=url, title=e.get("title") or "", views=e.get("view_count") or 0, picked=not many)
     return sorted(found.values(), key=lambda c: (not c["picked"], -c["views"]))
 
@@ -2955,6 +2961,15 @@ def strip_voice(src, dest):
 
 
 CLIP_SECONDS = (4, 30)  # a clip is used whole, so it has to be this short
+CLIP_PART = (15, 30)  # from a longer video (clip_find "videos"): seconds used, and seconds fetched so the editor can widen it
+CLIP_FITS = ("blur", "zoom", "zoom-left", "zoom-right")  # whole over a blurred copy, or filling the frame (which part is kept)
+
+
+def best_part(info):
+    """Where to cut into a long video: its most replayed moment (YouTube's heatmap, opening aside), else a third in."""
+    heat = (info.get("heatmap") or [])[5:]  # the first seconds are always the most played
+    start = max(heat, key=lambda b: b["value"])["start_time"] if heat else (info.get("duration") or 0) / 3
+    return int(max(0, min(start, (info.get("duration") or 0) - CLIP_PART[1])))
 
 
 CLIP_SPARES = 3  # extra clips fetched beyond the ones used, so you have something to swap in
@@ -2973,9 +2988,13 @@ def make_clips(con, text, count=5, draft=None):
     print(f"looking for clips: {text[:80]}")
     cands = [c for c in clip_candidates(" ".join([text, *(BRAND.get("clip_sources") or [])])) if c["url"] not in used]
     lo, hi = CLIP_SECONDS
-    print(f"  {len(cands)} to choose from; taking the most viewed that are whole in {lo}-{hi}s and have no text on screen: "
-          f"{count} to use (within {BRAND['max_seconds']}s together) and {CLIP_SPARES} spare")
-    clips, total, why = [], 0, {"too long or too short": 0, "text on screen": 0, "couldn't be read": 0}
+    videos, days, any_text = BRAND.get("clip_find") == "videos", int(BRAND.get("clip_days") or 0), bool(BRAND.get("clip_allow_text"))
+    since = time.strftime("%Y%m%d", time.localtime(time.time() - days * 86400))
+    print(f"  {len(cands)} to choose from; taking the most viewed" + (f" of the last {days} days" if days else "")
+          + (f", {CLIP_PART[0]}s from the most replayed part of each long one" if videos else f" that are whole in {lo}-{hi}s")
+          + ("" if any_text else " and have no text on screen")
+          + f": {count} to use (within {BRAND['max_seconds']}s together) and {CLIP_SPARES} spare")
+    clips, total, why = [], 0, {"too long or too short": 0, "too old": 0, "text on screen": 0, "couldn't be read": 0}
     quiet = type("Quiet", (), {"debug": print_nothing, "warning": print_nothing, "error": print_nothing})()
     with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "logger": quiet, "cachedir": False, "noplaylist": True}) as y:
         for c in cands[:80]:  # ponytail: a fixed cap on how many we look at per run; raise it if runs come up short
@@ -2983,16 +3002,23 @@ def make_clips(con, text, count=5, draft=None):
                 break
             try:
                 info = y.extract_info(c["url"], download=False)
-                dur = info.get("duration") or 0
-                if not lo <= dur <= hi:
+                dur, part = info.get("duration") or 0, None
+                if days and not c["picked"] and (info.get("upload_date") or since) < since:
+                    why["too old"] += 1
+                    used.add(c["url"])
+                    continue
+                if videos and dur > hi:  # a long video: fetch the part around its best moment, use the start of that
+                    a = best_part(info)
+                    part, dur = f"{a}-{a + CLIP_PART[1]}", CLIP_PART[0]
+                elif not lo <= dur <= hi:
                     why["too long or too short"] += 1
                     used.add(c["url"])  # its length won't change: don't look again
                     continue
-                path = download(c["url"], by="clips")
+                path = download(c["url"], part, by="clips")
             except (SystemExit, Exception):
                 why["couldn't be read"] += 1
                 continue
-            if not c["picked"] and has_text(path, dur):  # a video you pasted is yours to judge
+            if not c["picked"] and not any_text and has_text(path, dur):  # a video you pasted is yours to judge
                 why["text on screen"] += 1
                 used.add(c["url"])
                 for f in (path, path.with_suffix(".json"), path.with_suffix(".jpg")):
@@ -3002,12 +3028,12 @@ def make_clips(con, text, count=5, draft=None):
             use = sum(x["use"] for x in clips) < count and total + dur <= BRAND["max_seconds"]
             total += dur * use
             clips.append(c | json.loads(path.with_suffix(".json").read_text())
-                         | {"path": str(path), "found": c["url"], "seconds": dur, "use": use,
+                         | {"path": str(path), "found": c["url"], "seconds": dur, "start": 0, "end": dur, "use": use,
                             "views": c["views"] or info.get("view_count") or 0})
     print("  passed over: " + ", ".join(f"{n} {k}" for k, n in why.items() if n))
     used_file.write_text(json.dumps(sorted(used | {c["found"] for c in clips})))
     if sum(c["use"] for c in clips) < 2:
-        raise SystemExit("found fewer than two clips that are short, whole and free of text; try other words, paste links, "
+        raise SystemExit("found fewer than two clips that fit this channel's clip settings; try other words, paste links, "
                          "or add accounts to take clips from in Settings")
     clips.sort(key=lambda c: (not c["use"], c["views"]))  # count down: the most viewed plays last as number 1; spares after
     n = sum(c["use"] for c in clips)
@@ -3028,20 +3054,31 @@ def make_clips(con, text, count=5, draft=None):
     return pid
 
 
-def clip_add(con, ep, url):
-    """Add one video you chose (any site yt-dlp reads) to a clip countdown; it is used on the next render."""
+def clip_add(con, ep, url, part=None):
+    """Add one video you chose (any site yt-dlp reads), or one part of it ("1:20-1:45"), to a clip countdown; it is
+    used on the next render."""
     row = con.execute("select * from pages where ep=? and origin='clips'", (ep,)).fetchone()
     if not row:
         raise SystemExit(f"episode {ep} is not a clip countdown")
     meta = WORK / str(row["pageid"]) / "meta.json"
     m = json.loads(meta.read_text())
-    path = download(url)
+    if not part:  # look before fetching: a whole stream is no clip
+        import yt_dlp
+        try:
+            with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "cachedir": False, "noplaylist": True}) as y:
+                dur = y.extract_info(url, download=False).get("duration") or 0
+        except yt_dlp.utils.DownloadError as e:
+            raise SystemExit(str(e).split("\n")[0][:200]) from None
+        if dur > 90:
+            raise SystemExit(f"that video is {int(dur)}s long: say which part to use, like 1:20-1:45")
+    path = download(url, part)
     side = json.loads(path.with_suffix(".json").read_text())
     if any(c["path"] == str(path) for c in m["clips"]):
         raise SystemExit("that clip is already in this video")
     if not side.get("duration") or side["duration"] > 90:
-        raise SystemExit(f"that video is {side.get('duration') or '?'}s long; clips play whole, so add ones under 90 seconds")
-    m["clips"].append(side | {"path": str(path), "found": url, "seconds": side["duration"], "use": True, "views": 0, "picked": True})
+        raise SystemExit(f"that is {side.get('duration') or '?'}s long; add clips or parts under 90 seconds")
+    m["clips"].append(side | {"path": str(path), "found": url, "seconds": side["duration"], "start": 0, "end": side["duration"],
+                              "use": True, "views": 0, "picked": True})
     meta.write_text(json.dumps(m, indent=2))
     clips_usage(m)
     print(f"  added to EP {ep:03d}; open it to set the order, then click Render")
@@ -3050,7 +3087,8 @@ def clip_add(con, ep, url):
 def render_clips(con, m):
     """Join the clips marked `use`, in their saved order (the last one is number 1), into the video. Each fills the
     frame over a blurred copy of itself, keeps its own sound (or loses its voices, if the channel says so) and
-    carries its rank. Every clip is credited in the description. Pieces are kept, so a reorder re-renders quickly."""
+    carries its rank. A clip's `start`/`end` trim it, and its `fit` (else the channel's clip_fit) says whether it sits
+    whole over a blurred copy or is zoomed to fill the frame (CLIP_FITS). Every clip is credited in the description. Pieces are kept, so a reorder re-renders quickly."""
     import subprocess, imageio_ffmpeg
     from PIL import Image, ImageDraw, ImageFont
     ensure_fonts()
@@ -3064,8 +3102,10 @@ def render_clips(con, m):
     big = ImageFont.truetype(str(ROOT / BRAND["fonts"]["display"]), 150)
     segs = []
     for k, c in enumerate(clips):
-        label, secs = f"#{len(clips) - k}", c.get("seconds") or c.get("duration")
-        seg = work / f"seg-{Path(c['path']).stem}-{len(clips) - k}{'-novoice' if strip else ''}-{C['accent'][1:]}.mp4"
+        label, a = f"#{len(clips) - k}", float(c.get("start") or 0)
+        secs = float(c.get("end") or c.get("seconds") or c.get("duration")) - a
+        fit = c.get("fit") or BRAND.get("clip_fit") or "blur"
+        seg = work / f"seg-{Path(c['path']).stem}-{len(clips) - k}{'-novoice' if strip else ''}-{C['accent'][1:]}-{a:g}-{secs:g}-{fit}.mp4"
         segs.append(seg)
         print(f"  {label}: {c['title'][:60]}")
         if seg.exists():
@@ -3082,12 +3122,14 @@ def render_clips(con, m):
             if not clean.exists():
                 print("    removing voices…")
                 strip_voice(c["path"], clean)
-            sound = ["-i", str(clean), "-map", "2:a"]
+            sound = ["-ss", str(a), "-i", str(clean), "-map", "2:a"]
         tmp = seg.with_suffix(".part.mp4")
-        r = subprocess.run([ff, "-y", "-loglevel", "error", "-i", c["path"], "-loop", "1", "-i", str(work / "badge.png"), *sound[:-2],
+        fill = f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H}"
+        r = subprocess.run([ff, "-y", "-loglevel", "error", "-ss", str(a), "-i", c["path"], "-loop", "1", "-i", str(work / "badge.png"), *sound[:-2],
                             "-filter_complex",
-                            f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},boxblur=24[bg];"
-                            f"[0:v]scale={W}:{H}:force_original_aspect_ratio=decrease[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2[v0];"
+                            (f"{fill},boxblur=24[bg];[0:v]scale={W}:{H}:force_original_aspect_ratio=decrease[fg];"
+                             f"[bg][fg]overlay=(W-w)/2:(H-h)/2[v0];" if fit == "blur" else
+                             f"{fill}:{ {'zoom-left': '0', 'zoom-right': 'iw-ow'}.get(fit, '(iw-ow)/2')}:0[v0];") +
                             f"[v0][1:v]overlay=0:0:shortest=1,fps={FPS},format=yuv420p[v]",
                             "-map", "[v]", *sound[-2:], "-t", str(secs), "-shortest", "-c:v", "libx264", "-preset", "medium", "-crf", "20",
                             "-c:a", "aac", "-ar", "48000", "-ac", "2", "-b:a", "192k", str(tmp)], capture_output=True, text=True)
@@ -4461,6 +4503,8 @@ def selftest():
     assert prompt_for("script", title="T", text="X", answer="").startswith("Be funny about T }{\n\nArticle title: T")
     BRAND["prompts"] = saved
     assert day_from("25 December") == day_from("December 25") == day_from("12-25") == (12, 25)
+    heat = [dict(start_time=k * 10.0, value=v) for k, v in enumerate([1, .9, .8, .7, .6, .2, .9, .3] + [.1] * 92)]
+    assert best_part(dict(duration=1000, heatmap=heat)) == 60 and best_part(dict(duration=900)) == 300  # the peak after the opening; else a third in
     # quiz: a question is kept only if its proof is in the notes and names the right option alone
     global llm
     notes = ("The Sun holds 99.86% of the mass of the Solar System. Mars is the fourth planet from the Sun. "
@@ -4501,7 +4545,7 @@ def main():
     cf = sub.add_parser("copyfrom", help=argparse.SUPPRESS); cf.add_argument("--channel", required=True); cf.add_argument("--pageid", type=int, required=True)
     pl = sub.add_parser("pull", help="download a local model into Ollama"); pl.add_argument("model")
     ca = sub.add_parser("clipadd", help="add one video (a link) to a clip countdown")
-    ca.add_argument("url"); ca.add_argument("--ep", type=int, required=True)
+    ca.add_argument("url"); ca.add_argument("--ep", type=int, required=True); ca.add_argument("--part", help="1:20-1:45")
     cl = sub.add_parser("clips", help="a countdown of clips: words to search YouTube for, and/or links from any site")
     cl.add_argument("items", nargs="+"); cl.add_argument("--count", type=int, default=5, choices=range(2, 11))
     au = sub.add_parser("auto"); au.add_argument("--dry-run", action="store_true")
@@ -4604,7 +4648,7 @@ def main():
     elif args.cmd == "pull":
         pull_model(args.model)
     elif args.cmd == "clipadd":
-        clip_add(con, args.ep, args.url)
+        clip_add(con, args.ep, args.url, args.part)
     elif args.cmd == "clips" or (args.cmd == "run" and clips_channel()):
         make_clips(con, " ".join(args.items) if args.cmd == "clips" else args.input or random_topic(), getattr(args, "count", 5))
         if getattr(args, "upload", False):

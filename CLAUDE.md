@@ -112,6 +112,13 @@ draft), `clip_add()` (`./rw clipadd --ep N <link>`) appends one video, `render_c
 their saved order (last = number 1) and is what `rerender` runs for these videos. Rendered pieces are kept per clip
 and rank in `work/<id>/seg-*.mp4`, so a reorder is quick. The studio's clip editor (`clipEditor`/`wireClips` in
 web.html) saves order and ticks through `POST /api/clips`.
+Per channel (Settings → Videos → Clips): `clip_find` "shorts" (above) or "videos" (YouTube's most viewed videos for the
+words, any length; from one over 30 s, `best_part()` takes `CLIP_PART` seconds at its most replayed moment, YouTube's
+heatmap, and fetches a little more so the editor can widen it); `clip_days` (0/1/7/31: only uploads that recent, by the
+search filter in `CLIP_AGE` and re-checked on each video's date); `clip_allow_text` (skip the text check: games have
+maps and subtitles); `clip_fit` "blur" or "zoom". Per clip in meta: `start`/`end` (seconds into the saved file) and
+`fit` (`CLIP_FITS`; "" = the channel's), set in the clip editor and saved by `/api/clips`; `clipadd … --part 1:20-1:45`
+adds one part of a long video. Leonida Clips (`workspaces/leonida-clips`) is the gameplay channel using these.
 **The owner chose to allow other people's clips here**, as an exception to the licence rule below; every clip is
 credited in the description, and publishing rights are theirs to sort out.
 
