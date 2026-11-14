@@ -130,6 +130,11 @@ browser with CSS standing in for fit, badge and caption: it is an approximation,
 `render_clips()` names each piece by a hash of what it contains, draws badge and caption on one overlay, scales the
 clip's sound, and mixes the audio track over the joined clips in a second pass (picture copied). Publish in the editor
 runs `upload` and is offered only for a render that isn't stale.
+Any rendered video of any kind opens there through "Cut in the editor" (`POST /api/clip_from`, `clip_from_video()`):
+a copy of its file goes into `media/video/Own-…` and becomes the one clip of a new clip video, whose description starts
+from the original's (`base_description`). Text already drawn into that video is picture by then; it is changed in the
+original's own words editor. The editor's text track (`E.texts`, meta `texts`: text, at, end, pos, size) is drawn in
+`render_clips()`'s second pass with `text_plate()`, which a clip's `caption` also uses.
 **The owner chose to allow other people's clips here**, as an exception to the licence rule below; every clip is
 credited in the description, and publishing rights are theirs to sort out.
 
@@ -171,6 +176,8 @@ the quiz keeps its parts in meta `items` (name, text, image if any), edited in t
   question, the video fails with a reason rather than circling the topic.
 - **Licences:** only public domain, CC0, CC BY, CC BY-SA (never ND/NC) for anything auto-picked; every image, clip,
   track and sound used is credited in the YouTube description (`description()`), not on screen.
+- Pronunciations: `say` in brand.json ({"Koh-i-Noor": "ko he noor"}; Settings → Voice) is applied in `speakable_map()`,
+  so the voice reads the respelling and captions keep the written word.
 - AI voice clones need the owner's consent tick; descriptions say "AI voice clone".
 - Settings and Connectors share one layout (left nav, page title with a scope pill saying "Only for <channel>" or
   "All channels"). Anything that applies to one kind of channel carries `data-for="explainer"` or `data-for="clips"`

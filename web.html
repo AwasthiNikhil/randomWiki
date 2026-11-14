@@ -270,7 +270,7 @@ body[data-vtype=clips] [data-for=explainer], body[data-vtype=explainer] [data-fo
 #edBg { position: absolute; inset: -8%; background-size: cover; background-position: center; filter: blur(14px) brightness(.8); }
 #edVideo { position: absolute; inset: 0; width: 100%; height: 100%; }
 #edBadge { position: absolute; left: 4%; top: 7%; background: var(--accent); color: var(--bg); font: 700 clamp(16px, 3.4vh, 40px) Anton; padding: 0 .3em; border-radius: .2em; }
-#edCap { position: absolute; left: 6%; right: 6%; bottom: 22%; background: #0E1116d8; font: clamp(12px, 2.3vh, 28px) Anton; padding: .4em .5em; border-radius: .5em; text-align: center; }
+#edCap { position: absolute; left: 50%; translate: -50% -50%; top: 72%; max-width: 88%; width: max-content; background: #0E1116d8; font: clamp(12px, 2.3vh, 28px) Anton; padding: .4em .5em; border-radius: .5em; text-align: center; }
 #edEmpty { position: absolute; inset: 0; display: grid; place-items: center; }
 #edTime { font-variant-numeric: tabular-nums; color: var(--muted); min-width: 130px; }
 .edinsp label { display: grid; gap: 4px; font-size: 13px; color: var(--muted); } .edinsp label.check { display: flex; gap: 8px; align-items: flex-start; flex-wrap: wrap; color: var(--text); }
@@ -286,6 +286,10 @@ body[data-vtype=clips] [data-for=explainer], body[data-vtype=explainer] [data-fo
 .edtrack em { position: sticky; left: 4px; top: 0; z-index: 1; float: left; font: 600 9px/1 system-ui; letter-spacing: 1px; color: var(--muted); pointer-events: none; opacity: .7; }
 .edhint { position: absolute; left: 60px; top: 50%; translate: 0 -50%; font-size: 12.5px; color: var(--muted); pointer-events: none; white-space: nowrap; }
 .edclip { position: absolute; top: 0; bottom: 0; box-sizing: border-box; border: 1px solid var(--line); border-radius: 6px; background-color: var(--panel2); background-size: auto 100%; background-repeat: repeat-x; overflow: hidden; cursor: grab; display: flex; flex-direction: column; justify-content: space-between; padding: 4px 9px; }
+.edclip.txt { background: color-mix(in srgb, var(--accent) 22%, var(--panel2)); justify-content: center; }
+#edTexts span { position: absolute; left: 50%; translate: -50% -50%; max-width: 88%; width: max-content; background: #0E1116d8; font-family: Anton; padding: .35em .6em; border-radius: .5em; text-align: center; }
+#edTexts .p-top { top: 22%; } #edTexts .p-middle { top: 50%; } #edTexts .p-bottom { top: 72%; }
+#edTexts .s-S { font-size: clamp(9px, 1.6vh, 20px); } #edTexts .s-M { font-size: clamp(12px, 2.3vh, 28px); } #edTexts .s-L { font-size: clamp(16px, 3.4vh, 42px); }
 .edclip.aud { background: color-mix(in srgb, var(--info) 22%, var(--panel2)); }
 .edclip.sel { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); z-index: 2; }
 .edclip b { font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; } .edclip b span { color: var(--accent); }
@@ -489,6 +493,8 @@ body[data-vtype=clips] [data-for=explainer], body[data-vtype=explainer] [data-fo
               <label style="flex:1;min-width:min(200px,100%)" id="kokoroPick">Voice<select name="voice" id="voiceSel"></select></label>
               <label style="flex:1;min-width:min(200px,100%)">Speed <output id="speedOut"></output><input type="range" name="voice_speed" min="0.7" max="1.3" step="0.05"></label>
             </div>
+            <label>Pronunciations <small>one per line, the word as written = how to say it. Captions keep the written word. Used from the next render.</small>
+              <textarea name="say" rows="3" placeholder="Koh-i-Noor = ko he noor"></textarea></label>
             <div class="inline"><button class="btn" type="button" id="hear">Save &amp; hear it</button><audio id="voiceAudio" controls hidden></audio></div>
             <span class="hint" id="hearHint"></span>
           </fieldset>
@@ -870,17 +876,18 @@ body[data-vtype=clips] [data-for=explainer], body[data-vtype=explainer] [data-fo
     <div id="edSrc"></div>
   </div>
   <div class="edview">
-    <div class="edstage"><div id="edBg"></div><video id="edVideo" playsinline preload="auto"></video><span id="edBadge" hidden></span><span id="edCap" hidden></span>
+    <div class="edstage"><div id="edBg"></div><video id="edVideo" playsinline preload="auto"></video><span id="edBadge" hidden></span><span id="edCap" hidden></span><div id="edTexts"></div>
       <div id="edEmpty" class="hint">Nothing on the timeline yet</div></div>
     <div class="edrow" style="justify-content:center"><button class="btn" id="edPlay" type="button" title="Play / pause (Space)" aria-label="Play or pause">▶</button><span id="edTime">0:00.0 / 0:00.0</span>
       <button class="btn sm" id="edWatch" type="button" hidden></button></div>
   </div>
   <div class="edinsp" id="edInsp"></div>
   <div class="edtl">
-    <div class="edrow"><button class="btn sm" id="edSplit" type="button" title="Cut the clip in two at the playhead (S)">Split</button><button class="btn sm" id="edDel" type="button" title="Remove the selected piece (Delete)">Remove</button>
+    <div class="edrow"><button class="btn sm" id="edSplit" type="button" title="Cut the clip under the playhead in two, right where the playhead is (S). Then move or remove either half.">✂ Split at playhead</button>
+      <button class="btn sm" id="edText" type="button" title="Put words over the video at the playhead (T)">Add text</button><button class="btn sm" id="edDel" type="button" title="Remove the selected piece (Delete)">Remove</button>
       <span class="hint" id="edTotal" style="margin:0"></span><span style="flex:1"></span>
       <label class="hint" style="margin:0;display:flex;gap:6px;align-items:center">Zoom <input type="range" id="edZoom" min="6" max="160" step="1" style="width:140px"></label></div>
-    <div id="edScroll"><div id="edTl"><div id="edRuler"></div><div class="edtrack" id="edV"></div><div class="edtrack aud" id="edA"></div><div id="edHead"></div></div></div>
+    <div id="edScroll"><div id="edTl"><div id="edRuler"></div><div class="edtrack aud" id="edT"></div><div class="edtrack" id="edV"></div><div class="edtrack aud" id="edA"></div><div id="edHead"></div></div></div>
   </div>
   <div class="edjob" id="edJob" aria-live="polite"></div>
   <div id="edAudios" hidden></div>
@@ -1378,6 +1385,7 @@ async function openDetail(id) {
       <div class="sub">${esc(p.title)} · ${p.url ? `<a href="${esc(p.url)}" target="_blank" rel="noopener">${originName(p)} ↗</a>` : originName(p)}${yt ? ` · <a href="${yt}" target="_blank" rel="noopener">YouTube ↗</a>` : ""}${postLinks(p)}${p.ai ? ` · AI: ${p.ai.requests} requests, ${kTokens(p.ai.tokens)} tokens` : ""}</div>
       <div class="btns">
         ${p.status === "rendered" ? `<button class="btn primary" data-upload="${p.ep}">Publish</button>` : ""}
+        ${p.video && p.origin !== "clips" ? `<button class="btn" data-cutcopy="${p.pageid}" title="Opens a copy of this video on a timeline: split it, cut parts out, move them, add sound and text. This video stays as it is.">Cut in the editor</button>` : ""}
         ${p.status !== "uploaded" ? `<button class="btn" data-remake="${esc(makeArg(p))}">Remake</button>` : ""}
         ${["rendered", "queued", "failed"].includes(p.status) ? `<button class="btn danger" data-skip="${p.pageid}">Skip (don't upload)</button>` : ""}
         ${p.ep && p.status !== "uploaded" ? `<span id="delVidBox"><button class="btn danger" data-delvid="${p.pageid}">Delete video</button></span>` : ""}
@@ -1611,6 +1619,11 @@ document.addEventListener("click", async e => {
   else if (t.dataset.ef) { epFilter = t.dataset.ef; renderEpisodes(); }
   else if (t.dataset.id) go("/video/" + t.dataset.id);
   else if (t.dataset.cmd) exec(t.dataset.cmd);
+  else if (t.dataset.cutcopy) {
+    const r = await fetch("/api/clip_from", {method: "POST", headers: {"Content-Type": "application/json", "X-RW": "1"}, body: JSON.stringify({pageid: +t.dataset.cutcopy})});
+    const j = await r.json(); if (!r.ok) return termLine("! " + j.error, "err");
+    await loadPages(); go("/edit/" + j.pageid);
+  }
   else if (t.dataset.upload) { dlg.close(); exec(`upload --ep ${+t.dataset.upload}` + publishArg()); }
   else if (t.dataset.make) exec(`run ${quote(t.dataset.make)}`);
   else if (t.dataset.delvid) {
@@ -1717,7 +1730,9 @@ let E = null, clipFit = "blur";
 const edId = () => Math.random().toString(36).slice(2, 9);
 const r1 = x => Math.round(x * 10) / 10, clamp = (x, a, b) => Math.min(Math.max(x, a), b);
 const tfmt = s => `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, "0")}`;
-const edLen = c => c.end - c.start;
+const edLen = c => c.len ?? c.end - c.start;  // a text has a length; clips and audio have a start and end in their file
+const edList = kind => ({clip: E.clips, aud: E.audio, txt: E.texts})[kind];
+const edSel = () => E.sel && edList(E.sel.kind).find(x => x.id === E.sel.id);
 const edTotal = () => E.clips.reduce((a, c) => a + edLen(c), 0);
 function edOffsets() { let t = 0; return E.clips.map(c => { const o = t; t += edLen(c); return o; }); }
 function edAt(t) {  // the clip under time t -> [its index, seconds into its file]
@@ -1734,7 +1749,7 @@ async function openEditor(id) {
   const item = c => ({id: edId(), file: c.file, title: c.title, uploader: c.uploader, site: c.site, url: c.url, length: c.length,
                       start: c.start, end: c.end, fit: c.fit, volume: c.volume, caption: c.caption});
   if (E) clearTimeout(E.timer);
-  E = {p, badges: p.badges, clips: p.clips.filter(c => c.use).map(item), audio: p.tracks.map(t => ({id: edId(), ...t})),
+  E = {p, badges: p.badges, clips: p.clips.filter(c => c.use).map(item), audio: p.tracks.map(t => ({id: edId(), ...t})), texts: p.texts.map(t => ({id: edId(), ...t})),
        bin: [...new Map(p.clips.map(c => [c.file, c])).values()], sel: null, t: keep.t || 0, pps: keep.pps || 0, tab: keep.tab || "bin",
        undo: [], redo: [], playing: false, cur: null, lib: {}, saved: true, watching: false};
   $("#edName").value = p.yt_title;
@@ -1759,7 +1774,7 @@ function closeEditor() {
 const edBody = () => ({pageid: E.p.pageid, title: $("#edName").value.trim() || E.p.yt_title, badges: E.badges,
   clips: [...E.clips.map(({file, start, end, fit, volume, caption}) => ({file, use: true, start, end, fit, volume, caption})),
           ...E.bin.filter(b => !E.clips.some(c => c.file === b.file)).map(b => ({file: b.file, use: false, start: b.start ?? 0, end: b.end || b.length}))],
-  audio: E.audio.map(({file, at, start, end, volume}) => ({file, at, start, end, volume}))});
+  audio: E.audio.map(({file, at, start, end, volume}) => ({file, at, start, end, volume})), texts: E.texts.map(({text, at, len, pos, size}) => ({text, at, len, pos, size}))});
 async function edSave() {
   if (!E || E.saved) return true;
   clearTimeout(E.timer);
@@ -1769,7 +1784,7 @@ async function edSave() {
   return ok;
 }
 function edTouch() { E.saved = false; clearTimeout(E.timer); E.timer = setTimeout(edSave, 1000); }
-const edSnap = () => JSON.stringify({clips: E.clips, audio: E.audio, badges: E.badges});
+const edSnap = () => JSON.stringify({clips: E.clips, audio: E.audio, texts: E.texts, badges: E.badges});
 function edDo(fn) { E.undo.push(edSnap()); if (E.undo.length > 200) E.undo.shift(); E.redo = []; fn(); edTouch(); edDraw(); edLoad(false); }
 function edBack(from, to) {  // undo (from = E.undo) or redo
   if (!from.length) return;
@@ -1833,6 +1848,8 @@ function edHead(follow) {
   const x = E.t * E.pps, sc = $("#edScroll");
   $("#edHead").style.left = x + "px";
   $("#edTime").textContent = `${tfmt(E.t)} / ${tfmt(edTotal())}`;
+  const on = E.watching ? [] : E.texts.filter(x => x.text && E.t >= x.at && E.t < x.at + x.len), sig = on.map(x => x.id + x.text + x.pos + x.size).join("|");
+  if ($("#edTexts").dataset.sig !== sig) { $("#edTexts").dataset.sig = sig; $("#edTexts").innerHTML = on.map(x => `<span class="p-${x.pos} s-${x.size}">${esc(x.text)}</span>`).join(""); }
   if (follow && (x < sc.scrollLeft || x > sc.scrollLeft + sc.clientWidth - 40)) sc.scrollLeft = x - 80;
 }
 function edWatch() {  // the rendered file instead of the timeline preview, and back
@@ -1850,13 +1867,16 @@ function edWatch() {  // the rendered file instead of the timeline preview, and 
 // ---- drawing
 function edDraw() {
   const total = edTotal(), off = edOffsets(), pps = E.pps;
-  const span = Math.max(total, ...E.audio.map(a => a.at + edLen(a)), 10);
+  const span = Math.max(total, ...E.audio.map(a => a.at + edLen(a)), ...E.texts.map(a => a.at + a.len), 10);
   $("#edTl").style.width = span * pps + 300 + "px";
   const step = [0.5, 1, 2, 5, 10, 15, 30, 60, 120].find(s => s * pps >= 64) || 300;
   let ticks = "";
   for (let s = 0; s <= span + step; s += step) ticks += `<span style="left:${s * pps}px">${step < 1 ? tfmt(s) : mmss(s)}</span>`;
   $("#edRuler").innerHTML = ticks;
   const sel = (k, id) => E.sel?.kind === k && E.sel.id === id ? " sel" : "";
+  $("#edT").innerHTML = `<em>TEXT</em>` + (E.texts.map(x => `<div class="edclip txt${sel("txt", x.id)}" data-txt="${x.id}" title="${esc(x.text)}"
+      style="left:${x.at * pps}px;width:${x.len * pps}px"><i class="hl"></i><b>${esc(x.text || "(empty)")}</b><i class="hr"></i></div>`).join("")
+    || `<span class="edhint">Words shown over the video for a while: press "Add text".</span>`);
   $("#edV").innerHTML = `<em>VIDEO</em>` + (E.clips.map((c, i) => `<div class="edclip${sel("clip", c.id)}" data-clip="${c.id}" title="${esc(c.title)}"
       style="left:${off[i] * pps}px;width:${edLen(c) * pps}px;background-image:linear-gradient(#0008,#000b),url('${edPoster(c.file)}')">
       <i class="hl"></i><b>${E.badges ? `<span>#${E.clips.length - i}</span> ` : ""}${esc(c.caption || c.title || c.file)}</b><small>${r1(edLen(c))}s${c.volume ? "" : " · muted"}</small><i class="hr"></i></div>`).join("")
@@ -1885,11 +1905,12 @@ function edChrome() {
   $("#edWatch").textContent = E.watching ? "Back to the timeline" : p.stale || !E.saved ? "Watch the last render" : "Watch the render";
   $("#edPlay").textContent = E.playing ? "❚❚" : "▶";
   $("#edUndo").disabled = !E.undo.length; $("#edRedo").disabled = !E.redo.length;
-  $("#edSplit").disabled = !edTarget(); $("#edDel").disabled = !E.sel;
+  $("#edSplit").disabled = !edTarget(); $("#edDel").disabled = !E.sel; $("#edText").disabled = !E.clips.length;
 }
 function edInspector() {
-  const s = E.sel, c = s?.kind === "clip" && E.clips.find(x => x.id === s.id), a = s?.kind === "aud" && E.audio.find(x => x.id === s.id);
-  if (!c && !a) E.sel = null;
+  const s = E.sel, x = edSel(), c = s?.kind === "clip" && x, a = s?.kind === "aud" && x, tx = s?.kind === "txt" && x;
+  if (!x) E.sel = null;
+  const opts = (list, v) => list.map(([k, t]) => `<option value="${k}" ${k === v ? "selected" : ""}>${t}</option>`).join("");
   const num = (f, v, max, label) => `<label>${label}<input type="number" data-f="${f}" min="0" max="${max}" step="0.1" value="${r1(v)}"></label>`;
   const vol = v => `<label>Volume <output>${Math.round(v * 100)}%</output><input type="range" data-f="volume" min="0" max="2" step="0.05" value="${v}"></label>`;
   $("#edInsp").innerHTML = c ? `
@@ -1899,7 +1920,7 @@ function edInspector() {
     <span class="hint">Plays ${r1(edLen(c))}s of the ${r1(c.length)}s fetched. Drag the clip's edges, or press I and O at the playhead.</span>
     <label>Fills the screen <select data-f="fit">${[["", "As the channel is set"], ["blur", "Whole clip, blurred edges"], ["zoom", "Zoomed in: middle"], ["zoom-left", "Zoomed in: left side"], ["zoom-right", "Zoomed in: right side"]].map(([v, t]) => `<option value="${v}" ${v === c.fit ? "selected" : ""}>${t}</option>`).join("")}</select></label>
     ${vol(c.volume)}
-    <label>Caption <small>a line shown on this clip</small><input data-f="caption" maxlength="120" value="${esc(c.caption)}" placeholder="None"></label>
+    <label>Caption <small>a line shown on this clip, wherever you move it</small><input data-f="caption" maxlength="120" value="${esc(c.caption)}" placeholder="None"></label>
     <div class="btns"><button class="btn" data-act="split" type="button">Split at playhead</button><button class="btn" data-act="dup" type="button">Duplicate</button><button class="btn danger" data-act="del" type="button">Remove</button></div>`
   : a ? `
     <h5>Audio</h5><b class="ednm">${esc(a.title || a.file)}</b>
@@ -1908,12 +1929,20 @@ function edInspector() {
     <span class="hint">Plays ${r1(edLen(a))}s of ${r1(a.length)}s. Drag it along the track; drag its edges to trim. Anything past the last clip is cut off.</span>
     ${vol(a.volume)}
     <div class="btns"><button class="btn" data-act="split" type="button">Split at playhead</button><button class="btn danger" data-act="del" type="button">Remove</button></div>`
+  : tx ? `
+    <h5>Text</h5>
+    <label>Words<textarea data-f="text" rows="3" maxlength="200" placeholder="What it says">${esc(tx.text)}</textarea></label>
+    <div class="edtwo"><label>Where <select data-f="pos">${opts([["top", "Top"], ["middle", "Middle"], ["bottom", "Bottom"]], tx.pos)}</select></label>
+      <label>Size <select data-f="size">${opts([["S", "Small"], ["M", "Medium"], ["L", "Large"]], tx.size)}</select></label></div>
+    <div class="edtwo">${num("at", tx.at, 3600, "Appears at (s)")}${num("len", tx.len, 600, "Stays for (s)")}</div>
+    <span class="hint">Stays at this time whatever plays under it; drag it along the track, drag its edges to change how long it shows. A clip's own caption moves with the clip instead.</span>
+    <div class="btns"><button class="btn danger" data-act="del" type="button">Remove</button></div>`
   : `
     <h5>This video</h5>
     <label class="check"><input type="checkbox" data-f="badges" ${E.badges ? "checked" : ""}> Number the clips as a countdown <span class="hint" style="margin:0">#3, #2, #1: the last clip is number 1</span></label>
     <span class="hint">Click a clip or a piece of audio to change it. The description, with a credit for every clip and sound, is written when you render.</span>
     <h5>Keys</h5>
-    <dl class="edkeys"><dt>Space</dt><dd>play / pause</dd><dt>← →</dt><dd>move the playhead (Shift: 1 s)</dd><dt>S</dt><dd>split at the playhead</dd>
+    <dl class="edkeys"><dt>Space</dt><dd>play / pause</dd><dt>← →</dt><dd>move the playhead (Shift: 1 s)</dd><dt>S</dt><dd>split at the playhead</dd><dt>T</dt><dd>add text at the playhead</dd>
       <dt>I / O</dt><dd>start / end the clip here</dd><dt>Delete</dt><dd>remove the selected piece</dd><dt>D</dt><dd>duplicate it</dd><dt>⌘Z / ⇧⌘Z</dt><dd>undo / redo</dd></dl>`;
 }
 async function edBin() {
@@ -1961,7 +1990,12 @@ function edTrimHere(edge) {  // I / O
 }
 function edRemove() {
   if (!E.sel) return;
-  edDo(() => { if (E.sel.kind === "clip") E.clips = E.clips.filter(c => c.id !== E.sel.id); else E.audio = E.audio.filter(a => a.id !== E.sel.id); E.sel = null; E.t = Math.min(E.t, edTotal()); });
+  edDo(() => { const k = {clip: "clips", aud: "audio", txt: "texts"}[E.sel.kind]; E[k] = E[k].filter(c => c.id !== E.sel.id); E.sel = null; E.t = Math.min(E.t, edTotal()); });
+}
+function edAddText() {
+  if (!E.clips.length) return;
+  edDo(() => { const x = {id: edId(), text: "", at: r1(E.t), len: Math.max(1, Math.min(3, r1(edTotal() - E.t))), pos: "bottom", size: "M"}; E.texts.push(x); E.sel = {kind: "txt", id: x.id}; });
+  $("#edInsp textarea")?.focus();
 }
 function edDup() {
   const c = E.sel?.kind === "clip" && E.clips.find(x => x.id === E.sel.id); if (!c) return;
@@ -1988,7 +2022,7 @@ $("#edTl").onpointerdown = e => {
   const tl = $("#edTl"), x0 = e.clientX, tAt = ev => Math.max(0, (ev.clientX - tl.getBoundingClientRect().left) / E.pps);
   const cuts = () => [0, ...edOffsets(), edTotal(), E.t];
   const snap = (t, pts) => pts.reduce((best, p) => Math.abs(p - t) < Math.abs(best - t) && Math.abs(p - t) * E.pps < 8 ? p : best, t);
-  const blk = e.target.closest("[data-clip], [data-aud]"), side = e.target.classList.contains("hl") ? "l" : e.target.classList.contains("hr") ? "r" : "";
+  const blk = e.target.closest("[data-clip], [data-aud], [data-txt]"), side = e.target.classList.contains("hl") ? "l" : e.target.classList.contains("hr") ? "r" : "";
   let moved = false, move;
   if (!blk) { edPause(); E.sel = null; edSeek(snap(tAt(e), cuts().slice(0, -1))); move = ev => edSeek(snap(tAt(ev), cuts().slice(0, -1))); }
   else if (blk.dataset.clip) {
@@ -2001,6 +2035,12 @@ $("#edTl").onpointerdown = e => {
           for (const o of others) { if (t > acc + edLen(o) / 2) j++; acc += edLen(o); }
           others.splice(j, 0, c); E.clips = others;
         };
+  } else if (blk.dataset.txt) {
+    const x = E.texts.find(y => y.id === blk.dataset.txt), at0 = x.at, len0 = x.len, dx = ev => (ev.clientX - x0) / E.pps;
+    E.sel = {kind: "txt", id: x.id};
+    move = side === "l" ? ev => { const d = clamp(dx(ev), -at0, len0 - 0.5); x.at = r1(at0 + d); x.len = r1(len0 - d); }
+      : side === "r" ? ev => { x.len = r1(Math.max(0.5, len0 + dx(ev))); }
+      : ev => { x.at = r1(snap(Math.max(0, at0 + dx(ev)), cuts())); };
   } else {
     const a = E.audio.find(x => x.id === blk.dataset.aud), s0 = a.start, e0 = a.end, at0 = a.at;
     E.sel = {kind: "aud", id: a.id};
@@ -2024,10 +2064,11 @@ $("#edTl").onpointerdown = e => {
 };
 $("#edInsp").onchange = e => {
   const f = e.target.dataset.f; if (!f) return;
-  const s = E.sel, x = s && (s.kind === "clip" ? E.clips : E.audio).find(y => y.id === s.id), v = e.target.value;
+  const x = edSel(), v = e.target.value;
   edDo(() => {
     if (f === "badges") E.badges = e.target.checked;
-    else if (f === "fit" || f === "caption") x[f] = v.trim();
+    else if (["fit", "caption", "text", "pos", "size"].includes(f)) x[f] = v.trim();
+    else if (f === "len") x.len = r1(clamp(+v || 0, 0.5, 600));
     else if (f === "volume") x.volume = +v;
     else if (f === "at") x.at = r1(Math.max(0, +v || 0));
     else if (f === "start") x.start = r1(clamp(+v || 0, 0, x.end - 0.5));
@@ -2058,7 +2099,7 @@ $("#edName").oninput = () => { edTouch(); edChrome(); };
 $("#edZoom").oninput = e => { E.pps = +e.target.value; edDraw(); $("#edScroll").scrollLeft = E.t * E.pps - $("#edScroll").clientWidth / 2; };
 $("#edPlay").onclick = () => E.playing ? edPause() : edPlay();
 $("#edWatch").onclick = edWatch;
-$("#edSplit").onclick = edSplit; $("#edDel").onclick = edRemove;
+$("#edSplit").onclick = edSplit; $("#edDel").onclick = edRemove; $("#edText").onclick = edAddText;
 $("#edUndo").onclick = () => edBack(E.undo, E.redo); $("#edRedo").onclick = () => edBack(E.redo, E.undo);
 $("#edRender").onclick = async () => { edPause(); if (E.watching) edWatch(); if (await edSave() && await exec(`rerender --ep ${E.p.ep}`)) { $("#edJob").textContent = "Rendering…"; edChrome(); } };
 $("#edPublish").onclick = e => {  // two clicks: publishing can't be taken back from here
@@ -2074,7 +2115,7 @@ document.addEventListener("keydown", e => {
   if (mod && k === "z") { e.preventDefault(); return e.shiftKey ? edBack(E.redo, E.undo) : edBack(E.undo, E.redo); }
   if (mod && k === "s") { e.preventDefault(); return edSave(); }
   if (mod || e.altKey) return;
-  const act = {" ": () => E.playing ? edPause() : edPlay(), s: edSplit, i: () => edTrimHere("start"), o: () => edTrimHere("end"), d: edDup,
+  const act = {" ": () => E.playing ? edPause() : edPlay(), s: edSplit, t: edAddText, i: () => edTrimHere("start"), o: () => edTrimHere("end"), d: edDup,
                Delete: edRemove, Backspace: edRemove, Escape: () => { E.sel = null; edDraw(); },
                ArrowLeft: () => { edPause(); edSeek(E.t - (e.shiftKey ? 1 : 0.1)); }, ArrowRight: () => { edPause(); edSeek(E.t + (e.shiftKey ? 1 : 0.1)); },
                Home: () => edSeek(0), End: () => edSeek(edTotal())}[k];
@@ -2216,6 +2257,7 @@ async function loadSettings() {
     <details class="hint"><summary>Fixed part, added after your text</summary><pre style="white-space:pre-wrap;margin:6px 0">${esc(p.fixed)}</pre></details>
     <button class="btn sm" type="button" data-pdef="${p.key}">Back to the default</button></div>`).join("");
   fillPrompts(S.prompts || {}); renderThemes();
+  F("say").value = Object.entries(S.say || {}).map(([k, v]) => `${k} = ${v}`).join("\n");
   ["channel", "tagline", "outro_line", "logo_text", "voice_speed", "music_volume", "min_score", "max_seconds"].forEach(k => F(k).value = S[k] ?? "");
   F("logo_text").value = S.logo_text ?? "?";
   F("hashtags").value = (S.hashtags || []).join(", ");
@@ -2280,6 +2322,7 @@ async function searchFonts() {
 function collect() {
   S = {...S, channel: F("channel").value, tagline: F("tagline").value, outro_line: F("outro_line").value, logo_text: F("logo_text").value,
     hashtags: F("hashtags").value.split(",").map(x => x.trim()).filter(Boolean), voice: F("voice").value, voice_speed: +F("voice_speed").value,
+    say: Object.fromEntries(F("say").value.split("\n").map(l => l.split("=").map(x => x.trim())).filter(p => p.length === 2 && p[0] && p[1])),
     music_volume: +F("music_volume").value, voice_engine: document.querySelector("[name=vEngine]:checked")?.value || "kokoro", edge_voice: $("#edgeSel").value || S.edge_voice,
     clone_consent: $("#cloneConsent").checked, mode: document.querySelector("[name=mode]:checked")?.value || "auto", video_type: document.querySelector("[name=vtype]:checked")?.value || "explainer", research_from: document.querySelector("[name=researchFrom]:checked")?.value || "web",
     pictures: document.querySelector("[name=pictures]:checked")?.value || "libraries", picture_style: F("picture_style").value, clip_strip_voice: F("clip_strip_voice").checked, clip_find: F("clip_find").value, clip_days: +F("clip_days").value, clip_fit: F("clip_fit").value, clip_allow_text: F("clip_allow_text").checked, clip_sources: F("clip_sources").value.split("\n").map(x => x.trim()).filter(Boolean),

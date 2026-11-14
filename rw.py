@@ -1790,11 +1790,16 @@ def say_number(expr):
 
 def speakable_map(text):
     """Text the voice reads correctly, plus [(written, spoken)] pairs in order, so captions can show what was written.
-    'World War II' -> 'World War Two', 'Louis XIV' -> 'Louis the Fourteenth', 'PHP 5.4–8.5' -> 'PHP 5 point 4 to 8 point 5'."""
+    'World War II' -> 'World War Two', 'Louis XIV' -> 'Louis the Fourteenth', 'PHP 5.4–8.5' -> 'PHP 5 point 4 to 8 point 5',
+    and the channel's own pronunciations (`say` in brand.json: {"Koh-i-Noor": "ko he noor"}, whatever the capitals)."""
     pairs = []
+    say = {k.lower(): v for k, v in (BRAND.get("say") or {}).items() if k.strip() and v.strip()}
+    rx = re.compile("(?P<say>(?i:(?<!\\w)(?:" + "|".join(sorted(map(re.escape, say), key=len, reverse=True)) + ")(?!\\w)))|" + SPEAK.pattern) if say else SPEAK
 
     def fix(m):
-        if m["num"]:
+        if say and m["say"]:
+            spoken = say[m["say"].lower()]
+        elif m["num"]:
             if "." not in m["num"] and not re.search("[–—-]", m["num"]):
                 return m[0]  # plain numbers are read fine
             spoken = say_number(m["num"])
@@ -1808,7 +1813,7 @@ def speakable_map(text):
             spoken = f"{word} {number_words(n).title()}" if cardinal else f"{word} the {number_words(n, True).title()}"
         pairs.append((m[0], spoken))
         return spoken
-    return SPEAK.sub(fix, text), pairs
+    return rx.sub(fix, text), pairs
 
 
 def speakable(text):
@@ -3070,6 +3075,50 @@ def clip_new(con, title):
     return pid
 
 
+def clip_from_video(con, ep):
+    """Any rendered video of this channel as footage for the editor: a copy of its file goes into media/video and a new
+    clip video starts with that copy as its one clip, to split, cut, reorder and add sound and text to. The original
+    is not touched, and its description (the credits) is carried over. -> pageid"""
+    import shutil
+    row = con.execute("select * from pages where ep=?", (ep,)).fetchone()
+    if not row or not row["video_path"] or not Path(row["video_path"]).exists():
+        raise SystemExit(f"episode {ep} has no rendered video to edit")
+    src = Path(row["video_path"])
+    old = json.loads((WORK / str(row["pageid"]) / "meta.json").read_text())
+    dest = MEDIA / "video" / f"Own-{WS_NAME or 'main'}-{ep:03d}-{int(src.stat().st_mtime)}.mp4"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(src, dest)
+    dur = round(video_seconds(dest), 1)
+    side = dict(title=old["title"], url="", site="Shorts Machine", uploader=BRAND["channel"], license="", duration=dur,
+                file=dest.name, saved=time.strftime("%Y-%m-%d %H:%M"), by="clips")
+    dest.with_suffix(".json").write_text(json.dumps(side, indent=1))
+    library_poster(dest)
+    pid = clip_new(con, old["title"])
+    meta = WORK / str(pid) / "meta.json"
+    m = json.loads(meta.read_text())
+    m.update(tags=old.get("tags") or [], base_description=old.get("yt_description") or "", stale=True,
+             clips=[side | {"path": str(dest), "found": "", "seconds": dur, "start": 0, "end": dur, "use": True, "views": 0, "picked": True}])
+    meta.write_text(json.dumps(m, indent=2))
+    upsert(con, pid, ref=f"edit of EP {ep:03d}", reason=f"edit of EP {ep:03d}")
+    clips_usage(m)
+    return pid
+
+
+TEXT_SIZES = {"S": 56, "M": 84, "L": 124}
+TEXT_POS = {"top": 420, "middle": 960, "bottom": 1380}  # the middle of the plate, pixels down the frame
+
+
+def text_plate(d, text, pos="bottom", size="M"):
+    """Draw a line or two of text on a dark plate, so it reads over anything."""
+    f, ls = fit_lines(text, "display", TEXT_SIZES.get(size, 84), W - 200, 4)
+    hgt = int(len(ls) * f.size * 1.2) + 50
+    wid = min(W - 120, int(max(f.getlength(l) for l in ls)) + 90)
+    top = TEXT_POS.get(pos, 1380) - hgt // 2
+    d.rounded_rectangle(((W - wid) // 2, top, (W + wid) // 2, top + hgt), 30, fill=(*bytes.fromhex(C["bg"][1:]), 215))
+    for i, l in enumerate(ls):
+        d.text((W // 2, top + 25 + i * f.size * 1.2), l, font=f, fill=C["text"], anchor="mt")
+
+
 def clip_add(con, ep, urls, part=None):
     """Add videos you chose (any site yt-dlp reads: Twitch clips and VODs, YouTube, TikTok, Reddit, X…), or one part of
     one ("1:20-1:45"), to a clip video's timeline. A link that fails is reported and the rest go on."""
@@ -3113,7 +3162,8 @@ def mmss(s):
 def render_clips(con, m):
     """Join the clips marked `use`, in their saved order, into the video. Per clip: `start`/`end` trim it, `fit` (else
     the channel's clip_fit, CLIP_FITS) puts it whole over a blurred copy or zoomed to fill the frame, `volume` scales
-    its own sound (0 = silent; the channel may also strip voices), `caption` is a line of text on it. With `badges`
+    its own sound (0 = silent; the channel may also strip voices), `caption` is a line of text on it. `texts` are
+    drawn over the whole from `at` to `end` seconds (`pos` top/middle/bottom, `size` S/M/L). With `badges`
     (a countdown) each carries its rank, the last being number 1. `audio` entries are laid over the whole: each plays
     its `start`-`end` from `at` seconds into the video at its `volume`. Everything is credited in the description.
     Pieces are kept by what they contain, so a reorder re-renders quickly."""
@@ -3146,12 +3196,8 @@ def render_clips(con, m):
             big = font("display", 150)
             d.rounded_rectangle((40, 130, 40 + int(big.getlength(label)) + 60, 330), 28, fill=C["accent"])
             d.text((70, 230), label, font=big, fill=C["bg"], anchor="lm")
-        if cap:  # a line or two low on the frame, on a dark plate so it reads over anything
-            f, ls = fit_lines(cap, "display", 84, W - 200, 3)
-            hgt = int(len(ls) * f.size * 1.2) + 50
-            d.rounded_rectangle((60, 1500 - hgt, W - 60, 1500), 30, fill=(*bytes.fromhex(C["bg"][1:]), 215))
-            for i, l in enumerate(ls):
-                d.text((W // 2, 1500 - hgt + 25 + i * f.size * 1.2), l, font=f, fill=C["text"], anchor="mt")
+        if cap:
+            text_plate(d, cap)
         over.save(work / "over.png")
         probe = subprocess.run([ff, "-hide_banner", "-i", c["path"]], capture_output=True, text=True).stderr
         has = "Audio:" in probe and vol > 0
@@ -3184,29 +3230,45 @@ def render_clips(con, m):
     out = Path(row["video_path"]) if row and row["video_path"] else video_out(m["ep"], title)
     OUT.mkdir(exist_ok=True)
     tracks = [t for t in m.get("audio") or [] if Path(t["path"]).exists() and float(t.get("volume", 1)) > 0]
-    joined = work / "joined.mp4" if tracks else out
+    texts = [t for t in m.get("texts") or [] if t.get("text", "").strip()]
+    joined = work / "joined.mp4" if tracks or texts else out
     if subprocess.run([ff, "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", str(work / "list.txt"),
                        "-c", "copy", "-movflags", "+faststart", str(joined)]).returncode:
         raise RuntimeError("ffmpeg could not join the clips")
-    if tracks:  # lay the audio track over the clips' own sound; the picture is not touched
-        print(f"  adding {len(tracks)} audio piece{'s' if len(tracks) > 1 else ''}…")
-        ins = [x for t in tracks for x in ("-ss", str(t["start"]), "-t", str(t["end"] - t["start"]), "-i", t["path"])]
-        graph = "".join(f"[{i + 1}:a]volume={float(t.get('volume', 1))},adelay={int(t['at'] * 1000)}:all=1[t{i}];" for i, t in enumerate(tracks))
-        r = subprocess.run([ff, "-y", "-loglevel", "error", "-i", str(joined), *ins, "-filter_complex",
-                            graph + "[0:a]" + "".join(f"[t{i}]" for i in range(len(tracks))) + f"amix=inputs={len(tracks) + 1}:normalize=0:duration=first[a]",
-                            "-map", "0:v", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", "-ar", "48000", "-ac", "2", "-b:a", "192k",
+    if tracks or texts:  # a second pass over the joined clips: the audio track mixed in, the text track drawn on
+        print(f"  adding {len(tracks)} audio and {len(texts)} text piece{'s' if len(tracks) + len(texts) > 1 else ''}…")
+        ins, graph, v = [], "", "0:v"
+        for i, t in enumerate(texts):
+            plate = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+            text_plate(ImageDraw.Draw(plate), t["text"].strip(), t.get("pos"), t.get("size"))
+            plate.save(work / f"text-{i}.png")
+            ins += ["-i", str(work / f"text-{i}.png")]
+            graph += f"[{v}][{i + 1}:v]overlay=enable='between(t,{t['at']},{t['end']})'[v{i}];"
+            v = f"v{i}"
+        n = len(texts) + 1
+        ins += [x for t in tracks for x in ("-ss", str(t["start"]), "-t", str(t["end"] - t["start"]), "-i", t["path"])]
+        graph += "".join(f"[{n + i}:a]volume={float(t.get('volume', 1))},adelay={int(t['at'] * 1000)}:all=1[t{i}];" for i, t in enumerate(tracks))
+        if tracks:
+            graph += "[0:a]" + "".join(f"[t{i}]" for i in range(len(tracks))) + f"amix=inputs={len(tracks) + 1}:normalize=0:duration=first[a];"
+        r = subprocess.run([ff, "-y", "-loglevel", "error", "-i", str(joined), *ins, "-filter_complex", graph.rstrip(";"),
+                            "-map", f"[{v}]" if texts else "0:v", *(["-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p"] if texts else ["-c:v", "copy"]),
+                            "-map", "[a]" if tracks else "0:a", *(["-c:a", "aac", "-ar", "48000", "-ac", "2", "-b:a", "192k"] if tracks else ["-c:a", "copy"]),
                             "-movflags", "+faststart", str(out)], capture_output=True, text=True)
         joined.unlink()
+        for f in work.glob("text-*.png"):
+            f.unlink()
         if r.returncode:
-            raise RuntimeError(f"ffmpeg could not add the audio: {r.stderr[-300:]}")
+            raise RuntimeError(f"ffmpeg could not add the audio and text: {r.stderr[-300:]}")
     by = lambda c: f"\"{c['title'][:80]}\" by {c.get('uploader') or 'unknown'} ({c.get('site') or 'web'}){': ' + c['url'] if c.get('url') else ''}"
     seen = set()
-    credits = [(f"#{len(clips) - k}: " if badges else "") + by(c) for k, c in enumerate(clips) if badges or not (c["path"] in seen or seen.add(c["path"]))]
+    credits = [(f"#{len(clips) - k}: " if badges else "") + by(c) for k, c in enumerate(clips)
+               if c.get("site") != "Shorts Machine" and (badges or not (c["path"] in seen or seen.add(c["path"])))]  # our own videos bring their description instead
     sounds = [by(t) for t in tracks if not (t["path"] in seen or seen.add(t["path"]))]
     m["script"], m["stale"] = title + ".", False
-    m["yt_description"] = "\n".join([title + ".", "", f"{BRAND['channel']}: {BRAND['tagline']}", "", "CLIPS", *credits,
-                                     *(["", "AUDIO", *sounds] if sounds else []), "",
-                                     " ".join("#" + re.sub(r"\W", "", t) for t in BRAND["hashtags"] + m["tags"][:3])])[:4900]
+    more = [*(["", "CLIPS", *credits] if credits else []), *(["", "AUDIO", *sounds] if sounds else [])]
+    m["yt_description"] = ("\n".join([m["base_description"], *more]) if m.get("base_description") else
+                           "\n".join([title + ".", "", f"{BRAND['channel']}: {BRAND['tagline']}", *more, "",
+                                      " ".join("#" + re.sub(r"\W", "", t) for t in BRAND["hashtags"] + m["tags"][:3])]))[:4900]
     (work / "meta.json").write_text(json.dumps(m, indent=2))
     clips_usage(m)
     upsert(con, m["pageid"], title=title, status="rendered", video_path=str(out))
@@ -4558,6 +4620,9 @@ def selftest():
     saved, BRAND["prompts"] = BRAND.get("prompts"), {"script": "Be funny about {title} }{"}
     assert prompt_for("script", title="T", text="X", answer="").startswith("Be funny about T }{\n\nArticle title: T")
     BRAND["prompts"] = saved
+    BRAND["say"] = {"Koh-i-Noor": "ko he noor"}
+    assert speakable_map("The koh-i-noor pencil, Louis XIV.") == ("The ko he noor pencil, Louis the Fourteenth.", [("koh-i-noor", "ko he noor"), ("Louis XIV", "Louis the Fourteenth")])
+    del BRAND["say"]
     assert day_from("25 December") == day_from("December 25") == day_from("12-25") == (12, 25)
     heat = [dict(start_time=k * 10.0, value=v) for k, v in enumerate([1, .9, .8, .7, .6, .2, .9, .3] + [.1] * 92)]
     assert best_part(dict(duration=1000, heatmap=heat)) == 60 and best_part(dict(duration=900)) == 300  # the peak after the opening; else a third in

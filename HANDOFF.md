@@ -124,6 +124,12 @@ part), My media, fetching audio by link, a part of a Twitch VOD, a countdown vid
 screens, Safari. Known limits: one video and one audio track, no transitions or fades, no per-clip speed; pieces of
 audio may overlap and are simply mixed; the Queue's Publish doesn't know a render is stale; Twitch can't be searched
 (no listing by game), only links and a channel's clips page.
+Same day, later: "Cut in the editor" for any rendered video, a text track, and pronunciations. Tested in the browser
+on a second studio (port 8799, Leonida Clips) with a throwaway copy of EP 001: split twice, removed the middle, added a
+text (top, large), rendered (57 s, the cut and the text in the frames), deleted. Not tested: the "Cut in the editor"
+button itself on a narrated or quiz video (the endpoint was called directly), dragging text, text with audio together.
+Pronunciations: selftest covers the swap; Random Wiki has "Koh-i-Noor = ko he noor" and EP 020 was re-rendered with it
+(see the session's last report for whether anyone listened). The Settings field was not opened in the browser.
 Known gaps: topic match is by title words only; small or brief
 stamps and emoji overlays pass the text check; letting Gemini watch and rate candidates is the real fix. The video's dialog still shows the explainer editor (narration,
 visuals), which doesn't apply; re-render is refused. No per-clip trimming or reordering yet; each clip is its first

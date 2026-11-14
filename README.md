@@ -226,6 +226,13 @@ are fetched into it. Any clip video opens there too.
   it; with nothing selected, whether the clips are numbered as a countdown.
 - **Keys:** Space plays, ← → move the playhead (Shift: a second), S splits at the playhead, I and O start and end the
   clip there, D duplicates, Delete removes, ⌘Z / ⇧⌘Z undo and redo.
+- **Text:** "Add text" (or T) puts words over the video at the playhead, on a third track above the clips: drag it
+  to where it should appear, drag its edges for how long, and set the words, position and size on the right. A clip's
+  caption moves with the clip; text on the track stays at its time.
+- **Split:** "Split at playhead" (or S) cuts the clip under the playhead in two right there; move or remove either half.
+- **Other kinds of video:** open any rendered video and click **Cut in the editor**. A copy of it opens as one clip
+  you can split, cut parts out of, rearrange and add sound and text to; the original stays as it is. Words already in
+  that video (captions, quiz text) are part of its picture: change those in the original, then cut again.
 - Everything saves by itself. **Render** makes the file ("Watch the render" plays it); **Publish** (two clicks) sends
   the rendered file to the platforms chosen in Connectors, and is only offered when nothing changed since the render.
 The preview is close to the render but not identical (text sizes, the blurred edges, audio timing to a few tenths of

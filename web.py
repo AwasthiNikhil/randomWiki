@@ -75,6 +75,8 @@ def save_brand(new):
         b["topics"] = [str(t).strip()[:40] for t in new["topics"] if str(t).strip()][:12]
     if new.get("idea_source") in ("mix", "topics", "trending", "wikipedia"):
         b["idea_source"] = new["idea_source"]
+    if "say" in new:  # how the voice should say a word: {"written": "spoken"}
+        b["say"] = {str(k).strip()[:60]: str(v).strip()[:80] for k, v in list(new["say"].items())[:200] if str(k).strip() and str(v).strip()}
     if "clip_strip_voice" in new:
         b["clip_strip_voice"] = bool(new["clip_strip_voice"])
     if new.get("clip_find") in ("shorts", "videos"):
@@ -312,6 +314,7 @@ def meta_summary(pid, m):
                      narration=m.get("narration", "kokoro"), music=m.get("music", "brand"), music_volume=m.get("music_volume"),
                      ai=m.get("ai") or m.get("gemini"),
                      audio_credits=m.get("audio_credits") or {}, quiz=m.get("quiz") or [], badges=m.get("badges", True), stale=bool(m.get("stale")),
+                     texts=[dict(text=t["text"], at=t["at"], len=round(t["end"] - t["at"], 2), pos=t["pos"], size=t["size"]) for t in m.get("texts") or []],
                      tracks=[dict(file=Path(t["path"]).name, title=t.get("title", ""), length=t.get("duration") or 0, at=t["at"], start=t["start"],
                                   end=t["end"], volume=t.get("volume", 1)) for t in m.get("audio") or [] if Path(t["path"]).exists()],
                      parts=[[i["name"], i["text"]] for i in m.get("items") or []],  # guess / on this day: what it shows
@@ -608,6 +611,13 @@ class H(BaseHTTPRequestHandler):
                 m = json.loads(meta.read_text())
                 m.update(title=title, script=script)
                 meta.write_text(json.dumps(m, indent=2))
+            elif self.path == "/api/clip_from":  # body: {"pageid"} -> a rendered video of any kind, opened as footage in a new clip video
+                con = rw.db()
+                ep = con.execute("select ep from pages where pageid=?", (int(body["pageid"]),)).fetchone()["ep"]
+                try:
+                    return self.send(200, {"ok": True, "pageid": rw.clip_from_video(con, ep)})
+                except SystemExit as e:
+                    raise ValueError(str(e)) from None
             elif self.path == "/api/clip_new":  # body: {"title"} -> an empty clip video to open in the editor
                 return self.send(200, {"ok": True, "pageid": rw.clip_new(rw.db(), str(body.get("title", "")))})
             elif self.path == "/api/clips":  # the editor's state. body: {"pageid", "title", "badges", "clips": [{"file", "use", "start", "end",
@@ -647,7 +657,11 @@ class H(BaseHTTPRequestHandler):
                 title = str(body.get("title", "")).strip()
                 if not 0 < len(title) <= 100:
                     raise ValueError("give it a title (up to 100 characters)")
-                m.update(title=title, badges=bool(body.get("badges", m.get("badges", True))), audio=audio, stale=True,
+                texts = [{"text": str(t.get("text") or "").strip()[:200], "at": round(max(float(t.get("at") or 0), 0), 2),
+                          "end": round(max(float(t.get("at") or 0), 0) + max(float(t.get("len") or 0), 0.5), 2),
+                          "pos": t.get("pos") if t.get("pos") in rw.TEXT_POS else "bottom", "size": t.get("size") if t.get("size") in rw.TEXT_SIZES else "M"}
+                         for t in body.get("texts") or [] if str(t.get("text") or "").strip()]
+                m.update(title=title, badges=bool(body.get("badges", m.get("badges", True))), audio=audio, texts=texts, stale=True,
                          clips=order + [c | {"use": False} for f, c in have.items() if f not in listed])  # a clip the page didn't list stays, unused
                 meta.write_text(json.dumps(m, indent=2))
                 rw.clips_usage(m)
