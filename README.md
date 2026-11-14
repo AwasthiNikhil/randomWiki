@@ -80,6 +80,12 @@ Keep references, clips, music and pictures in `media/` (`video/`, `audio/`, `ima
 - Search each section by title, uploader, site or licence. Nothing else is kept: no download history, and yt-dlp's cache is off.
 - Use other people's work only with permission, under its licence (Creative Commons, public domain), or as fair use.
 
+## Keeping track of media
+Every item in the Media tab says where it is used ("Used in Rank Them EP 006", "Spare for…", or "Not used yet").
+Clips fetched automatically for clip videos are kept apart from what you added yourself: the tab opens on "Added by
+you", with "Fetched for clip videos" and "All" beside it, a "Not used yet" tick, and one button to delete fetched clips
+that no video uses. Deleting something a video uses asks twice, because that video could no longer be re-rendered.
+
 ## Video clips
 Visuals can also be **video clips**: free-licensed Wikimedia Commons clips (using Wikimedia's own small transcodes) and NASA footage (public domain). They're trimmed to 12 s, skip any opening slate, are muted, and play in the panel. Auto-pick can choose them for named things; in the visuals editor, pick *▶ Commons videos* or *▶ NASA videos*.
 

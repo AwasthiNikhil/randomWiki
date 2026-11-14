@@ -1192,6 +1192,15 @@ def src_met(q, limit=12):
     return out
 
 
+def src_cleveland(q, limit=12):
+    """Cleveland Museum of Art open access: artworks and historical objects, CC0, no key."""
+    d = get_json("https://openaccess-api.clevelandart.org/api/artworks/", {"q": q, "cc0": 1, "has_image": 1, "limit": limit})
+    return [dict(source="cleveland", url=(x["images"].get("print") or x["images"]["web"])["url"], thumb=x["images"]["web"]["url"],
+                 page=x.get("url"), name=x.get("title") or "artwork",
+                 artist=re.sub(r"\s*\(.*", "", (x.get("creators") or [{}])[0].get("description") or "") or "Cleveland Museum of Art",
+                 license="CC0 (Cleveland Museum of Art)") for x in d.get("data") or [] if (x.get("images") or {}).get("web")]
+
+
 VIDEO_MIME = ("video/webm", "video/ogg", "application/ogg", "video/mp4")
 
 
@@ -1315,7 +1324,7 @@ def src_wordpress(q, limit=24):
     return out
 
 
-IMAGE_SOURCES = {"article": src_article, "commons": src_commons, "openverse": src_openverse, "nasa": src_nasa, "met": src_met,
+IMAGE_SOURCES = {"article": src_article, "commons": src_commons, "openverse": src_openverse, "nasa": src_nasa, "met": src_met, "cleveland": src_cleveland,
                  "commons_video": src_commons_video, "nasa_video": src_nasa_video, "wordpress": src_wordpress,
                  "pexels": src_pexels, "pexels_video": src_pexels_video, "pixabay": src_pixabay, "pixabay_video": src_pixabay_video}
 
@@ -2406,7 +2415,34 @@ IMAGE_SOURCES["library"] = src_library
 IMAGE_SOURCES["media_image"] = src_media_images
 
 
-def download(url, section=None, kind="video"):
+def media_used(path, pageid, how=None, title="", ep=None):
+    """Note in a media file's sidecar that this channel's video uses it (how: "used", or "spare" for a clip kept in
+    reserve), or with how=None that it no longer does. The Media tab shows it."""
+    side = Path(path).with_suffix(".json")
+    if not side.exists():
+        return
+    v = json.loads(side.read_text())
+    was = v.get("used_in") or []
+    now = [u for u in was if (u.get("ws"), u.get("pageid")) != (WS_NAME, pageid)]
+    if how:
+        now.append(dict(ws=WS_NAME, channel=BRAND["channel"], pageid=pageid, ep=ep, title=title, how=how))
+    if now != was:
+        side.write_text(json.dumps(v | {"used_in": now}, indent=1))
+
+
+def media_forget(pageid):
+    """A video is gone: nothing in media/ is used by it any more."""
+    for side in MEDIA.glob("*/*.json"):
+        if f'"pageid": {int(pageid)}' in side.read_text():
+            media_used(side, pageid)
+
+
+def clips_usage(m):
+    for c in m.get("clips") or []:
+        media_used(c["path"], m["pageid"], "used" if c.get("use", True) else "spare", m["title"], m["ep"])
+
+
+def download(url, section=None, kind="video", by=None):
     """Save a video or its audio from almost any site (yt-dlp), or an image (direct link, Commons file page, or a page's
     main image), into media/<kind>/, with a small sidecar of where it came from."""
     if kind == "image":
@@ -2458,6 +2494,12 @@ def download(url, section=None, kind="video"):
                 uploader=info.get("uploader") or info.get("channel") or "", license=info.get("license") or "",
                 duration=round(cut[1] - cut[0] if cut else info.get("duration") or 0), section=section or "",
                 file=path.name, saved=time.strftime("%Y-%m-%d %H:%M")) | {k: v for k, v in known.items() if v}
+    had = path.with_suffix(".json")
+    old = json.loads(had.read_text()) if had.exists() else None
+    if old:  # downloaded before: keep who fetched it and which videos use it
+        side |= {k: old[k] for k in ("by", "used_in", "saved") if k in old}
+    elif by:  # "clips": fetched for a clip video, not something you added yourself
+        side["by"] = by
     path.with_suffix(".json").write_text(json.dumps(side, indent=1))
     if kind == "video":
         library_poster(path)
@@ -2671,7 +2713,7 @@ def make_clips(con, text, count=5, draft=None):
                     why["too long or too short"] += 1
                     used.add(c["url"])  # its length won't change: don't look again
                     continue
-                path = download(c["url"])
+                path = download(c["url"], by="clips")
             except (SystemExit, Exception):
                 why["couldn't be read"] += 1
                 continue
@@ -2703,6 +2745,7 @@ def make_clips(con, text, count=5, draft=None):
              narration="none", music="none", clips=clips, yt_description="")
     (WORK / str(pid) / "meta.json").write_text(json.dumps(m, indent=2))
     upsert(con, pid, title=title, url="", source="curated", origin="clips", ref=text, reason="clip countdown", status="draft", ep=ep)
+    clips_usage(m)
     if BRAND.get("mode") == "manual" if draft is None else draft:
         print(f"  draft ready: open EP {ep:03d} in the studio to choose and order the clips, then click Render")
         return pid
@@ -2725,6 +2768,7 @@ def clip_add(con, ep, url):
         raise SystemExit(f"that video is {side.get('duration') or '?'}s long; clips play whole, so add ones under 90 seconds")
     m["clips"].append(side | {"path": str(path), "found": url, "seconds": side["duration"], "use": True, "views": 0, "picked": True})
     meta.write_text(json.dumps(m, indent=2))
+    clips_usage(m)
     print(f"  added to EP {ep:03d}; open it to set the order, then click Render")
 
 
@@ -2791,6 +2835,7 @@ def render_clips(con, m):
     m["yt_description"] = "\n".join([title + ".", "", f"{BRAND['channel']}: {BRAND['tagline']}", "", "CLIPS", *credits, "",
                                      " ".join("#" + re.sub(r"\W", "", t) for t in BRAND["hashtags"] + m["tags"][:3])])[:4900]
     (work / "meta.json").write_text(json.dumps(m, indent=2))
+    clips_usage(m)
     upsert(con, m["pageid"], title=title, status="rendered", video_path=str(out))
     print(f"  done: {out}")
 
@@ -3033,6 +3078,7 @@ def delete_local(con, pageid, reason):
     """Delete an episode's video and work files; the page stays in the log as skipped."""
     import shutil
     row = con.execute("select video_path from pages where pageid=?", (pageid,)).fetchone()
+    media_forget(pageid)
     shutil.rmtree(WORK / str(int(pageid)), ignore_errors=True)
     video = Path(row["video_path"] or "") if row else Path()
     if row and row["video_path"] and video.resolve().parent == OUT.resolve():  # only files we rendered

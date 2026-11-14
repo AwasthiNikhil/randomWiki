@@ -39,7 +39,7 @@ user-facing manual.
 | `data/shorts.db` | SQLite, one table `pages` (every idea/page seen; see below) |
 | `work/<pageid>/` | per video: `meta.json` (script, title, images with timing/motion/overlays/sfx, music, credits, description), images, voice, music, sfx |
 | `out/NNN-slug.mp4` | rendered videos; `out/.posters/` small JPEG stills for the grids |
-| `media/{video,audio,image}/` | the owner's downloads and uploads, each with a `.json` sidecar (was `library/`; migrated automatically) |
+| `media/{video,audio,image}/` | downloads and uploads, shared by all channels, each with a `.json` sidecar: source, licence, `by: "clips"` when fetched automatically for a clip video, and `used_in` (which channel's video uses it, as `used` or `spare`; kept current by `media_used()` / `clips_usage()` / `media_forget()`). The Media tab filters on these |
 | `workspaces/<slug>/` | every channel after the first (see Channels below) |
 | `secrets/` | OAuth and keys: `client_secret.json`, `token.json` (YouTube), `gemini_api_key`, `anthropic_api_key`, `stock.json`, `meta.json`, `tiktok.json` |
 

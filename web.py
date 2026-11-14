@@ -107,6 +107,13 @@ def save_brand(new):
     return b
 
 
+def delete_media(f):
+    f.unlink()
+    f.with_suffix(".json").unlink(missing_ok=True)
+    if f.suffix != ".jpg":
+        f.with_suffix(".jpg").unlink(missing_ok=True)  # a video's poster
+
+
 THEMES = rw.ROOT / "prompts"  # saved sets of prompts, one <name>.json each, shared by every channel
 
 
@@ -292,7 +299,7 @@ def meta_summary(pid, m):
                      audio_credits=m.get("audio_credits") or {},
                      clips=[dict(file=Path(c["path"]).name, title=c.get("title", ""), uploader=c.get("uploader", ""), site=c.get("site", ""),
                                  url=c.get("url", ""), seconds=c.get("seconds") or c.get("duration") or 0, views=c.get("views", 0),
-                                 use=c.get("use", True)) for c in m.get("clips") or []],
+                                 use=c.get("use", True)) for c in m.get("clips") or [] if Path(c["path"]).exists()],
                      images=[{k: v for k, v in i.items() if k != "path"} | {"credit": rw.credit(i), "file": Path(i["path"]).name}
                              for i in m["images"]])
 
@@ -619,9 +626,16 @@ class H(BaseHTTPRequestHandler):
                 f = rw.MEDIA / (kind if kind in rw.MEDIA_KINDS else "video") / name
                 if not re.fullmatch(r"[\w.\-]+", name) or not f.is_file():
                     raise ValueError("no such file in your media")
-                f.unlink()
-                f.with_suffix(".json").unlink(missing_ok=True)
-                f.with_suffix(".jpg").unlink(missing_ok=True)
+                side = next((v for v in rw.library_items(kind) if v["file"] == name), {})
+                if not body.get("force") and any(u["how"] == "used" for u in side.get("used_in") or []):
+                    raise ValueError("a video uses this; deleting it means that video can't be re-rendered")
+                delete_media(f)
+            elif self.path == "/api/library_clean":  # delete clips fetched for clip videos that no video uses (spares included)
+                gone = [v["file"] for v in rw.library_items("video")
+                        if v.get("by") == "clips" and not any(u["how"] == "used" for u in v.get("used_in") or [])]
+                for name in gone:
+                    delete_media(rw.MEDIA / "video" / name)
+                return self.send(200, {"ok": True, "deleted": len(gone)})
             elif self.path == "/api/library_use":  # body: {"file", "pageid", "kind"}: a clip or image becomes a visual, audio its music
                 name, pid, kind = str(body.get("file", "")), int(body["pageid"]), body.get("kind", "video")
                 meta = rw.WORK / str(pid) / "meta.json"
@@ -636,8 +650,10 @@ class H(BaseHTTPRequestHandler):
                     m = json.loads(meta.read_text())
                     m["music"] = "own"
                     meta.write_text(json.dumps(m, indent=2))
+                    rw.media_used(rw.MEDIA / kind / name, pid, "used", m["title"], m["ep"])
                     return self.send(200, {"ok": True, "music": True})
                 m = json.loads(meta.read_text())
+                rw.media_used(rw.MEDIA / kind / name, pid, "used", m["title"], m["ep"])
                 if kind == "image":
                     if len(m["images"]) >= 12:
                         raise ValueError("that video already has 12 visuals; remove one in its editor first")

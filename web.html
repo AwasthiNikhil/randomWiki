@@ -610,7 +610,7 @@ body[data-vtype=clips] [data-for=explainer], body[data-vtype=explainer] [data-fo
           <div class="ccard">
             <div class="chead"><b>Free libraries</b><span class="cstate ok">Always on</span></div>
             <ul class="hint" style="margin:0;padding-left:18px;display:grid;gap:3px">
-              <li><b>Images:</b> Wikipedia, Wikimedia Commons, Openverse (Flickr and others), NASA, The Met, WordPress Photo Directory (CC0)</li>
+              <li><b>Images:</b> Wikipedia, Wikimedia Commons, Openverse (Flickr and others), NASA, The Met, Cleveland Museum of Art, WordPress Photo Directory (CC0)</li>
               <li><b>Video clips:</b> Wikimedia Commons, NASA, and your Library</li>
               <li><b>Music:</b> Openverse (Jamendo, ccMixter and others)</li>
               <li><b>Sound effects:</b> Freesound, through Openverse</li>
@@ -703,7 +703,11 @@ body[data-vtype=clips] [data-for=explainer], body[data-vtype=explainer] [data-fo
             <div class="hint" id="libUp" hidden></div>
             <span class="hint" id="libHint"></span>
           </div>
-          <div class="toolbar" style="margin-bottom:12px"><input class="search" id="libSearch" placeholder="Search title, uploader, site, licence…" aria-label="Search media"></div>
+          <div class="toolbar" style="margin-bottom:12px">
+            <div class="seg" id="libShow" role="group" aria-label="Which media to show"></div>
+            <label class="hint" style="margin:0;display:flex;gap:6px;align-items:center;cursor:pointer"><input type="checkbox" id="libUnused" style="accent-color:var(--accent)"> Not used yet</label>
+            <button class="btn sm danger" id="libClean" hidden></button>
+            <input class="search" id="libSearch" placeholder="Search title, uploader, site, licence…" aria-label="Search media"></div>
           <div id="libList"></div>
         </div>
       </div>
@@ -1247,7 +1251,7 @@ async function openDetail(id) {
         <div class="vsearch">
           <select id="vSource" aria-label="Image source">
             <option value="article">This article</option><option value="commons" selected>Wikimedia Commons</option>
-            <option value="openverse">Openverse (Flickr etc.)</option><option value="nasa">NASA</option><option value="met">The Met (art &amp; history)</option>
+            <option value="openverse">Openverse (Flickr etc.)</option><option value="nasa">NASA</option><option value="met">The Met (art &amp; history)</option><option value="cleveland">Cleveland Museum of Art (CC0)</option>
             <option value="wordpress">WordPress Photos (CC0)</option><option value="pexels">Pexels photos</option><option value="pixabay">Pixabay photos</option>
             <option value="commons_video">▶ Commons videos</option><option value="nasa_video">▶ NASA videos</option><option value="pexels_video">▶ Pexels videos</option><option value="pixabay_video">▶ Pixabay videos</option><option value="media_image">My media: images</option><option value="library">▶ My media: videos</option>
           </select>
@@ -1341,7 +1345,21 @@ async function loadLibrary() {
 }
 function renderLibrary() {
   const words = $("#libSearch").value.toLowerCase().split(/\s+/).filter(Boolean), kind = mediaKind, c = MEDIA_COPY[kind];
-  const items = library.filter(v => words.every(w => [v.title, v.uploader, v.site, v.license, v.file].join(" ").toLowerCase().includes(w)));
+  const used = v => (v.used_in || []).filter(u => u.how === "used"), fetched = v => v.by === "clips";
+  const groups = {all: library, mine: library.filter(v => !fetched(v)), fetched: library.filter(fetched)};
+  if (!libShow || !groups[libShow].length) libShow = groups.mine.length ? "mine" : "all";  // your own things first; fetched clips don't bury them
+  $("#libShow").innerHTML = [["all", "All"], ["mine", "Added by you"], ["fetched", "Fetched for clip videos"]].map(([k, label]) =>
+    `<button type="button" data-show="${k}" class="${k === libShow ? "on" : ""}" ${groups[k].length ? "" : "disabled"}>${label} ${groups[k].length}</button>`).join("");
+  $("#libShow").hidden = !groups.fetched.length;
+  const idle = groups.fetched.filter(v => !used(v).length).length;
+  $("#libClean").hidden = !idle;
+  if ($("#libClean").dataset.sure !== "1") $("#libClean").textContent = `Delete ${idle} fetched clip${idle === 1 ? "" : "s"} no video uses`;
+  const usage = v => {
+    const by = how => [...new Map((v.used_in || []).filter(u => u.how === how).map(u => [u.ws + "|" + u.pageid, `${u.channel} EP ${String(u.ep).padStart(3, "0")}`])).values()];
+    const u = by("used"), sp = by("spare");
+    return u.length ? `<span class="chip s-uploaded">Used in ${esc(u.join(", "))}</span>` : sp.length ? `<span class="chip s-draft">Spare for ${esc(sp.join(", "))}</span>` : `<span class="chip">Not used yet</span>`;
+  };
+  const items = groups[libShow].filter(v => (!$("#libUnused").checked || !used(v).length) && words.every(w => [v.title, v.uploader, v.site, v.license, v.file].join(" ").toLowerCase().includes(w)));
   const src = v => `/media/${kind}/${encodeURIComponent(v.file)}`;
   $("#libList").innerHTML = !library.length ? `<div class="empty">${c.empty}</div>`
     : !items.length ? `<div class="empty">Nothing matches.</div>` : `<div class="libgrid">${paged("lib", items, kind + "|" + words.join(" ")).map(v => `
@@ -1349,18 +1367,28 @@ function renderLibrary() {
         : kind === "audio" ? `<div class="wave">♪</div><audio src="${src(v)}" controls preload="none"></audio>`
         : `<a href="${src(v)}" target="_blank" rel="noopener"><img class="still" src="${src(v)}" alt="${esc(v.title)}" loading="lazy"></a>`}
       <div class="body"><h3>${esc(v.title)}</h3>
+        <div class="meta">${usage(v)}</div>
         <div class="meta">${[v.uploader, v.site, v.duration ? mmss(v.duration) : "", v.width ? `${v.width}×${v.height}` : "", v.section ? "part " + v.section : ""].filter(Boolean).map(esc).join(" · ")}</div>
         ${v.license ? `<div class="meta">Licence: ${esc(v.license)}</div>` : ""}
         <div class="meta" title="File in media/${kind}/">${esc(v.file)}</div>
         <div class="row">${v.url ? `<a class="btn sm" href="${esc(v.url)}" target="_blank" rel="noopener">Source ↗</a>` : ""}
           <button class="btn sm" data-libuse="${esc(v.file)}">${c.use}</button>
-          <button class="btn sm danger" data-libdel="${esc(v.file)}">Delete</button></div>
+          <button class="btn sm danger" data-libdel="${esc(v.file)}" data-used="${used(v).length ? 1 : ""}">Delete</button></div>
         <div class="row" data-usebox="${esc(v.file)}" hidden>
           <select class="sort" style="margin:0;flex:1;min-width:0" aria-label="Video to use it in"></select>
           <button class="btn sm primary" data-libadd="${esc(v.file)}">${kind === "audio" ? "Use" : "Add"}</button></div></div></div>`).join("")}${moreBtn("lib", items.length)}</div>`;
   watchMore();
 }
 $("#libSearch").oninput = renderLibrary;
+let libShow = "";
+$("#libShow").onclick = e => { if (e.target.dataset.show) { libShow = e.target.dataset.show; renderLibrary(); } };
+$("#libUnused").onchange = renderLibrary;
+$("#libClean").onclick = async e => {
+  const b = e.target;
+  if (b.dataset.sure !== "1") { b.dataset.sure = "1"; b.textContent = "They'll be gone for good, spares included. Delete?"; return; }
+  b.dataset.sure = "";
+  if (await post("/api/library_clean")) { termLine("fetched clips that no video uses were deleted", "good"); loadLibrary(); loadPages(); }
+};
 $("#libFile").onchange = async e => {  // one at a time, with progress: videos can be big
   const files = [...e.target.files], kind = mediaKind, box = $("#libUp"); e.target.value = "";
   let ok = 0;
@@ -1408,8 +1436,9 @@ $("#libList").addEventListener("click", async e => {
     add.disabled = false; add.textContent = mediaKind === "audio" ? "Use" : "Add"; return;
   }
   const b = e.target.closest("[data-libdel]"); if (!b) return;
-  if (b.textContent !== "Delete for good?") { b.textContent = "Delete for good?"; return; }
-  if (await post("/api/library_delete", {file: b.dataset.libdel, kind: mediaKind})) loadLibrary();
+  const sure = b.dataset.used ? "A video uses it. Delete anyway?" : "Delete for good?";
+  if (b.textContent !== sure) { b.textContent = sure; return; }
+  if (await post("/api/library_delete", {file: b.dataset.libdel, kind: mediaKind, force: true})) loadLibrary();
 });
 document.addEventListener("click", async e => {
   const t = e.target.closest("button"); if (!t) return;

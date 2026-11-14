@@ -68,6 +68,8 @@ before, only music after; about a quarter of a clip's length to process. Nobody 
 Clip editor (pick, reorder, add by link, re-render) and the Settings/Connectors redesign were tested in the browser
 on Rank Them and a throwaway channel; drag-and-drop reordering was not exercised (the up/down buttons were), nor was
 the redesign checked at phone width or on Random Wiki itself.
+Media tracking (usage labels, by-you/fetched filter, cleanup button) was checked in the browser on Rank Them; the
+cleanup button and deleting a used item were not clicked through, since they would delete the owner's real clips.
 Known gaps: topic match is by title words only; small or brief
 stamps and emoji overlays pass the text check; letting Gemini watch and rate candidates is the real fix. The video's dialog still shows the explainer editor (narration,
 visuals), which doesn't apply; re-render is refused. No per-clip trimming or reordering yet; each clip is its first
