@@ -114,6 +114,16 @@ tested: Make now and schedules on this channel, links from Twitch / Reddit / X, 
 trailers and fakes, and nothing here can tell; the most replayed moment may be a talking head or a web page; zoom
 cuts a wide clip to its middle third, so words and maps at the sides are lost; with the text check off, captions and
 channel stamps get through.
+The editor (2026-11-14, CLAUDE.md "The editor"): replaces the clip list in the video dialog. Tested in the browser on
+a throwaway video in Leonida Clips (since deleted): New edit with two Twitch clip links in the Make box, playback
+across clips with the audio track in step, split, undo/redo, caption, mute, adding audio at the playhead, dragging a
+clip to reorder, Render (33 s; caption in the frame; silence where the muted clip plays alone, tone then tone plus
+clip sound after; credits list clips and audio), opening from the video dialog, going back. Not tested: Publish from
+the editor, dragging edges to trim and dragging audio (the number fields and keys share their code paths only in
+part), My media, fetching audio by link, a part of a Twitch VOD, a countdown video (badges on) in the editor, small
+screens, Safari. Known limits: one video and one audio track, no transitions or fades, no per-clip speed; pieces of
+audio may overlap and are simply mixed; the Queue's Publish doesn't know a render is stale; Twitch can't be searched
+(no listing by game), only links and a channel's clips page.
 Known gaps: topic match is by title words only; small or brief
 stamps and emoji overlays pass the text check; letting Gemini watch and rate candidates is the real fix. The video's dialog still shows the explainer editor (narration,
 visuals), which doesn't apply; re-render is refused. No per-clip trimming or reordering yet; each clip is its first

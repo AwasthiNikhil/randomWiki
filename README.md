@@ -205,15 +205,31 @@ seconds are taken, as many as fit the channel's maximum video length), clips wit
 screen are left out (macOS only), search results must name the subject in their title, and a clip is never used twice
 on a channel. "Remove human voices from clips" takes talking, narration and singing out of each clip's sound and
 keeps the music and other sounds. Settings also takes a list of accounts to draw from every time (TikTok accounts, YouTube channels or
-playlists); Facebook and Instagram can't be browsed, so paste single video links from them. Open a clip video to choose its clips: tick the ones to use, move them into playing order (the last is number 1),
-play any of them, or add one by pasting a link; then re-render. A few spare clips are fetched with each video so
-there is something to swap in. With "Stop at a draft" (Settings → Videos) nothing is rendered until you have chosen.
+playlists); Facebook and Instagram can't be browsed, so paste single video links from them. Open a clip video and click **Open in the editor**
+(below). A few spare clips are fetched with each video so there is something to swap in; they wait in the editor's bin.
+With "Stop at a draft" (Settings → Videos) nothing is rendered until you have chosen.
 For gameplay and other footage that sits inside long videos, the channel's Clips settings have: **Where to look**
 (YouTube videos of any length: the most replayed 15 seconds of each long one are taken), **How new** (last day, week
 or month), **How a clip fills the screen** (whole over a blurred copy, or zoomed to fill) and **Keep clips with text
-on screen** (turn on for games). In a clip video, each clip has "from … to …" seconds to trim it and its own fill
-choice (blurred edges, or fill keeping the middle, left or right); to add part of a long video, paste its link and
-the part, like 1:20-1:45.
+on screen** (turn on for games). 
+
+### The editor
+On a clips channel, **New edit** (beside Make now) starts an empty video in the editor; links typed in the Make box
+are fetched into it. Any clip video opens there too.
+- **Left, the bin:** paste links (one per line: Twitch clips and VODs, YouTube, TikTok, Reddit, X, Instagram…) and
+  click Fetch. A video over 10 minutes needs the part to fetch, like `1:20:00-1:22:30`. "This video" lists what was
+  fetched for it, "My media" your own library, "Audio" your music and sounds; + puts one on the timeline.
+- **Bottom, the timeline:** clips play left to right. Drag a clip to move it, drag its edges to trim, click the ruler
+  to move the playhead. The audio track under it holds music or sound laid over the clips: drag a piece to where it
+  should come in, drag its edges to trim.
+- **Right:** the selected piece's start and end, how it fills the screen, its volume (0 mutes it), a caption shown on
+  it; with nothing selected, whether the clips are numbered as a countdown.
+- **Keys:** Space plays, ← → move the playhead (Shift: a second), S splits at the playhead, I and O start and end the
+  clip there, D duplicates, Delete removes, ⌘Z / ⇧⌘Z undo and redo.
+- Everything saves by itself. **Render** makes the file ("Watch the render" plays it); **Publish** (two clicks) sends
+  the rendered file to the platforms chosen in Connectors, and is only offered when nothing changed since the render.
+The preview is close to the render but not identical (text sizes, the blurred edges, audio timing to a few tenths of
+a second).
 From the command line: `./rw clips "funny cats" --count 5`. These are other people's videos:
 each is credited in the description, but credit is not permission, and platforms can remove or demonetise reposts.
 

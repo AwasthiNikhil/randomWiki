@@ -277,7 +277,7 @@ def set_audio_credit(pid, file, item):
 _meta_cache = {}  # path -> (mtime, summary): thousands of videos shouldn't mean thousands of JSON reads per refresh
 
 
-HEAVY = ("images", "yt_description", "potential_info", "audio_credits", "clips", "quiz", "parts")  # only the open video needs these
+HEAVY = ("images", "yt_description", "potential_info", "audio_credits", "clips", "quiz", "parts", "tracks")  # only the open video needs these
 
 
 def pages(pageid=None):
@@ -311,13 +311,15 @@ def meta_summary(pid, m):
     return dict(yt_title=m["title"], script=m["script"], yt_description=m["yt_description"], potential_info=m.get("potential"),
                      narration=m.get("narration", "kokoro"), music=m.get("music", "brand"), music_volume=m.get("music_volume"),
                      ai=m.get("ai") or m.get("gemini"),
-                     audio_credits=m.get("audio_credits") or {}, quiz=m.get("quiz") or [],
+                     audio_credits=m.get("audio_credits") or {}, quiz=m.get("quiz") or [], badges=m.get("badges", True), stale=bool(m.get("stale")),
+                     tracks=[dict(file=Path(t["path"]).name, title=t.get("title", ""), length=t.get("duration") or 0, at=t["at"], start=t["start"],
+                                  end=t["end"], volume=t.get("volume", 1)) for t in m.get("audio") or [] if Path(t["path"]).exists()],
                      parts=[[i["name"], i["text"]] for i in m.get("items") or []],  # guess / on this day: what it shows
                      clips=[dict(file=Path(c["path"]).name, title=c.get("title", ""), uploader=c.get("uploader", ""), site=c.get("site", ""),
                                  url=c.get("url", ""), seconds=c.get("seconds") or c.get("duration") or 0, views=c.get("views", 0),
                                  start=c.get("start") or 0, end=c.get("end") or c.get("seconds") or c.get("duration") or 0,
-                                 length=max(c.get("duration") or 0, c.get("seconds") or 0), fit=c.get("fit", ""),
-                                 use=c.get("use", True)) for c in m.get("clips") or [] if Path(c["path"]).exists()],
+                                 length=max(c.get("duration") or 0, c.get("seconds") or 0), fit=c.get("fit") or "",
+                                 volume=c.get("volume", 1), caption=c.get("caption", ""), use=c.get("use", True)) for c in m.get("clips") or [] if Path(c["path"]).exists()],
                      images=[{k: v for k, v in i.items() if k != "path"} | {"credit": rw.credit(i), "file": Path(i["path"]).name}
                              for i in m["images"]])
 
@@ -424,7 +426,7 @@ class H(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path, _, query = self.path.partition("?")
-        if re.fullmatch(r"/((episodes|ideabank|queue|media|log|connectors|settings)(/[\w-]*)?|video/\d+)?", path):  # every studio page
+        if re.fullmatch(r"/((episodes|ideabank|queue|media|log|connectors|settings)(/[\w-]*)?|(video|edit)/\d+)?", path):  # every studio page
             return self.send(200, (rw.ROOT / "web.html").read_bytes(), "text/html; charset=utf-8")
         if path == "/api/page":  # ?id=N: one video with everything the editor needs
             got = pages(int((re.search(r"id=(\d+)", query) or [0, 0])[1]))
@@ -606,25 +608,51 @@ class H(BaseHTTPRequestHandler):
                 m = json.loads(meta.read_text())
                 m.update(title=title, script=script)
                 meta.write_text(json.dumps(m, indent=2))
-            elif self.path == "/api/clips":  # body: {"pageid", "title", "clips": [{"file", "use", "start", "end", "fit"}] in playing order}; client then runs rerender
+            elif self.path == "/api/clip_new":  # body: {"title"} -> an empty clip video to open in the editor
+                return self.send(200, {"ok": True, "pageid": rw.clip_new(rw.db(), str(body.get("title", "")))})
+            elif self.path == "/api/clips":  # the editor's state. body: {"pageid", "title", "badges", "clips": [{"file", "use", "start", "end",
+                # "fit", "volume", "caption"}] in playing order (a file may come twice: two cuts of it), "audio": [{"file", "at", "start", "end", "volume"}]}
                 meta = rw.WORK / str(int(body["pageid"])) / "meta.json"
                 m = json.loads(meta.read_text())
-                have = {Path(c["path"]).name: c for c in m.get("clips") or []}
-                def clip(new):  # the saved clip with the page's tick, trim (seconds into the file) and fit
-                    c = have.pop(str(new["file"]))
+
+                def source(kind, name, known):  # what we know of a file: from this video, else from the media library
+                    if name in known:
+                        return known[name]
+                    side = rw.MEDIA / kind / Path(name).with_suffix(".json").name
+                    if not re.fullmatch(r"[\w.\-]+", name) or not side.is_file() or not (rw.MEDIA / kind / name).is_file():
+                        raise ValueError(f"no such file in your media: {name}")
+                    return json.loads(side.read_text()) | {"path": str(rw.MEDIA / kind / name), "picked": True, "views": 0}
+
+                def span(c, new):  # start and end, seconds into the file, at least half a second apart
                     full = max(c.get("duration") or 0, c.get("seconds") or 0)
                     a = min(max(float(new.get("start") or 0), 0), full)
                     b = min(float(new.get("end") or full), full)
-                    if b - a < 1:
-                        raise ValueError(f"\"{c.get('title', '')[:40]}\": the end has to be at least a second after the start")
-                    return c | {"use": bool(new.get("use")), "start": a, "end": b, "seconds": round(b - a, 1),
-                                "fit": new.get("fit") if new.get("fit") in rw.CLIP_FITS else ""}
-                order = [clip(c) for c in body["clips"] if str(c.get("file")) in have]
+                    if b - a < 0.5:
+                        raise ValueError(f"\"{c.get('title', '')[:40]}\": the end has to be after the start")
+                    return {"start": round(a, 2), "end": round(b, 2)}
+
+                have = {Path(c["path"]).name: c for c in reversed(m.get("clips") or [])}
+                order = []
+                for new in body["clips"]:
+                    c = source("video", str(new["file"]), have)
+                    t = span(c, new)
+                    order.append(c | t | {"use": bool(new.get("use")), "seconds": round(t["end"] - t["start"], 2),
+                                          "fit": new.get("fit") if new.get("fit") in rw.CLIP_FITS else "",
+                                          "volume": min(max(float(new.get("volume", 1)), 0), 2), "caption": str(new.get("caption") or "").strip()[:120]})
+                listed = {str(new["file"]) for new in body["clips"]}
+                had = {Path(t["path"]).name: t for t in m.get("audio") or []}
+                audio = [(t := source("audio", str(new["file"]), had)) | span(t, new)
+                         | {"at": round(max(float(new.get("at") or 0), 0), 2), "volume": min(max(float(new.get("volume", 1)), 0), 2)}
+                         for new in body.get("audio") or []]
                 title = str(body.get("title", "")).strip()
-                if not 0 < len(title) <= 100 or sum(c["use"] for c in order) < 2:
-                    raise ValueError("give it a title (up to 100 characters) and tick at least two clips")
-                m.update(title=title, clips=order + list(have.values()))  # any clip the page didn't list is kept, at the end
+                if not 0 < len(title) <= 100:
+                    raise ValueError("give it a title (up to 100 characters)")
+                m.update(title=title, badges=bool(body.get("badges", m.get("badges", True))), audio=audio, stale=True,
+                         clips=order + [c | {"use": False} for f, c in have.items() if f not in listed])  # a clip the page didn't list stays, unused
                 meta.write_text(json.dumps(m, indent=2))
+                rw.clips_usage(m)
+                for t in audio:
+                    rw.media_used(t["path"], m["pageid"], "used", m["title"], m["ep"])
             elif self.path == "/api/quiz":  # body: {"pageid", "title", "quiz": [{"question", "options": [3], "answer"}]}; client then runs rerender
                 meta = rw.WORK / str(int(body["pageid"])) / "meta.json"
                 m = json.loads(meta.read_text())

@@ -3054,70 +3054,109 @@ def make_clips(con, text, count=5, draft=None):
     return pid
 
 
-def clip_add(con, ep, url, part=None):
-    """Add one video you chose (any site yt-dlp reads), or one part of it ("1:20-1:45"), to a clip countdown; it is
-    used on the next render."""
+CLIP_WHOLE = 600  # the longest video fetched whole for the editor; of anything longer, name a part
+
+
+def clip_new(con, title):
+    """An empty clip video to fill in the editor. -> pageid"""
+    title = title.strip()[:100] or "Untitled edit"
+    pid = sources_id(f"clips:{title}:{time.time()}")
+    ep = con.execute("select coalesce(max(ep), 0) + 1 from pages").fetchone()[0]
+    (WORK / str(pid)).mkdir(parents=True, exist_ok=True)
+    m = dict(ep=ep, pageid=pid, origin="clips", article_title=title, description="", title=title, script=title + ".", tags=[],
+             images=[], url="", narration="none", music="none", clips=[], audio=[], badges=False, yt_description="")
+    (WORK / str(pid) / "meta.json").write_text(json.dumps(m, indent=2))
+    upsert(con, pid, title=title, url="", source="curated", origin="clips", ref="", reason="clip edit", status="draft", ep=ep)
+    return pid
+
+
+def clip_add(con, ep, urls, part=None):
+    """Add videos you chose (any site yt-dlp reads: Twitch clips and VODs, YouTube, TikTok, Reddit, X…), or one part of
+    one ("1:20-1:45"), to a clip video's timeline. A link that fails is reported and the rest go on."""
+    import yt_dlp
     row = con.execute("select * from pages where ep=? and origin='clips'", (ep,)).fetchone()
     if not row:
-        raise SystemExit(f"episode {ep} is not a clip countdown")
+        raise SystemExit(f"episode {ep} is not a clip video")
     meta = WORK / str(row["pageid"]) / "meta.json"
-    m = json.loads(meta.read_text())
-    if not part:  # look before fetching: a whole stream is no clip
-        import yt_dlp
+    added = 0
+    for url in urls:
         try:
-            with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "cachedir": False, "noplaylist": True}) as y:
-                dur = y.extract_info(url, download=False).get("duration") or 0
-        except yt_dlp.utils.DownloadError as e:
-            raise SystemExit(str(e).split("\n")[0][:200]) from None
-        if dur > 90:
-            raise SystemExit(f"that video is {int(dur)}s long: say which part to use, like 1:20-1:45")
-    path = download(url, part)
-    side = json.loads(path.with_suffix(".json").read_text())
-    if any(c["path"] == str(path) for c in m["clips"]):
-        raise SystemExit("that clip is already in this video")
-    if not side.get("duration") or side["duration"] > 90:
-        raise SystemExit(f"that is {side.get('duration') or '?'}s long; add clips or parts under 90 seconds")
-    m["clips"].append(side | {"path": str(path), "found": url, "seconds": side["duration"], "start": 0, "end": side["duration"],
-                              "use": True, "views": 0, "picked": True})
-    meta.write_text(json.dumps(m, indent=2))
-    clips_usage(m)
-    print(f"  added to EP {ep:03d}; open it to set the order, then click Render")
+            if not part:  # look before fetching: a whole stream is no clip
+                with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "cachedir": False, "noplaylist": True}) as y:
+                    dur = y.extract_info(url, download=False).get("duration") or 0
+                if dur > CLIP_WHOLE:
+                    raise SystemExit(f"it is {mmss(dur)} long: say which part to fetch (up to {CLIP_WHOLE // 60} minutes), like 1:20:00-1:22:30")
+            path = download(url, part)
+            side = json.loads(path.with_suffix(".json").read_text())
+            if not side.get("duration") or side["duration"] > CLIP_WHOLE + 5:
+                raise SystemExit(f"that is {side.get('duration') or '?'}s long; fetch at most {CLIP_WHOLE // 60} minutes at a time")
+        except (SystemExit, Exception) as e:
+            print(f"  couldn't add {url[:80]}: {str(e).splitlines()[0][:200] if str(e) else type(e).__name__}")
+            continue
+        m = json.loads(meta.read_text())  # read late: the editor may have saved while this downloaded
+        end = side["duration"] if side["duration"] <= 90 else 30  # a long one starts as its first half minute; trim it in the editor
+        m["clips"].append(side | {"path": str(path), "found": url, "seconds": end, "start": 0, "end": end,
+                                  "use": True, "views": 0, "picked": True})
+        m["stale"] = True
+        meta.write_text(json.dumps(m, indent=2))
+        clips_usage(m)
+        added += 1
+    if not added:
+        raise SystemExit("nothing was added")
+    print(f"  added {added} to EP {ep:03d}")
+
+
+def mmss(s):
+    return f"{int(s) // 3600}:{int(s) % 3600 // 60:02d}:{int(s) % 60:02d}" if s >= 3600 else f"{int(s) // 60}:{int(s) % 60:02d}"
 
 
 def render_clips(con, m):
-    """Join the clips marked `use`, in their saved order (the last one is number 1), into the video. Each fills the
-    frame over a blurred copy of itself, keeps its own sound (or loses its voices, if the channel says so) and
-    carries its rank. A clip's `start`/`end` trim it, and its `fit` (else the channel's clip_fit) says whether it sits
-    whole over a blurred copy or is zoomed to fill the frame (CLIP_FITS). Every clip is credited in the description. Pieces are kept, so a reorder re-renders quickly."""
-    import subprocess, imageio_ffmpeg
-    from PIL import Image, ImageDraw, ImageFont
+    """Join the clips marked `use`, in their saved order, into the video. Per clip: `start`/`end` trim it, `fit` (else
+    the channel's clip_fit, CLIP_FITS) puts it whole over a blurred copy or zoomed to fill the frame, `volume` scales
+    its own sound (0 = silent; the channel may also strip voices), `caption` is a line of text on it. With `badges`
+    (a countdown) each carries its rank, the last being number 1. `audio` entries are laid over the whole: each plays
+    its `start`-`end` from `at` seconds into the video at its `volume`. Everything is credited in the description.
+    Pieces are kept by what they contain, so a reorder re-renders quickly."""
+    import hashlib, subprocess, imageio_ffmpeg
+    from PIL import Image, ImageDraw
     ensure_fonts()
     ff = imageio_ffmpeg.get_ffmpeg_exe()
     clips = [c for c in m["clips"] if c.get("use", True) and Path(c["path"]).exists()]
-    if len(clips) < 2:
-        raise SystemExit("a countdown needs at least two clips ticked")
+    badges = m.get("badges", True)
+    if len(clips) < (2 if badges else 1):
+        raise SystemExit("a countdown needs at least two clips" if badges else "put at least one clip on the timeline")
     work = WORK / str(m["pageid"])
-    m["title"] = re.sub(r"^Top \d+ ", f"Top {len(clips)} ", m["title"])  # the title follows the number of clips
+    if badges:
+        m["title"] = re.sub(r"^Top \d+ ", f"Top {len(clips)} ", m["title"])  # the title follows the number of clips
     title, strip = m["title"], bool(BRAND.get("clip_strip_voice"))
-    big = ImageFont.truetype(str(ROOT / BRAND["fonts"]["display"]), 150)
     segs = []
     for k, c in enumerate(clips):
-        label, a = f"#{len(clips) - k}", float(c.get("start") or 0)
+        label, a = f"#{len(clips) - k}" if badges else "", float(c.get("start") or 0)
         secs = float(c.get("end") or c.get("seconds") or c.get("duration")) - a
-        fit = c.get("fit") or BRAND.get("clip_fit") or "blur"
-        seg = work / f"seg-{Path(c['path']).stem}-{len(clips) - k}{'-novoice' if strip else ''}-{C['accent'][1:]}-{a:g}-{secs:g}-{fit}.mp4"
+        fit, vol, cap = c.get("fit") or BRAND.get("clip_fit") or "blur", float(c.get("volume", 1)), (c.get("caption") or "").strip()
+        key = hashlib.sha1(json.dumps([c["path"], label, a, secs, fit, vol, cap, strip, C["accent"], C["bg"], C["text"]]).encode()).hexdigest()[:12]
+        seg = work / f"seg-{key}.mp4"
         segs.append(seg)
-        print(f"  {label}: {c['title'][:60]}")
+        print(f"  {label or k + 1}: {c['title'][:60]}")
         if seg.exists():
             continue
-        badge = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-        d = ImageDraw.Draw(badge)
-        d.rounded_rectangle((40, 130, 40 + int(big.getlength(label)) + 60, 330), 28, fill=C["accent"])
-        d.text((70, 230), label, font=big, fill=C["bg"], anchor="lm")
-        badge.save(work / "badge.png")
+        over = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        d = ImageDraw.Draw(over)
+        if label:
+            big = font("display", 150)
+            d.rounded_rectangle((40, 130, 40 + int(big.getlength(label)) + 60, 330), 28, fill=C["accent"])
+            d.text((70, 230), label, font=big, fill=C["bg"], anchor="lm")
+        if cap:  # a line or two low on the frame, on a dark plate so it reads over anything
+            f, ls = fit_lines(cap, "display", 84, W - 200, 3)
+            hgt = int(len(ls) * f.size * 1.2) + 50
+            d.rounded_rectangle((60, 1500 - hgt, W - 60, 1500), 30, fill=(*bytes.fromhex(C["bg"][1:]), 215))
+            for i, l in enumerate(ls):
+                d.text((W // 2, 1500 - hgt + 25 + i * f.size * 1.2), l, font=f, fill=C["text"], anchor="mt")
+        over.save(work / "over.png")
         probe = subprocess.run([ff, "-hide_banner", "-i", c["path"]], capture_output=True, text=True).stderr
-        sound = ["-map", "0:a"] if "Audio:" in probe else ["-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo", "-map", "2:a"]
-        if strip and "Audio:" in probe:
+        has = "Audio:" in probe and vol > 0
+        sound = ["-map", "0:a"] if has else ["-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo", "-map", "2:a"]
+        if strip and has:
             clean = work / f"novoice-{Path(c['path']).stem}.wav"
             if not clean.exists():
                 print("    removing voices…")
@@ -3125,13 +3164,14 @@ def render_clips(con, m):
             sound = ["-ss", str(a), "-i", str(clean), "-map", "2:a"]
         tmp = seg.with_suffix(".part.mp4")
         fill = f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H}"
-        r = subprocess.run([ff, "-y", "-loglevel", "error", "-ss", str(a), "-i", c["path"], "-loop", "1", "-i", str(work / "badge.png"), *sound[:-2],
+        r = subprocess.run([ff, "-y", "-loglevel", "error", "-ss", str(a), "-i", c["path"], "-loop", "1", "-i", str(work / "over.png"), *sound[:-2],
                             "-filter_complex",
                             (f"{fill},boxblur=24[bg];[0:v]scale={W}:{H}:force_original_aspect_ratio=decrease[fg];"
                              f"[bg][fg]overlay=(W-w)/2:(H-h)/2[v0];" if fit == "blur" else
                              f"{fill}:{ {'zoom-left': '0', 'zoom-right': 'iw-ow'}.get(fit, '(iw-ow)/2')}:0[v0];") +
                             f"[v0][1:v]overlay=0:0:shortest=1,fps={FPS},format=yuv420p[v]",
-                            "-map", "[v]", *sound[-2:], "-t", str(secs), "-shortest", "-c:v", "libx264", "-preset", "medium", "-crf", "20",
+                            "-map", "[v]", *sound[-2:], *(["-af", f"volume={vol}"] if has and vol != 1 else []),
+                            "-t", str(secs), "-shortest", "-c:v", "libx264", "-preset", "medium", "-crf", "20",
                             "-c:a", "aac", "-ar", "48000", "-ac", "2", "-b:a", "192k", str(tmp)], capture_output=True, text=True)
         if r.returncode:
             raise RuntimeError(f"ffmpeg failed on {c['url']}: {r.stderr[-300:]}")
@@ -3143,13 +3183,29 @@ def render_clips(con, m):
     row = con.execute("select video_path from pages where pageid=?", (m["pageid"],)).fetchone()
     out = Path(row["video_path"]) if row and row["video_path"] else video_out(m["ep"], title)
     OUT.mkdir(exist_ok=True)
+    tracks = [t for t in m.get("audio") or [] if Path(t["path"]).exists() and float(t.get("volume", 1)) > 0]
+    joined = work / "joined.mp4" if tracks else out
     if subprocess.run([ff, "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", str(work / "list.txt"),
-                       "-c", "copy", "-movflags", "+faststart", str(out)]).returncode:
+                       "-c", "copy", "-movflags", "+faststart", str(joined)]).returncode:
         raise RuntimeError("ffmpeg could not join the clips")
-    credits = [f"#{len(clips) - k}: \"{c['title'][:80]}\" by {c.get('uploader') or 'unknown'} ({c.get('site') or 'web'}): {c['url']}"
-               for k, c in enumerate(clips)]
-    m["script"] = title + "."
-    m["yt_description"] = "\n".join([title + ".", "", f"{BRAND['channel']}: {BRAND['tagline']}", "", "CLIPS", *credits, "",
+    if tracks:  # lay the audio track over the clips' own sound; the picture is not touched
+        print(f"  adding {len(tracks)} audio piece{'s' if len(tracks) > 1 else ''}…")
+        ins = [x for t in tracks for x in ("-ss", str(t["start"]), "-t", str(t["end"] - t["start"]), "-i", t["path"])]
+        graph = "".join(f"[{i + 1}:a]volume={float(t.get('volume', 1))},adelay={int(t['at'] * 1000)}:all=1[t{i}];" for i, t in enumerate(tracks))
+        r = subprocess.run([ff, "-y", "-loglevel", "error", "-i", str(joined), *ins, "-filter_complex",
+                            graph + "[0:a]" + "".join(f"[t{i}]" for i in range(len(tracks))) + f"amix=inputs={len(tracks) + 1}:normalize=0:duration=first[a]",
+                            "-map", "0:v", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", "-ar", "48000", "-ac", "2", "-b:a", "192k",
+                            "-movflags", "+faststart", str(out)], capture_output=True, text=True)
+        joined.unlink()
+        if r.returncode:
+            raise RuntimeError(f"ffmpeg could not add the audio: {r.stderr[-300:]}")
+    by = lambda c: f"\"{c['title'][:80]}\" by {c.get('uploader') or 'unknown'} ({c.get('site') or 'web'}){': ' + c['url'] if c.get('url') else ''}"
+    seen = set()
+    credits = [(f"#{len(clips) - k}: " if badges else "") + by(c) for k, c in enumerate(clips) if badges or not (c["path"] in seen or seen.add(c["path"]))]
+    sounds = [by(t) for t in tracks if not (t["path"] in seen or seen.add(t["path"]))]
+    m["script"], m["stale"] = title + ".", False
+    m["yt_description"] = "\n".join([title + ".", "", f"{BRAND['channel']}: {BRAND['tagline']}", "", "CLIPS", *credits,
+                                     *(["", "AUDIO", *sounds] if sounds else []), "",
                                      " ".join("#" + re.sub(r"\W", "", t) for t in BRAND["hashtags"] + m["tags"][:3])])[:4900]
     (work / "meta.json").write_text(json.dumps(m, indent=2))
     clips_usage(m)
@@ -4545,7 +4601,7 @@ def main():
     cf = sub.add_parser("copyfrom", help=argparse.SUPPRESS); cf.add_argument("--channel", required=True); cf.add_argument("--pageid", type=int, required=True)
     pl = sub.add_parser("pull", help="download a local model into Ollama"); pl.add_argument("model")
     ca = sub.add_parser("clipadd", help="add one video (a link) to a clip countdown")
-    ca.add_argument("url"); ca.add_argument("--ep", type=int, required=True); ca.add_argument("--part", help="1:20-1:45")
+    ca.add_argument("urls", nargs="+"); ca.add_argument("--ep", type=int, required=True); ca.add_argument("--part", help="1:20-1:45")
     cl = sub.add_parser("clips", help="a countdown of clips: words to search YouTube for, and/or links from any site")
     cl.add_argument("items", nargs="+"); cl.add_argument("--count", type=int, default=5, choices=range(2, 11))
     au = sub.add_parser("auto"); au.add_argument("--dry-run", action="store_true")
@@ -4648,7 +4704,7 @@ def main():
     elif args.cmd == "pull":
         pull_model(args.model)
     elif args.cmd == "clipadd":
-        clip_add(con, args.ep, args.url, args.part)
+        clip_add(con, args.ep, args.urls, args.part)
     elif args.cmd == "clips" or (args.cmd == "run" and clips_channel()):
         make_clips(con, " ".join(args.items) if args.cmd == "clips" else args.input or random_topic(), getattr(args, "count", 5))
         if getattr(args, "upload", False):

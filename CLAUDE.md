@@ -108,10 +108,9 @@ with a rank badge, and the pieces are joined with their own sound. With `clip_st
 (Demucs `htdemucs`, CPU, model in `.cache/torch`) first removes human voices, speech and singing, from each clip. Used clip links are remembered in the channel's
 `data/clips_used.json`. On a clips channel, `run` and `auto` call it (no input = a random channel topic).
 Three steps: `make_clips()` gathers (the ones to use plus `CLIP_SPARES`, each with `use`; manual mode stops here as a
-draft), `clip_add()` (`./rw clipadd --ep N <link>`) appends one video, `render_clips()` joins the clips marked `use` in
+draft), `clip_add()` (`./rw clipadd --ep N <links> [--part 1:20-1:45]`) appends videos (whole up to `CLIP_WHOLE` seconds, else a named part), `render_clips()` joins the clips marked `use` in
 their saved order (last = number 1) and is what `rerender` runs for these videos. Rendered pieces are kept per clip
-and rank in `work/<id>/seg-*.mp4`, so a reorder is quick. The studio's clip editor (`clipEditor`/`wireClips` in
-web.html) saves order and ticks through `POST /api/clips`.
+and rank in `work/<id>/seg-*.mp4`, so a reorder is quick. The studio's editor is described below.
 Per channel (Settings → Videos → Clips): `clip_find` "shorts" (above) or "videos" (YouTube's most viewed videos for the
 words, any length; from one over 30 s, `best_part()` takes `CLIP_PART` seconds at its most replayed moment, YouTube's
 heatmap, and fetches a little more so the editor can widen it); `clip_days` (0/1/7/31: only uploads that recent, by the
@@ -119,6 +118,18 @@ search filter in `CLIP_AGE` and re-checked on each video's date); `clip_allow_te
 maps and subtitles); `clip_fit` "blur" or "zoom". Per clip in meta: `start`/`end` (seconds into the saved file) and
 `fit` (`CLIP_FITS`; "" = the channel's), set in the clip editor and saved by `/api/clips`; `clipadd … --part 1:20-1:45`
 adds one part of a long video. Leonida Clips (`workspaces/leonida-clips`) is the gameplay channel using these.
+**The editor** (`/edit/<pageid>`, the `ed*` functions in web.html; "New edit" on a clips channel calls `clip_new()` for an
+empty video with `badges` off). State `E`: `clips` (the video track in playing order; a file may appear twice, as two
+cuts), `audio` (the audio track), `bin` (every source of this video). Each change goes on `E.undo` and is saved a
+second later by `POST /api/clips`, which rewrites meta `clips` (per clip: `use`, `start`, `end`, `fit`, `volume`,
+`caption`), `audio` ([{path, at, start, end, volume}] from `media/audio/`), `badges`, and sets `stale` until the next
+render; files it is sent that the video didn't have are looked up in `media/`. Links are fetched by running `clipadd`
+(Twitch clips and VODs, and a Twitch channel's `/clips?range=7d` page as a `clip_sources` entry, work through yt-dlp);
+when any job ends the editor reloads the video (`edJob()` from `poll()`). The preview plays the source files in the
+browser with CSS standing in for fit, badge and caption: it is an approximation, the render is the truth.
+`render_clips()` names each piece by a hash of what it contains, draws badge and caption on one overlay, scales the
+clip's sound, and mixes the audio track over the joined clips in a second pass (picture copied). Publish in the editor
+runs `upload` and is offered only for a render that isn't stale.
 **The owner chose to allow other people's clips here**, as an exception to the licence rule below; every clip is
 credited in the description, and publishing rights are theirs to sort out.
 
