@@ -78,6 +78,8 @@ with timings; no full video rendered with one), the picture model (see below for
 Drawn-picture channels (`pictures: "ai"`) were proven with one full video on a new channel, Odd Origins (EP 001,
 barber poles, 40 s, six drawings, Edge voice). Known weak spot: drawings illustrate the sentence, not verified facts,
 so they can show things wrongly (era, details).
+Copy to another channel: tested from the command line (a clip video and a narrated video into a throwaway channel,
+and a refused duplicate); in the studio only that the button and channel list appear, not a click.
 Known gaps: topic match is by title words only; small or brief
 stamps and emoji overlays pass the text check; letting Gemini watch and rate candidates is the real fix. The video's dialog still shows the explainer editor (narration,
 visuals), which doesn't apply; re-render is refused. No per-clip trimming or reordering yet; each clip is its first

@@ -53,6 +53,9 @@ its own launchd job (`com.shortsmachine.auto[.<slug>]`). Shared (under `ROOT`): 
 The studio shows one channel: `POST /api/workspace` (`switch_workspace()` in web.py) writes `data/active_workspace`
 and re-execs the server, refusing while a job runs; `rw web` starts on the remembered channel. Scheduled runs of
 different channels queue on `data/render.lock`. To test, make a throwaway channel folder and delete it after.
+A video can be copied to another channel (`./rw copyto --ep N --to <slug>`, the "Copy to channel" button): `copy_to()`
+starts `copyfrom` as the target channel, where `copy_from()` copies the script and pictures (or clip list) into its
+own `work/`, gives it the next episode number and makes it with that channel's brand and voice.
 
 `pages` columns: pageid, title, url, source, status, score, reason, ep, video_path, video_id (YouTube), created,
 updated, potential, rank (ideabank order), via, origin, ref, upload_rank (Queue order), posts (JSON: other platforms).

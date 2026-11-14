@@ -844,7 +844,12 @@ function termLine(text, cls) {
   if (atBottom) out.scrollTop = out.scrollHeight;
 }
 
-let channelName = "Shorts Machine", brandMusicVolume = 0.08, wsSlug = null, maxSeconds = 58;
+let channelName = "Shorts Machine", brandMusicVolume = 0.08, wsSlug = null, maxSeconds = 58, channels = [];
+document.addEventListener("click", e => {  // copy the open video to another channel
+  if (e.target.id !== "copyGo") return;
+  const sel = $("#copyTo"), name = sel.selectedOptions[0].textContent;
+  exec(`copyto --ep ${+e.target.dataset.ep} --to ${quote(sel.value)}`).then(ok => { if (ok) { dlg.close(); termLine(`copying to ${name}: switch to that channel to see it when this finishes`, ""); } });
+});
 // ---------------- channels: each has its own brand, ideas, videos and sign-ins; the studio shows one at a time ----------------
 async function switchChannel(body) {
   if (!await post("/api/workspace", body)) { $("#wsSel").value = wsSlug; $("#wsNew").hidden = true; return; }
@@ -863,7 +868,7 @@ $("#wsNew").onsubmit = e => { e.preventDefault(); switchChannel({name: $("#wsNam
 async function loadPages() {
   const j = await (await fetch("/api/pages")).json();
   if (wsSlug !== null && wsSlug !== j.workspace) return location.reload();  // the channel was changed in another tab
-  wsSlug = j.workspace;
+  wsSlug = j.workspace; channels = j.workspaces;
   if (document.activeElement !== $("#wsSel"))
     $("#wsSel").innerHTML = j.workspaces.map(w => `<option value="${esc(w.slug)}"${w.slug === wsSlug ? " selected" : ""}>${esc(w.name)}</option>`).join("") + `<option value="+">＋ New channel…</option>`;
   pages = j.pages;
@@ -1283,6 +1288,9 @@ async function openDetail(id) {
         ${p.ep && p.status !== "uploaded" ? `<span id="delVidBox"><button class="btn danger" data-delvid="${p.pageid}">Delete video</button></span>` : ""}
         ${p.status === "uploaded" ? `<span id="unpubBox"><button class="btn danger" data-unpub="${p.ep}">Delete from YouTube…</button></span>` : ""}
       </div>
+      ${p.ep && (p.script || p.clips?.length) && channels.length > 1 ? `<div class="btns" style="align-items:center"><span class="hint" style="margin:0">Make this video in</span>
+        <select class="sort" id="copyTo" style="margin:0" aria-label="Channel to copy to">${channels.filter(c => c.slug !== wsSlug).map(c => `<option value="${esc(c.slug)}">${esc(c.name)}</option>`).join("")}</select>
+        <button class="btn" id="copyGo" type="button" data-ep="${p.ep}" title="Same script and pictures, made again with that channel's brand, voice and closing line">Copy to channel</button></div>` : ""}
       ${potDetail(p)}
       ${p.status === "failed" ? `<h5>Error</h5><div class="box">${esc(p.reason)}</div>` : ""}
       ${p.origin === "clips" && p.clips?.length && p.status !== "uploaded" ? clipEditor(p) : p.script && p.status !== "uploaded" ? `
@@ -1355,7 +1363,7 @@ async function poll() {
     $("#dot").className = "dot" + (running ? " run" : "");
     $("#jobLabel").textContent = running ? j.cmd : (j.cmd ? `idle · last: ${j.cmd}` : "idle");
     $("#jobLabel").title = $("#jobLabel").textContent;
-    document.querySelectorAll("[data-cmd], #makeNow, #saveIdea, #upload, #qFind, #libGo, [data-remake], [data-upload], [data-make], [data-rerender], [data-unpubgo], #clipRender, #clipAdd").forEach(b => b.disabled = running);
+    document.querySelectorAll("[data-cmd], #makeNow, #saveIdea, #upload, #qFind, #libGo, [data-remake], [data-upload], [data-make], [data-rerender], [data-unpubgo], #clipRender, #clipAdd, #copyGo").forEach(b => b.disabled = running);
     $("#stop").disabled = !running;
     if (was && !running) {
       loadPages(); if (!$("#library").hidden) loadLibrary();  // e.g. a download just finished

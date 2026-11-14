@@ -183,6 +183,11 @@ for choosing what to show. Edit them to change what a channel is about and how i
 (the material and the reply format), which you can read but not change. "Save as theme" stores the current set under a
 name (`prompts/<name>.json`) so another channel can load it.
 
+## The same video on another channel
+Open a video and use "Copy to channel": the script and pictures (or the clips) are copied and the video is made again
+with the other channel's logo, colours, voice and closing line. It lands in that channel's Queue; a channel can hold
+each video only once.
+
 ## CLI
 ```
 ./rw run ["anything"]         # a question, topic, paragraph or link; nothing = the next idea, else a random page

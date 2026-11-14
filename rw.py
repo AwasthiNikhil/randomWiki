@@ -3094,6 +3094,63 @@ def render_clips(con, m):
     print(f"  done: {out}")
 
 
+def copy_to(con, ep, to):
+    """Copy a video to another channel: same script and pictures (or clips), made again there with that channel's
+    brand, voice and closing line. The work is done by `copyfrom` running as that channel."""
+    import subprocess
+    row = con.execute("select pageid from pages where ep=?", (ep,)).fetchone()
+    if not row or not (WORK / str(row["pageid"]) / "meta.json").exists():
+        raise SystemExit(f"episode {ep} has nothing saved to copy")
+    if to == WS_NAME or (to and not (ROOT / "workspaces" / to / "brand.json").exists()):
+        raise SystemExit("choose another channel to copy it to")
+    r = subprocess.run([sys.executable, "-W", "ignore", "-u", str(ROOT / "rw.py"), "copyfrom", "--channel", WS_NAME, "--pageid", str(row["pageid"])],
+                       env=os.environ | {"RW_WORKSPACE": to})
+    if r.returncode:
+        raise SystemExit("the copy didn't finish; see above")
+
+
+def copy_from(con, channel, pageid):
+    """This channel's half of copy_to: take the other channel's script and pictures and make the video as ours."""
+    import shutil
+    theirs = (ROOT / "workspaces" / channel if channel else ROOT)
+    src, mine = theirs / "work" / str(pageid), WORK / str(pageid)
+    if not (src / "meta.json").exists():
+        raise SystemExit("that video isn't there any more")
+    if mine.exists() or con.execute("select 1 from pages where pageid=? and ep is not null", (pageid,)).fetchone():
+        raise SystemExit(f"{BRAND['channel']} already has this video")
+    their = sqlite3.connect(f"file:{theirs / 'data' / 'shorts.db'}?mode=ro", uri=True)
+    their.row_factory = sqlite3.Row
+    row = their.execute("select * from pages where pageid=?", (pageid,)).fetchone()
+    m = json.loads((src / "meta.json").read_text())
+    mine.mkdir(parents=True)
+    for f in src.iterdir():  # pictures, clips, this video's own music and sounds; not their voice or rendered pieces
+        if f.is_file() and not re.match(r"meta\.json|voice|seg-|novoice-|badge|list\.txt", f.name):
+            shutil.copy(f, mine / f.name)
+    for i in m.get("images") or []:
+        i["path"] = str(mine / Path(i["path"]).name)
+    ep = con.execute("select coalesce(max(ep), 0) + 1 from pages").fetchone()[0]
+    m["ep"] = ep
+    for k in ("narration", "yt_description", "potential", "ai", "gemini"):
+        m.pop(k, None)
+    print(f"[{ep:03d}] {m['title']}  (copied from {json.loads((theirs / 'brand.json').read_text())['channel']})")
+    upsert(con, pageid, title=row["title"], url=row["url"], source=row["source"], origin=row["origin"], ref=row["ref"],
+           reason="copied from another channel", status="draft", ep=ep)
+    try:
+        if m.get("origin") == "clips":
+            m["yt_description"] = ""
+            (mine / "meta.json").write_text(json.dumps(m, indent=2))
+            render_clips(con, m)
+        else:
+            produce(con, m, video_out(ep, m["article_title"]))
+            try:
+                score_video(con, pageid)
+            except Exception as e:
+                print(f"  could not score: {e}")
+    except BaseException as e:
+        upsert(con, pageid, status="failed", reason=f"{type(e).__name__}: {e}"[:300])
+        raise
+
+
 def sources_id(key):
     import sources
     return sources.synthetic_id(key)
@@ -3731,6 +3788,9 @@ def main():
     sub.add_parser("selftest")
     sub.add_parser("preview")
     sub.add_parser("imagemodel", help="install the picture model that runs on this Mac")
+    ct = sub.add_parser("copyto", help="copy a video to another channel, remade with that channel's brand and voice")
+    ct.add_argument("--ep", type=int, required=True); ct.add_argument("--to", required=True, help='channel folder name ("" = the first channel)')
+    cf = sub.add_parser("copyfrom", help=argparse.SUPPRESS); cf.add_argument("--channel", required=True); cf.add_argument("--pageid", type=int, required=True)
     pl = sub.add_parser("pull", help="download a local model into Ollama"); pl.add_argument("model")
     ca = sub.add_parser("clipadd", help="add one video (a link) to a clip countdown")
     ca.add_argument("url"); ca.add_argument("--ep", type=int, required=True)
@@ -3829,6 +3889,10 @@ def main():
         upload_pending(con, args.publish_at, args.ep)
     elif args.cmd == "imagemodel":
         image_model_setup()
+    elif args.cmd == "copyto":
+        copy_to(con, args.ep, args.to)
+    elif args.cmd == "copyfrom":
+        copy_from(con, args.channel, args.pageid)
     elif args.cmd == "pull":
         pull_model(args.model)
     elif args.cmd == "clipadd":
