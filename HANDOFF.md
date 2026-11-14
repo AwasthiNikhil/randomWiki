@@ -75,6 +75,9 @@ public demo keys and a bad Unsplash key; no real Unsplash key tried), Prelinger 
 OpenRouter/Cerebras writers (only the bad-key path; default model names may be out of date, the list comes live once a
 key is saved), `pull` (tested with a tiny model, removed after), Edge voices (English and Nepali sentence synthesised
 with timings; no full video rendered with one), the picture model (see below for whether its first run finished).
+Drawn-picture channels (`pictures: "ai"`) were proven with one full video on a new channel, Odd Origins (EP 001,
+barber poles, 40 s, six drawings, Edge voice). Known weak spot: drawings illustrate the sentence, not verified facts,
+so they can show things wrongly (era, details).
 Known gaps: topic match is by title words only; small or brief
 stamps and emoji overlays pass the text check; letting Gemini watch and rate candidates is the real fix. The video's dialog still shows the explainer editor (narration,
 visuals), which doesn't apply; re-render is refused. No per-clip trimming or reordering yet; each clip is its first

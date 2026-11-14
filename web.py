@@ -79,6 +79,8 @@ def save_brand(new):
         b["clip_strip_voice"] = bool(new["clip_strip_voice"])
     if "clip_sources" in new:
         b["clip_sources"] = [u for u in (str(x).strip()[:300] for x in new["clip_sources"]) if re.match(r"https?://", u)][:20]
+    if new.get("pictures") in ("libraries", "ai"):
+        b["pictures"], b["picture_style"] = new["pictures"], str(new.get("picture_style") or "").strip()[:300]
     if new.get("research_from") in ("web", "wikipedia"):
         b["research_from"] = new["research_from"]
     if new.get("video_type") in ("explainer", "clips"):

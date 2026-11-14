@@ -35,6 +35,8 @@ Settings → Videos has "Wikipedia only" for channels that prefer it. Every page
   ollama.com/library).
 - **Pictures drawn on your Mac:** Connectors → AI model → Pictures downloads FLUX.1 schnell (9.6 GB, Apache 2.0). Then
   a video's Visuals has "Draw a picture with AI": describe it, wait about a minute, and it is saved in Media → Images.
+- **A channel drawn in one style:** Settings → Videos → "Pictures come from" → "Drawn for each video" draws one picture
+  per sentence in the style you describe, instead of looking for photographs.
 - **Picture libraries:** Unsplash, Smithsonian Open Access and Europeana with your own free key (Connectors → Media
   sources), plus the Cleveland Museum of Art and old public-domain films from the Prelinger Archives with no key.
 - **Voices:** Settings → Voice & music → Online voices gives about 300 Microsoft Edge voices in many languages. It is

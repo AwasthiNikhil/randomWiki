@@ -489,6 +489,12 @@ body[data-vtype=clips] [data-for=explainer], body[data-vtype=explainer] [data-fo
               <label class="radio"><input type="radio" name="researchFrom" value="wikipedia"> Wikipedia only</label>
               <span class="hint" style="margin:0">If Gemini or Claude is chosen in Connectors, it researches first and this is the fallback. Every source read is listed in the video's description.</span>
             </div>
+            <div data-for="explainer" style="display:grid;gap:6px"><span class="hint" style="margin:0">Pictures come from</span>
+              <label class="radio"><input type="radio" name="pictures" value="libraries"> <b>Photo libraries</b>: real photographs, artworks and clips that match each sentence</label>
+              <label class="radio"><input type="radio" name="pictures" value="ai"> <b>Drawn for each video</b>: one picture per sentence, drawn on this Mac in your style (about half a minute each)</label>
+              <label>Picture style <small>added to every drawing, so the whole channel looks alike</small><input name="picture_style" maxlength="300" placeholder="flat vector illustration, bold simple shapes, limited colour palette, soft grain, no text"></label>
+              <span class="hint" style="margin:0">Drawing needs the picture model (Connectors → AI model → Pictures). Until it is downloaded, photo libraries are used. Descriptions say the pictures are AI-generated.</span>
+            </div>
             <span class="hint" data-for="explainer" style="margin:0">Trending ideas skip tragedies, politics, sports results and gossip, and are phrased as questions about the lasting idea behind the news. Every idea is researched when it's made.</span>
             <label data-for="explainer" style="max-width:320px">Minimum interest score <small>ideas scoring lower are not made</small> <output id="scoreOut"></output><input type="range" name="min_score" min="1" max="10" step="1"></label>
           </fieldset>
@@ -1731,6 +1737,7 @@ async function loadSettings() {
   document.querySelectorAll("[name=mode]").forEach(r => r.checked = r.value === (S.mode || "auto"));
   document.querySelectorAll("[name=vtype]").forEach(r => r.checked = r.value === (S.video_type || "explainer"));
   document.querySelectorAll("[name=researchFrom]").forEach(r => r.checked = r.value === (S.research_from || "web"));
+  document.querySelectorAll("[name=pictures]").forEach(r => r.checked = r.value === (S.pictures || "libraries")); F("picture_style").value = S.picture_style || "";
   F("clip_sources").value = (S.clip_sources || []).join("\n"); F("clip_strip_voice").checked = !!S.clip_strip_voice;
   sampleState(j.voice_sample);
   if (!j.clone_ready) document.querySelector("[name=vEngine][value=clone]").disabled = true;
@@ -1780,7 +1787,8 @@ function collect() {
   S = {...S, channel: F("channel").value, tagline: F("tagline").value, outro_line: F("outro_line").value, logo_text: F("logo_text").value,
     hashtags: F("hashtags").value.split(",").map(x => x.trim()).filter(Boolean), voice: F("voice").value, voice_speed: +F("voice_speed").value,
     music_volume: +F("music_volume").value, voice_engine: document.querySelector("[name=vEngine]:checked")?.value || "kokoro", edge_voice: $("#edgeSel").value || S.edge_voice,
-    clone_consent: $("#cloneConsent").checked, mode: document.querySelector("[name=mode]:checked")?.value || "auto", video_type: document.querySelector("[name=vtype]:checked")?.value || "explainer", research_from: document.querySelector("[name=researchFrom]:checked")?.value || "web", clip_strip_voice: F("clip_strip_voice").checked, clip_sources: F("clip_sources").value.split("\n").map(x => x.trim()).filter(Boolean),
+    clone_consent: $("#cloneConsent").checked, mode: document.querySelector("[name=mode]:checked")?.value || "auto", video_type: document.querySelector("[name=vtype]:checked")?.value || "explainer", research_from: document.querySelector("[name=researchFrom]:checked")?.value || "web",
+    pictures: document.querySelector("[name=pictures]:checked")?.value || "libraries", picture_style: F("picture_style").value, clip_strip_voice: F("clip_strip_voice").checked, clip_sources: F("clip_sources").value.split("\n").map(x => x.trim()).filter(Boolean),
     topics: F("topics").value.split(",").map(x => x.trim()).filter(Boolean), idea_source: document.querySelector("[name=ideaSrc]:checked")?.value || "mix", min_score: +F("min_score").value, max_seconds: +F("max_seconds").value, llm: $("#llmSel").value, gemini_model: $("#gemSel").value, claude_model: $("#clSel").value,
     ...Object.fromEntries([...document.querySelectorAll("[data-provmodel]")].map(x => [x.dataset.provmodel + "_model", x.value])),
     ai: document.querySelector("[name=aiPick]:checked")?.value || "local", publish_to: [...document.querySelectorAll("[data-pub]:checked")].map(c => c.dataset.pub),

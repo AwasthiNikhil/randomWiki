@@ -1551,7 +1551,44 @@ def mentions(query, c, every=False):
     return bool(words) and (hits == len(words) if every else hits >= max(1, len(words) // 2))
 
 
+DRAW_PROMPT = """A YouTube Short is being illustrated with drawn pictures. For each numbered sentence of the narration, describe
+ONE picture that shows what the sentence says: a single concrete scene with its main subject, setting and action, in 12
+to 25 words. Describe only what is seen. No words, letters, numbers, logos or captions in the picture. Keep recurring
+people and things looking the same from picture to picture.
+
+Subject of the video: {title}
+Sentences:
+{sentences}
+
+Reply as JSON: {{"scenes": ["<picture for sentence 1>", "<picture for sentence 2>", ...]}}"""
+DRAW_STYLE = "flat vector illustration, bold simple shapes, limited colour palette, soft grain, no text"
+
+
+def draw_visuals(title, script, dest, limit=8):
+    """A channel whose pictures are drawn (Settings → Videos): one picture per sentence from the model on this Mac,
+    all in the channel's style, each shown while its sentence is spoken."""
+    import hashlib
+    sents = split_sentences(script)[:limit]
+    scenes = [str(x).strip() for x in llm(DRAW_PROMPT.format(title=title, sentences="\n".join(
+        f"{k + 1}. {x}" for k, x in enumerate(sents))), 0.4).get("scenes") or []]
+    style, out = BRAND.get("picture_style") or DRAW_STYLE, []
+    for k, scene in enumerate(scenes[:len(sents)]):
+        if not scene:
+            continue
+        path = dest / f"img_{hashlib.sha1(f'{scene}{style}'.encode()).hexdigest()[:10]}.png"
+        print(f"  sentence {k + 1}: drawing {scene[:90]!r}", flush=True)
+        if not path.exists():
+            generate_image(f"{scene}. {style}", path)
+        out.append(dict(source="ai", url="ai:" + path.stem, name=scene[:150], page="", artist="FLUX.1 schnell, on this Mac",
+                        license="AI-generated", path=str(path), sentence=k, query=scene))
+    if len(out) < 2:
+        raise RuntimeError("the picture model drew fewer than two pictures")
+    return out
+
+
 def pick_visuals(title, script, dest, own=None, pageimage=None, limit=6, topics=()):
+    if BRAND.get("pictures") == "ai" and IMAGE_READY.exists():
+        return draw_visuals(title, script, dest)
     """One image per sentence where possible, for the concrete thing that sentence mentions, from Wikipedia entity
     images, then Commons, then Openverse. Each image remembers its sentence so it appears when that is spoken."""
     sents = split_sentences(script)

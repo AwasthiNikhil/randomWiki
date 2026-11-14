@@ -82,7 +82,8 @@ Models the owner can add (Connectors → AI model): other writers through `PROVI
 OpenAI-style chat, keys in `secrets/ai_keys.json`, `provider_chat()`; they write, research stays `research_web()`);
 Ollama models downloaded with `./rw pull <name>`; a picture model on this Mac (`./rw imagemodel`: mflux in
 `.venv-image`, FLUX.1 schnell 4-bit in `.cache/hf`, `generate_image()`, offered in the visuals editor as source `ai`
-and saved to `media/image/` as "AI-generated"); voices: Kokoro, the clone, or Edge online voices (`tts_edge()`, word
+and saved to `media/image/` as "AI-generated"; a channel with `pictures: "ai"` has every picture drawn instead of
+picked: `draw_visuals()` asks for one scene per sentence (`DRAW_PROMPT`) and appends the channel's `picture_style`); voices: Kokoro, the clone, or Edge online voices (`tts_edge()`, word
 timings from the service, any language; `edge_voices()` cached in `data/`). Picture sources with the owner's own free
 keys live in `STOCK` (Pexels, Pixabay, Unsplash, Smithsonian, Europeana); keyless ones are plain `src_*` functions.
 
