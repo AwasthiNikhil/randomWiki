@@ -430,8 +430,9 @@ body[data-vtype=clips] [data-for=explainer], body[data-vtype=explainer] [data-fo
               <label class="radio"><input type="radio" name="vEngine" value="clone"> <b>My voice</b>: cloned from a sample (Chatterbox, a few minutes per video)</label>
             </div>
             <div id="cloneBox" style="display:grid;gap:10px;padding:12px;border:1px dashed var(--line);border-radius:10px">
-              <div class="hint">Record 15–30 seconds in a quiet room, reading this at your normal pace:</div>
-              <div class="box" style="font-size:14px;line-height:1.6">In 1932, Australia went to war with emus, and the emus won. Soldiers with machine guns spent weeks chasing twenty thousand birds across the wheat fields of Western Australia. The birds scattered, regrouped, and outran the trucks. One officer said that if he had a division of soldiers with the emus' ability to absorb bullets, he could face any army in the world.</div>
+              <div class="hint">Record or upload 15 to 30 seconds of yourself talking at your normal pace. What you say doesn't matter: a voice note, part of a call or an old recording works as well as reading something. One voice only, no music, as little background noise as you can.</div>
+              <details><summary class="hint" style="cursor:pointer">Not sure what to say? Read this</summary>
+              <div class="box" style="font-size:14px;line-height:1.6">In 1932, Australia went to war with emus, and the emus won. Soldiers with machine guns spent weeks chasing twenty thousand birds across the wheat fields of Western Australia. The birds scattered, regrouped, and outran the trucks. One officer said that if he had a division of soldiers with the emus' ability to absorb bullets, he could face any army in the world.</div></details>
               <div class="inline">
                 <button class="btn sm" type="button" id="sampleRec">● Record sample</button>
                 <label class="btn sm" style="display:inline-block;cursor:pointer">Upload audio<input type="file" accept="audio/*" id="sampleFile" hidden></label>
