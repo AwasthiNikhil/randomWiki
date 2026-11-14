@@ -183,6 +183,19 @@ shows a few things that happened on that date, oldest first, each with its year,
 Everything comes from Wikipedia's daily "On this day" list; deaths and disasters are left out. With a daily schedule
 this makes one video a day without any input.
 
+## Top 5 countdowns
+Set a channel to **Top 5 countdowns**, then type what to count down ("tallest mountains on Earth", "facts about
+octopuses"). The topic is researched and five entries are shown from number 5 to number 1, each with a picture, its
+name and one sentence. An entry is used only if a sentence in the research backs it, numbers included.
+
+## Word of the day
+Set a channel to **Word of the day** and click Make now with nothing typed for Wiktionary's word of the day, or type
+any word. The video shows the word, then its meaning, origin and an example, one after another as they are read.
+
+## Changing what a video says
+Open a guess, on this day, countdown or word video in the studio: every entry's name and words can be changed, and
+entries removed; then Save & re-render. Pictures stay as they are.
+
 ## Clip countdowns
 A channel can make countdowns of short clips instead of narrated explainers: Settings → Ideas & videos → "What this
 channel makes". Then the Make box takes words (YouTube Shorts under that hashtag: "funny cats" looks in #funnycats)

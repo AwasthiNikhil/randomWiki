@@ -115,7 +115,7 @@ web.html) saves order and ticks through `POST /api/clips`.
 **The owner chose to allow other people's clips here**, as an exception to the licence rule below; every clip is
 credited in the description, and publishing rights are theirs to sort out.
 
-## Formats: quiz, guess the picture, on this day (`FORMATS` in rw.py)
+## Formats: quiz, guess the picture, on this day, top countdown, word of the day (`FORMATS` in rw.py)
 Videos made of voiced scenes rather than one narration. `FORMATS` maps a channel's `video_type` (also the video's
 `origin`) to (make function, where its parts are in meta, its scene list, its renderer, fewest parts). `run` and `auto`
 on such a channel call the make function with the Make box's text ("" = a random channel topic, or today's date).
@@ -125,7 +125,9 @@ Shared: `make_format()` (row, produce, score), `produce_format()` (also what `re
 `backdrop()`, `text_lines()`, `countdown()`, `cover()`, `lead_picture()` (an article's main picture, only if it is a
 free photograph). While a video is over `max_seconds` its last part is dropped. To add a format: a `make_x`, `x_steps`,
 `render_x`, a `FORMATS` entry, a tile and Make-box hint in web.html, `ORIGIN_NAMES` and `makeArg`. In the UI these
-channels count as explainer channels for `data-for`. No draft step, pictures editor or captions.
+channels count as explainer channels for `data-for`. No draft step, pictures editor or captions. Every format but
+the quiz keeps its parts in meta `items` (name, text, image if any), edited in the studio by `itemsEditor`/`wireItems`
+(`POST /api/items`: change name or words, remove entries, then `rerender`).
 - **quiz** (`make_quiz`): `research()` as for explainers, then `quiz_questions()`: the writer's model drafts questions
   with three options and the sentence of the notes that proves each; code keeps only those whose sentence is really in
   the notes (`in_text()`), names the answer and neither wrong option, and from which the local model, shown only that
@@ -137,7 +139,14 @@ channels count as explainer channels for `data-for`. No draft step, pictures edi
   from a blur over `GUESS_THINK` seconds. Subjects already shown are in the channel's `data/guess_used.json`.
 - **onthisday** (`make_onthisday`): Wikipedia's "On this day" feed for today or a date in the text (`day_from()`), no
   model: events that pass the `GRIM` word list, are 6-30 words and have a `lead_picture()` among their linked articles,
-  taken from across the list and shown oldest first. Meta `items` (guess and onthisday): name, text, image.
+  taken from across the list and shown oldest first. Drawn by `render_list()`, which `top` shares.
+- **top** (`make_top`): `research()` on "the top N <topic>, in order, with figures"; the writer's model picks and orders
+  entries (name, Wikipedia title, one sentence, proving quote); kept if the quote is in the notes, has every number the
+  sentence states, and there is a picture (`lead_picture()`, else Commons); the same picture twice is a duplicate.
+  The order itself is the model's reading of the notes, not re-checked. Saved in playing order (number 1 last).
+- **word** (`make_word`): the typed word, else Wiktionary's word of the day (featured feed); the English entry's plain
+  text goes to the writer's model for a meaning, an origin and an example. An origin naming a capitalised word or year
+  the entry doesn't have is dropped. No pictures: `render_word()` reveals the sections as they are read.
 
 ## Conventions that matter
 - **No video from model memory:** research must come from sources actually read; if research has no answer to a

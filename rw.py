@@ -3315,7 +3315,7 @@ def produce_format(con, m):
         m[key].pop()
     m["script"] = " ".join(line for _, _, line, _, _ in steps if line)
     if key == "items":
-        m["images"] = [i["image"] for i in m["items"]]
+        m["images"] = [i["image"] for i in m["items"] if i.get("image")]
     dur = scenes[-1]["end"]
     row = con.execute("select video_path from pages where pageid=?", (m["pageid"],)).fetchone()
     out = Path(row["video_path"]) if row and row["video_path"] else video_out(m["ep"], m["article_title"])
@@ -3566,12 +3566,13 @@ def onthisday_steps(m):
             + [("outro", None, BRAND["outro_line"], 0.3, None)])
 
 
-def render_onthisday(m, scenes, audio_path, duration, out_path, frame_at=None):
-    """A title card with the date, then each event: its year large, a picture that drifts closer, and the words."""
+def render_list(m, scenes, audio_path, duration, out_path, frame_at, label, cards_text, big, head=False):
+    """A title card, then one screen per item: a line of small print (label), something large (big(k): a year, a
+    rank), a picture that drifts closer, and the words (with the item's name as a heading when head is set).
+    cards_text: (large line, accent line) for the title card; the accent line is repeated on the closing card."""
     from PIL import Image, ImageDraw
     ensure_fonts()
     items, cards, pics = m["items"], {}, {}
-    date = f"{m['day'][1]} {MONTH_NAMES[m['day'][0] - 1]}".upper()
     bw, bh, by = PW, 760, 540  # the picture's box
     mask = Image.new("L", (bw, bh), 0)
     ImageDraw.Draw(mask).rounded_rectangle((0, 0, bw, bh), 36, fill=255)
@@ -3580,15 +3581,18 @@ def render_onthisday(m, scenes, audio_path, duration, out_path, frame_at=None):
         if (kind, k) not in cards:
             im, d = backdrop()
             if kind == "intro":
-                y = text_lines(d, "ON THIS DAY", "display", 190, 620, 1, C["text"], centre=True)
-                text_lines(d, date, "display", 130, y + 30, 1, C["accent"], centre=True)
+                y = text_lines(d, cards_text[0], "display", 190, 600, 2, C["text"], centre=True)
+                text_lines(d, cards_text[1], "display", 120, y + 30, 3, C["accent"], centre=True)
             elif kind == "outro":
-                y = text_lines(d, date, "display", 130, 640, 1, C["accent"], centre=True)
+                y = text_lines(d, cards_text[1], "display", 120, 640, 3, C["accent"], centre=True)
                 text_lines(d, BRAND["outro_line"], "body", 56, y + 60, 3, C["text"], centre=True, weight="Medium")
             else:
-                d.text((60, 205), f"ON THIS DAY · {date}", font=font("display", 54), fill=C["accent"])
-                d.text((60, 268), items[k]["name"], font=font("display", 200), fill=C["text"])
-                text_lines(d, items[k]["text"], "body", 56, by + bh + 50, 8, C["text"], weight="Medium")
+                text_lines(d, label, "display", 54, 205, 1, C["accent"])
+                d.text((60, 268), big(k), font=font("display", 200), fill=C["text"])
+                y = by + bh + 44
+                if head:
+                    y = text_lines(d, items[k]["name"].upper(), "display", 84, y, 2, C["accent"]) + 14
+                text_lines(d, items[k]["text"], "body", 56, y, 7 if head else 8, C["text"], weight="Medium")
             cards[kind, k] = im
         return cards[kind, k]
 
@@ -3606,10 +3610,169 @@ def render_onthisday(m, scenes, audio_path, duration, out_path, frame_at=None):
     render_scenes(scenes, draw, audio_path, duration, out_path, frame_at)
 
 
+def render_onthisday(m, scenes, audio_path, duration, out_path, frame_at=None):
+    date = f"{m['day'][1]} {MONTH_NAMES[m['day'][0] - 1]}".upper()
+    render_list(m, scenes, audio_path, duration, out_path, frame_at, f"ON THIS DAY · {date}", ("ON THIS DAY", date),
+                lambda k: m["items"][k]["name"])
+
+
+# ---------- top countdowns: ranked things or facts, each with a picture, number 1 last ----------
+TOP_PROMPT = """Write a countdown for a YouTube Short: "Top {n}: {topic}".
+Use ONLY the notes below. Pick the {more} best entries. Every entry is a different one of the things the topic names
+(for "tallest mountains": seven different mountains, never the same one twice, never a mountain range or an event). If the topic is a ranking (tallest, fastest, oldest, largest),
+order them by the figures in the notes, the top one first; otherwise put the most surprising first.
+For each entry give:
+- "name": what it is, in at most 5 words
+- "wikipedia": the exact title of the English Wikipedia article about that thing (for its picture)
+- "fact": ONE sentence of at most 22 words a narrator will read, with the figure that earns its place
+- "quote": the sentence from the notes that proves the fact, copied word for word; every number in the fact must be in it
+Notes:
+{text}
+Reply as JSON: {{"items": [{{"name": "...", "wikipedia": "...", "fact": "...", "quote": "..."}}]}} with the top one first"""
+
+
+def make_top(con, text="", count=5):
+    """A countdown on a topic ("tallest mountains", "facts about octopuses"): research it, let the writer's model
+    choose and order entries from the notes, and keep those whose proof is really in the notes, covers every number
+    the fact states, and that have a free picture (the thing's Wikipedia picture, else Wikimedia Commons).
+    The order is the model's reading of the notes; nothing in code re-ranks it."""
+    before, topic = dict(ai_used), re.sub(r"^top\s*\d*\s*", "", text.strip(), flags=re.I) or random_topic()
+    print(f"countdown: {topic}\n  researching…")
+    a = research(f"What are the top {count + 3} {topic}, in order, with the figure for each?")
+    r = llm(TOP_PROMPT.format(n=count, more=count + 3, topic=topic, text=a["text"][:12000]), 0.5)
+    pid, ep, work = new_video(con, f"top:{topic}")
+    nums = lambda x: set(re.findall(r"\d+(?:\.\d+)?", str(x).replace(",", "")))
+    items, why = [], {"proof not in the research": 0, "a number the proof doesn't have": 0, "no free picture": 0}
+    for e in r.get("items") or []:
+        if len(items) == count or not isinstance(e, dict):
+            continue
+        name, fact, quote = (str(e.get(k) or "").strip() for k in ("name", "fact", "quote"))
+        if not name or not 4 <= len(fact.split()) <= 28 or not in_text(quote, a["text"]):
+            why["proof not in the research"] += 1
+        elif nums(fact) - nums(quote):
+            why["a number the proof doesn't have"] += 1
+        else:
+            got = lead_picture(str(e.get("wikipedia") or name))
+            img = got[2] if got else next(iter(src_commons(name, 3)), None)
+            if img and any(img["url"] == i["image"]["url"] for i in items):  # the same thing again under another name
+                continue
+            if not img:
+                why["no free picture"] += 1
+                continue
+            items.append(dict(name=name[:60], text=fact, quote=quote, image=download_image(img, work)))
+            print(f"  {len(items)}. {name}: {fact[:80]}")
+    print(f"  {len(items)} kept" + "".join(f"; {n} dropped ({k})" for k, n in why.items() if n))
+    if len(items) < 3:
+        raise SystemExit(f"the research on \"{topic}\" didn't give three entries that could be proven and pictured; try another topic")
+    m = dict(ep=ep, pageid=pid, origin="top", article_title=topic, description="", title=f"Top {len(items)} {topic.title()}"[:90],
+             items=items[::-1], script="", images=[],  # saved in playing order: number 1 last
+             tags=[w for w in re.findall(r"[a-z0-9]+", topic.lower()) if len(w) > 2 and w not in ("the", "and")][:5],
+             url=a["url"], credit=a["credit"], source_label=a["source_label"])
+    return make_format(con, m, topic, before)
+
+
+def top_steps(m):
+    n = len(m["items"])
+    m["title"] = re.sub(r"^Top \d+ ", f"Top {n} ", m["title"])  # the title follows the number of entries
+    return ([("intro", None, f"Top {number_words(n)} {m['article_title']}.", 0.3, None)]
+            + [("item", k, f"Number {number_words(n - k)}. {i['name']}. {i['text']}", 0.5, "chime") for k, i in enumerate(m["items"])]
+            + [("outro", None, BRAND["outro_line"], 0.3, None)])
+
+
+def render_top(m, scenes, audio_path, duration, out_path, frame_at=None):
+    n = len(m["items"])
+    render_list(m, scenes, audio_path, duration, out_path, frame_at, m["title"].upper(), (f"TOP {n}", m["article_title"].upper()),
+                lambda k: f"#{n - k}", head=True)
+
+
+# ---------- word of the day: a word, what it means, where it comes from, and how it is used ----------
+WIKTIONARY = "https://en.wiktionary.org/w/api.php"
+WORD_PROMPT = """Here is the English Wiktionary entry for the word "{word}":
+{entry}
+
+Write three short sentences for a "word of the day" video, in plain English a 14-year-old follows.
+- "meaning": what the word means (its first, main sense), starting with the word itself. Only what the entry says.
+- "origin": where the word comes from, using ONLY the entry's Etymology; name the languages or people it names.
+  Empty if the entry has no etymology.
+- "example": a natural everyday sentence that uses the word correctly.
+Each at most 24 words, written to be read aloud: no brackets, hyphenated word parts or symbols.
+Reply as JSON: {{"meaning": "...", "origin": "...", "example": "..."}}"""
+
+
+def make_word(con, text="", count=3):
+    """A word-of-the-day video: the word typed, else Wiktionary's word of the day. The writer's model puts the entry's
+    meaning and etymology into plain sentences and writes an example; an origin that names a language, person or year
+    the entry doesn't is dropped rather than shown."""
+    import html
+    before, word = dict(ai_used), text.strip()
+    if not word:
+        feed = fetch(WIKTIONARY, {"action": "featuredfeed", "feed": "wotd", "feedformat": "atom"}).decode()
+        found = re.findall(r'id="WOTD-rss-title"[^>]*>(.*?)<', html.unescape(feed))
+        if not found:
+            raise SystemExit("couldn't read Wiktionary's word of the day; type a word instead")
+        word = html.unescape(found[-1])
+    print(f"word of the day: {word}")
+    p = get_json(WIKTIONARY, {"action": "query", "format": "json", "formatversion": 2, "prop": "extracts", "explaintext": 1,
+                              "redirects": 1, "titles": word})["query"]["pages"][0]
+    english = re.search(r"== English ==\n(.*?)(?=\n== [^=]|\Z)", p.get("extract") or "", re.S)
+    if not english:
+        raise SystemExit(f"Wiktionary has no English entry for \"{word}\"")
+    entry = re.split(r"\n=+ (Translations|Anagrams|References|Further reading|See also|Derived terms|Related terms) =+", english.group(1))[0].strip()
+    pos = re.search(r"=== (Noun|Verb|Adjective|Adverb|Interjection|Proper noun|Phrase|Idiom|Proverb|Preposition|Conjunction|Pronoun) ===", english.group(1))
+    r = llm(WORD_PROMPT.format(word=word, entry=entry[:5000]), 0.4)
+    meaning, origin, example = (re.sub(r"\s+", " ", str(r.get(k) or "")).strip() for k in ("meaning", "origin", "example"))
+    if len(meaning.split()) < 4:
+        raise RuntimeError(f"couldn't write a meaning for \"{word}\" from its entry")
+    low = entry.lower()
+    named = [w for w in re.findall(r"(?<=[a-z,;] )[A-Z][a-z]+|\d{3,4}", origin) if w.lower() not in low]  # names and years not in the entry
+    if named or "Etymology" not in entry:
+        print("  no origin shown" + (f": it named {', '.join(named)}, which the entry doesn't" if named else ": the entry has no etymology"))
+        origin = ""
+    pid, ep, _ = new_video(con, f"word:{word}")
+    items = [dict(name=n, text=t) for n, t in (("MEANING", meaning), ("ORIGIN", origin), ("EXAMPLE", example)) if t]
+    url = "https://en.wiktionary.org/wiki/" + urllib.parse.quote(p["title"].replace(" ", "_"))
+    m = dict(ep=ep, pageid=pid, origin="word", article_title=p["title"], description=pos.group(1).lower() if pos else "",
+             title=f"Word of the Day: {p['title'].capitalize()}"[:90], items=items, script="", images=[],
+             tags=["wordoftheday", "vocabulary", "english"], url=url, credit=f"Meaning and origin from Wiktionary, CC BY-SA 4.0: {url}")
+    return make_format(con, m, p["title"], before)
+
+
+def word_steps(m):
+    return ([("intro", None, f"Today's word: {m['article_title']}.", 0.4, None)]
+            + [("part", k, i["text"], 0.5, None) for k, i in enumerate(m["items"])]
+            + [("outro", None, BRAND["outro_line"], 0.3, None)])
+
+
+def render_word(m, scenes, audio_path, duration, out_path, frame_at=None):
+    """The word large at the top; its meaning, origin and example appear one after another as they are read, the one
+    being read in full colour and the earlier ones dimmed."""
+    ensure_fonts()
+    cards = {}
+
+    def card(kind, k):
+        shown = -1 if kind == "intro" else len(m["items"]) if kind == "outro" else k
+        if shown not in cards:
+            im, d = backdrop()
+            d.text((60, 205), "WORD OF THE DAY", font=font("display", 54), fill=C["accent"])
+            y = text_lines(d, m["article_title"].upper(), "display", 190, 290, 1, C["text"])
+            if m.get("description"):
+                y = text_lines(d, m["description"], "body", 46, y + 6, 1, C["muted"], weight="Medium")
+            y += 70
+            for j, i in enumerate(m["items"][:shown + 1]):
+                d.text((60, y), i["name"].upper(), font=font("display", 50), fill=C["accent"] if j == shown else C["muted"])
+                y = text_lines(d, i["text"], "body", 56, y + 84, 6, C["text"] if j == shown else C["muted"], weight="Medium") + 56
+            cards[shown] = im
+        return cards[shown]
+
+    render_scenes(scenes, lambda s, t: card(s["kind"], s["q"]).copy(), audio_path, duration, out_path, frame_at)
+
+
 # video_type / origin -> (make it from the Make box's text, where its parts are in meta, its scenes, its renderer, fewest parts)
 FORMATS = {"quiz": (make_quiz, "quiz", quiz_steps, render_quiz, 3),
            "guess": (make_guess, "items", guess_steps, render_guess, 3),
-           "onthisday": (make_onthisday, "items", onthisday_steps, render_onthisday, 2)}
+           "onthisday": (make_onthisday, "items", onthisday_steps, render_onthisday, 2),
+           "top": (make_top, "items", top_steps, render_top, 3),
+           "word": (make_word, "items", word_steps, render_word, 2)}
 
 
 def copy_to(con, ep, to):
@@ -3647,7 +3810,8 @@ def copy_from(con, channel, pageid):
     for i in m.get("images") or []:
         i["path"] = str(mine / Path(i["path"]).name)
     for i in m.get("items") or []:
-        i["image"]["path"] = str(mine / Path(i["image"]["path"]).name)
+        if i.get("image"):
+            i["image"]["path"] = str(mine / Path(i["image"]["path"]).name)
     ep = con.execute("select coalesce(max(ep), 0) + 1 from pages").fetchone()[0]
     m["ep"] = ep
     for k in ("narration", "yt_description", "potential", "ai", "gemini"):

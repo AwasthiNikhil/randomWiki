@@ -97,6 +97,14 @@ caption in the photo) and Wikipedia's main picture isn't always the best one; on
 ("Dog breed"); the history word list drops harmless events and can let a grim one through; history pictures are of a
 linked article, which may be a person or place rather than the event; Wikipedia rate-limits picture lookups, so runs
 sometimes wait 10-40 s. Guess and history videos can't be edited in the studio (only remade).
+Then Top Five (`workspaces/top-five`, top countdown; EP 001 tallest mountains) and Word a Day (`workspaces/word-a-day`,
+word of the day; EP 001 petrichor typed, EP 002 Wiktionary's word for 14 November), both from the command line. The
+entry editor for guess / on this day / top / word was tested in the browser on a throwaway countdown (removed one,
+reworded one, re-rendered; the title followed the count). Not tested: Make now in the studio for these two, schedules,
+copying, the editor on the other three formats. Weak spots: a countdown's order and which entries count are the
+model's reading of the research (the first try mixed "tallest by other measures" into one list before the prompt was
+tightened); only numbers are checked against the proof; the word format's meaning and example are the model's wording
+(only names and years in the origin are checked); Wiktionary's daily word is often obscure.
 Known gaps: topic match is by title words only; small or brief
 stamps and emoji overlays pass the text check; letting Gemini watch and rate candidates is the real fix. The video's dialog still shows the explainer editor (narration,
 visuals), which doesn't apply; re-render is refused. No per-clip trimming or reordering yet; each clip is its first

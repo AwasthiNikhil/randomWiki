@@ -622,6 +622,20 @@ class H(BaseHTTPRequestHandler):
                     raise ValueError("give it a title (up to 100 characters) and one to ten questions")
                 m.update(title=title, quiz=quiz)
                 meta.write_text(json.dumps(m, indent=2))
+            elif self.path == "/api/items":  # body: {"pageid", "title", "items": [{"i": its place before, "name", "text"}]}; client then runs rerender
+                meta = rw.WORK / str(int(body["pageid"])) / "meta.json"
+                m = json.loads(meta.read_text())
+                old, items = m.get("items") or [], []
+                for it in body["items"]:
+                    name, text = str(it.get("name", "")).strip()[:80], re.sub(r"\s+", " ", str(it.get("text", ""))).strip()[:400]
+                    if not name or not text or not 0 <= int(it["i"]) < len(old):
+                        raise ValueError("every entry needs both its name and its words")
+                    items.append(old[int(it["i"])] | {"name": name, "text": text})  # its picture stays
+                title, least = str(body.get("title", "")).strip(), rw.FORMATS[m["origin"]][4]
+                if not 0 < len(title) <= 100 or len(items) < least or len({it["i"] for it in body["items"]}) != len(items):
+                    raise ValueError(f"give it a title (up to 100 characters) and keep at least {least} entries")
+                m.update(title=title, items=items)
+                meta.write_text(json.dumps(m, indent=2))
             elif self.path == "/api/images":  # body: {"pageid", "images": [ordered list]}; downloads new picks
                 pid = int(body["pageid"])
                 work = rw.WORK / str(pid)
