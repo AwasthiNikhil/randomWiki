@@ -1584,7 +1584,7 @@ def draw_visuals(title, script, dest, limit=8):
         print(f"  sentence {k + 1}: drawing {scene[:90]!r}", flush=True)
         if not path.exists():
             generate_image(f"{scene}. {style}", path)
-        out.append(dict(source="ai", url="ai:" + path.stem, name=scene[:150], page="", artist="FLUX.1 schnell, on this Mac",
+        out.append(dict(source="ai", url="ai:" + path.stem, name=scene[:150], page="", artist="FLUX.1 schnell",
                         license="AI-generated", path=str(path), sentence=k, query=scene))
     if len(out) < 2:
         raise RuntimeError("the picture model drew fewer than two pictures")
@@ -2403,7 +2403,14 @@ def description(m):
                  "edge": "Narration: AI voice (Microsoft Edge text to speech)."}
     lines += [narration.get(m.get("narration"), "Narration: AI voice (Kokoro TTS).") + " Fonts: SIL OFL.", "",
               " ".join("#" + re.sub(r"\W", "", t) for t in BRAND["hashtags"] + m["tags"][:3])]
-    return "\n".join(lines)[:4900]
+    return "\n".join(re.sub(r":\s*$", "", l) for l in lines)[:4900]  # a credit with no link doesn't end in a colon
+
+
+def description_problems(text):
+    """What must never reach a published description: a credit left hanging where its link should be, or our own
+    workshop notes. upload() refuses on any of these; the selftest runs every kind of description through it."""
+    return ([f"a credit with no link: \"{l[:60]}\"" for l in text.splitlines() if l.rstrip().endswith(":")]
+            + [f"internal wording: \"{l[:60]}\"" for l in text.splitlines() if re.search(r"on this Mac|/Users/|\.venv|meta\.json", l)])
 
 
 APPEAL_PROMPT = """Rate this YouTube Short as it would appear to someone scrolling the Shorts feed.
@@ -2688,7 +2695,7 @@ def src_ai_image(q, limit=1):
     path = folder / f"AI-{hashlib.sha1(f'{q}{time.time()}'.encode()).hexdigest()[:10]}.png"
     generate_image(q, path)
     im = Image.open(path)
-    path.with_suffix(".json").write_text(json.dumps(dict(title=q[:150], url="", site="AI picture", uploader="FLUX.1 schnell, on this Mac",
+    path.with_suffix(".json").write_text(json.dumps(dict(title=q[:150], url="", site="AI picture", uploader="FLUX.1 schnell",
                                                          license="AI-generated", file=path.name, width=im.width, height=im.height,
                                                          saved=time.strftime("%Y-%m-%d %H:%M")), indent=1))
     return [c for c in src_media_images("", 10 ** 6) if c["url"] == "media:" + path.name]
@@ -4518,6 +4525,8 @@ def upload(con, pageid, publish_at=None):
     if not row or row["status"] != "rendered":
         raise SystemExit(f"page {pageid} is not in 'rendered' state")
     m = json.loads((WORK / str(pageid) / "meta.json").read_text())
+    if bad := description_problems(m["yt_description"]):  # checked once, for every platform
+        raise SystemExit(f"EP {row['ep']:03d} not published: its description has {bad[0]}. Re-render the video to rewrite the description.")
     posts = json.loads(row["posts"] or "{}")
     targets = [p for p in BRAND.get("publish_to") or ["youtube"] if p in PLATFORMS and p not in posts
                and not (p == "youtube" and row["video_id"])]
@@ -4624,6 +4633,13 @@ def selftest():
     saved, BRAND["prompts"] = BRAND.get("prompts"), {"script": "Be funny about {title} }{"}
     assert prompt_for("script", title="T", text="X", answer="").startswith("Be funny about T }{\n\nArticle title: T")
     BRAND["prompts"] = saved
+    pic = dict(name="a long drawing instruction", page="", artist="FLUX.1 schnell", license="AI-generated", source="ai")
+    photo = dict(name="Pole", page="https://commons.wikimedia.org/wiki/File:Pole.jpg", artist="A. Person", license="CC BY-SA 4.0", source="commons")
+    base = dict(script="A hook. More.", url="https://example.org", article_title="T", tags=["a"], narration="clone")
+    for imgs, want in (([pic, pic], "Images: AI-generated illustrations (FLUX.1 schnell)."), ([pic, photo, photo | {"page": ""}], "Some images are AI-generated")):
+        d = description(base | {"images": imgs})
+        assert want in d and "drawing instruction" not in d and not description_problems(d), d
+    assert len(description_problems("Image: \"x\", FLUX.1 schnell, on this Mac, AI-generated: \nfine")) == 2
     BRAND["say"] = {"Koh-i-Noor": "ko he noor"}
     assert speakable_map("The koh-i-noor pencil, Louis XIV.") == ("The ko he noor pencil, Louis the Fourteenth.", [("koh-i-noor", "ko he noor"), ("Louis XIV", "Louis the Fourteenth")])
     del BRAND["say"]
