@@ -115,6 +115,19 @@ web.html) saves order and ticks through `POST /api/clips`.
 **The owner chose to allow other people's clips here**, as an exception to the licence rule below; every clip is
 credited in the description, and publishing rights are theirs to sort out.
 
+## Quizzes (`make_quiz()` in rw.py)
+A third kind of video (`video_type: "quiz"`; `run` and `auto` on such a channel take a topic, or a random channel
+topic). `research()` as for explainers, then `quiz_questions()`: the writer's model drafts questions with three options
+and the sentence of the notes that proves each; code keeps only those whose sentence is really in the notes
+(`in_text()`), names the answer and neither wrong option, and from which the local model, shown only that sentence,
+picks the same option. Fewer than three kept = the video fails. `produce_quiz()` voices line by line (intro, each
+question, each answer, outro), adds `QUIZ_THINK` seconds with a tick per second and a chime on the answer, drops the
+last question while the total is over `max_seconds`, and `render_quiz()` draws it (cards cached per state; `backdrop()`,
+`font()`, `fit_lines()`, `encode()` are shared with `render()`). Meta has `origin: "quiz"`, `intro`, `quiz`
+(question, options, answer, quote). `rerender` and "Copy to channel" re-voice and redraw it. No draft step, no
+question editing, no pictures or captions; the studio lists the questions with their proof. In the UI a quiz channel
+counts as an explainer channel for `data-for` (same topics, research, voice and model settings).
+
 ## Conventions that matter
 - **No video from model memory:** research must come from sources actually read; if research has no answer to a
   question, the video fails with a reason rather than circling the topic.

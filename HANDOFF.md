@@ -80,6 +80,13 @@ barber poles, 40 s, six drawings, Edge voice). Known weak spot: drawings illustr
 so they can show things wrongly (era, details).
 Copy to another channel: tested from the command line (a clip video and a narrated video into a throwaway channel,
 and a refused duplicate); in the studio only that the button and channel list appear, not a click.
+Quizzes (2026-11-14, see CLAUDE.md "Quizzes"): a new channel, 3 Second Quiz (`workspaces/3-second-quiz`), with one
+video made from "the solar system" (5 questions, 54 s, Gemini research, Kokoro voice); re-render run once; the studio's
+tile, Make-box hint and question list were looked at in the browser. Not tested: Make now from the studio, a scheduled
+run, copying a quiz to another channel, Edge or cloned voices, the local model writing the questions, and nobody has
+listened to the ticks and chime. Open: random topics repeat, so questions can repeat across videos (nothing remembers
+asked questions); questions can't be edited in the studio; the Videos settings page still shows idea, picture and
+edit-first options that a quiz channel ignores.
 Known gaps: topic match is by title words only; small or brief
 stamps and emoji overlays pass the text check; letting Gemini watch and rate candidates is the real fix. The video's dialog still shows the explainer editor (narration,
 visuals), which doesn't apply; re-render is refused. No per-clip trimming or reordering yet; each clip is its first

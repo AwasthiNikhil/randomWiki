@@ -710,6 +710,13 @@ def find_answer(question, text):
 
 def answers(question, quote, text):
     """True if `quote` really comes from `text` and, judged on its own, answers the question (local model)."""
+    if len(quote.split()) < 4 or "?" in quote or not in_text(quote, text):
+        return False
+    return str(llm(IS_ANSWER_PROMPT.format(question=question, quote=quote), 0.1, local=True).get("answers")).lower() == "true"
+
+
+def in_text(quote, text):
+    """True if `quote` really comes from `text`."""
     norm = lambda x: re.sub(r"\W+", " ", x).lower().strip()
     # every sentence of the quote must be in the text, give or take a word: models join real sentences from different
     # places and drop or add a word when copying, but an invented sentence matches nothing this closely
@@ -718,9 +725,7 @@ def answers(question, quote, text):
     parts = [p for p in split(quote) if len(p.split()) >= 5] or [quote]
     whole, sents = norm(text), [norm(x) for x in split(text)]
     real = lambda p: norm(p)[:120] in whole or any(difflib.SequenceMatcher(None, norm(p), x).ratio() >= 0.85 for x in sents)
-    if len(quote.split()) < 4 or "?" in quote or not all(real(p) for p in parts):
-        return False
-    return str(llm(IS_ANSWER_PROMPT.format(question=question, quote=quote), 0.1, local=True).get("answers")).lower() == "true"
+    return all(real(p) for p in parts)
 
 
 def ensure_answered(s, question, answer, text):
@@ -2077,43 +2082,44 @@ def image_starts(cues, words, duration, min_gap=1.5):
     return out
 
 
-def render(meta, words, audio_path, duration, out_path, frame_at=None):
-    """Draw the branded video and encode it to out_path. With frame_at=seconds, save just that frame as an image."""
-    import subprocess, imageio_ffmpeg
-    from PIL import Image, ImageDraw, ImageFont
-    ensure_fonts()
+def font(kind, size, weight=None):
+    from PIL import ImageFont
+    f = ImageFont.truetype(str(ROOT / BRAND["fonts"][kind]), size)
+    weight = weight or (BRAND["fonts"].get("display_weight", "Bold") if kind == "display" else None)
+    try:
+        f.set_variation_by_name(weight)  # variable fonts only; static fonts keep their single weight
+    except Exception:
+        pass
+    return f
 
-    def font(kind, size, weight=None):
-        f = ImageFont.truetype(str(ROOT / BRAND["fonts"][kind]), size)
-        weight = weight or (BRAND["fonts"].get("display_weight", "Bold") if kind == "display" else None)
-        try:
-            f.set_variation_by_name(weight)  # variable fonts only; static fonts keep their single weight
-        except Exception:
-            pass
-        return f
 
-    def wrap(text, f, width):
-        lines, cur = [], ""
-        for w in text.split():
-            t = f"{cur} {w}".strip()
-            if cur and f.getlength(t) > width:
-                lines.append(cur)
-                t = w
-            cur = t
-        return lines + [cur] if cur else lines
+def wrap(text, f, width):
+    lines, cur = [], ""
+    for w in text.split():
+        t = f"{cur} {w}".strip()
+        if cur and f.getlength(t) > width:
+            lines.append(cur)
+            t = w
+        cur = t
+    return lines + [cur] if cur else lines
 
-    def fits(f, lines, width):
-        return all(f.getlength(l) <= width for l in lines)
 
-    def fit_lines(text, kind, size, width, max_lines, weight=None, min_size=12):
-        while True:  # shrink until it fits; never truncate
-            f = font(kind, size, weight)
-            lines = wrap(text, f, width)
-            if size <= min_size or (len(lines) <= max_lines and fits(f, lines, width)):
-                return f, lines
-            size -= 2
+def fits(f, lines, width):
+    return all(f.getlength(l) <= width for l in lines)
 
-    # static layer: header, title, footer
+
+def fit_lines(text, kind, size, width, max_lines, weight=None, min_size=12):
+    while True:  # shrink until it fits; never truncate
+        f = font(kind, size, weight)
+        lines = wrap(text, f, width)
+        if size <= min_size or (len(lines) <= max_lines and fits(f, lines, width)):
+            return f, lines
+        size -= 2
+
+
+def backdrop():
+    """A blank frame in the channel's colours with its mark and name at the top. -> (image, draw)"""
+    from PIL import Image, ImageDraw
     bg = Image.new("RGB", (W, H), C["bg"])
     d = ImageDraw.Draw(bg)
     d.rounded_rectangle((60, 66, 150, 156), 20, fill=C["accent"])
@@ -2125,6 +2131,17 @@ def render(meta, words, audio_path, duration, out_path, frame_at=None):
     else:
         d.text((105, 113), mark, font=font("display", 70 if len(mark) < 2 else 46), fill=C["bg"], anchor="mm")
     d.text((176, 111), BRAND["channel"].upper(), font=font("display", 62), fill=C["text"], anchor="lm")
+    return bg, d
+
+
+def render(meta, words, audio_path, duration, out_path, frame_at=None):
+    """Draw the branded video and encode it to out_path. With frame_at=seconds, save just that frame as an image."""
+    import subprocess, imageio_ffmpeg
+    from PIL import Image, ImageDraw, ImageFont
+    ensure_fonts()
+
+    # static layer: header, title, footer
+    bg, d = backdrop()
     # title (<=3 lines) + description (<=2 lines) scaled together to fit the header block
     desc = "" if meta.get("origin") == "question" else meta.get("description") or ""  # older explainers stored a source count here
     room, tw = PY - 24 - 190, W - 120
@@ -2321,17 +2338,21 @@ def render(meta, words, audio_path, duration, out_path, frame_at=None):
         frame(frame_at).save(out_path)
         return
 
-    ff = imageio_ffmpeg.get_ffmpeg_exe()
     work = WORK / str(meta.get("pageid", ""))
     music = {"none": None, "own": work / "music.m4a"}.get(meta.get("music"), WS / BRAND["music"])
     sfx = [(work / srcs[k][1]["sfx"], starts[k]) for k in range(n) if srcs[k][1].get("sfx") and (work / srcs[k][1]["sfx"]).is_file()]
-    cmd = [ff, "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}",
-           "-r", str(FPS), "-i", "-", "-i", str(audio_path)]
-    cmd += audio_mix(music if music and music.exists() else None, meta.get("music_volume", BRAND["music_volume"]), sfx)
-    cmd += ["-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p",
-            "-c:a", "aac", "-ar", "48000", "-b:a", "192k", "-movflags", "+faststart", "-shortest", str(out_path)]
-    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
+    encode(frame, duration, audio_path,
+           audio_mix(music if music and music.exists() else None, meta.get("music_volume", BRAND["music_volume"]), sfx), out_path)
 
+
+def encode(frame, duration, audio_path, mix, out_path):
+    """Pipe frame(t) images to ffmpeg with the voice and the audio_mix() args, into out_path."""
+    import subprocess, imageio_ffmpeg
+    cmd = [imageio_ffmpeg.get_ffmpeg_exe(), "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}",
+           "-r", str(FPS), "-i", "-", "-i", str(audio_path), *mix,
+           "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p",
+           "-c:a", "aac", "-ar", "48000", "-b:a", "192k", "-movflags", "+faststart", "-shortest", str(out_path)]
+    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
     for fi in range(int(duration * FPS)):
         proc.stdin.write(frame(fi / FPS).tobytes())
     proc.stdin.close()
@@ -3094,6 +3115,227 @@ def render_clips(con, m):
     print(f"  done: {out}")
 
 
+# ---------- quizzes: a question and three options on screen, a few seconds to think, then the answer ----------
+QUIZ_PROMPT = """Write a multiple-choice quiz for a YouTube Short about: "{topic}"
+Use ONLY facts stated in the notes below. Write {n} questions a curious viewer has a fair chance at: not trivial,
+not obscure, each about a different fact.
+Each question: at most 14 words, with exactly one correct answer, and 3 options of at most 4 words each: the correct
+one and two plausible wrong ones of the same kind (three planets, three years, three people).
+For each, copy the one sentence from the notes that proves the answer, word for word. The answer's own words must
+appear in that sentence, and the wrong options must not.
+Notes:
+{text}
+Reply as JSON: {{"title": "<a title of at most 60 characters that dares the viewer to try>", "questions": [{{"question":
+"<question>", "options": ["<option>", "<option>", "<option>"], "answer": "<the correct option, copied exactly>",
+"quote": "<the sentence from the notes>"}}]}}"""
+
+QUIZ_CHECK = """Sentence: "{quote}"
+Question: "{question}"
+Options: {options}
+Going only by the sentence, which option answers the question?
+Reply as JSON: {{"answer": "<that option, copied exactly, or none if the sentence doesn't say>"}}"""
+
+QUIZ_THINK = 3  # seconds the viewer gets before the answer
+
+
+def quiz_questions(topic, text, count):
+    """Questions for a quiz, each proven by a sentence of the research: the writer's model drafts them, and code keeps
+    only those whose proof is really in the notes, names the answer and no other option, and from which the local
+    model, shown nothing but that sentence, picks the same answer. -> (title, [{question, options, answer, quote}])"""
+    import random
+    norm = lambda x: re.sub(r"\W+", " ", str(x)).lower().strip()
+    good, title, why = [], "", {"proof not in the research": 0, "proof doesn't settle it": 0, "badly formed": 0}
+    for _ in range(2):
+        r = llm(QUIZ_PROMPT.format(topic=topic, n=count + 3, text=text[:12000]), 0.6)
+        title = title or str(r.get("title") or "").strip()[:70]
+        for q in r.get("questions") or []:
+            if len(good) == count:
+                break
+            try:
+                question, answer, quote = str(q["question"]).strip(), str(q["answer"]).strip(), str(q["quote"]).strip()
+                opts = [str(o).strip() for o in q["options"]]
+            except (KeyError, TypeError):
+                why["badly formed"] += 1
+                continue
+            wrong = [o for o in opts if norm(o) != norm(answer)]
+            if (len(opts) != 3 or len(wrong) != 2 or norm(wrong[0]) == norm(wrong[1]) or len(question.split()) > 16
+                    or any(len(o.split()) > 5 or not norm(o) for o in opts)
+                    or any(norm(question) == norm(g["question"]) or norm(answer) == norm(g["answer"]) for g in good)):
+                why["badly formed"] += 1
+            elif not in_text(quote, text):
+                why["proof not in the research"] += 1
+            elif (f" {norm(answer)} " not in f" {norm(quote)} " or any(f" {norm(o)} " in f" {norm(quote)} " for o in wrong)
+                  or norm(llm(QUIZ_CHECK.format(quote=quote, question=question, options="; ".join(opts)), 0.1, local=True)
+                          .get("answer")) != norm(answer)):
+                why["proof doesn't settle it"] += 1
+            else:
+                random.shuffle(opts)  # models like to put the right one first
+                good.append(dict(question=question, options=opts, answer=answer, quote=quote))
+        if len(good) == count:
+            break
+    print(f"  {len(good)} questions kept" + "".join(f"; {n} dropped ({k})" for k, n in why.items() if n))
+    if len(good) < 3:
+        raise RuntimeError(f"the research on \"{topic}\" didn't give three questions that could be proven from it; try another topic")
+    return title, good
+
+
+def make_quiz(con, topic, count=5):
+    """A quiz video on a topic: research it, write questions the research proves (quiz_questions), then voice and
+    render. Always made straight away: there is no draft step for quizzes yet."""
+    before, topic = dict(ai_used), topic.strip()
+    print(f"quiz on: {topic}\n  researching…")
+    a = research(topic)
+    title, quiz = quiz_questions(topic, a["text"], count)
+    n = len(quiz)
+    pid = sources_id(f"quiz:{topic}:{time.time()}")
+    ep = con.execute("select coalesce(max(ep), 0) + 1 from pages").fetchone()[0]
+    (WORK / str(pid)).mkdir(parents=True, exist_ok=True)
+    intro = f"{number_words(n).capitalize()} questions on {topic}. {number_words(QUIZ_THINK).capitalize()} seconds each."
+    m = dict(ep=ep, pageid=pid, origin="quiz", article_title=topic, description="", title=title or f"{n} questions: {topic}"[:70],
+             intro=intro, quiz=quiz, script=intro + " " + " ".join(f"{q['question']} {q['answer']}." for q in quiz),
+             tags=[w for w in re.findall(r"[a-z0-9]+", topic.lower()) if len(w) > 2 and w not in ("the", "and")][:5], images=[],
+             url=a["url"], credit=a["credit"], source_label=a["source_label"])
+    print(f"[{ep:03d}] {m['title']}")
+    upsert(con, pid, title=m["title"], url=a["url"], source="curated", origin="quiz", ref=topic, reason="quiz", status="draft", ep=ep)
+    try:
+        produce_quiz(con, m)
+    except BaseException as e:
+        upsert(con, pid, status="failed", reason=f"{type(e).__name__}: {e}"[:300])
+        raise
+    try:
+        score_video(con, pid)
+    except Exception as e:
+        print(f"  could not score: {e}")
+    record_usage(pid, before)
+    return pid
+
+
+def produce_quiz(con, m):
+    """Voice a quiz line by line (so each question, pause and answer has its own moment), add a tick for every second
+    of thinking time and a chime on the answer, then render."""
+    import numpy as np, soundfile as sf
+    work = WORK / str(m["pageid"])
+    m["narration"] = BRAND.get("voice_engine") if BRAND.get("voice_engine") in ("clone", "edge") else "kokoro"
+    print("  voicing…")
+    sr, said = None, {}
+
+    def say(line):
+        nonlocal sr
+        if line not in said:
+            tts(line, work / "part.wav")
+            wav, sr = sf.read(work / "part.wav", dtype="float32")
+            wav = wav.mean(1) if wav.ndim > 1 else wav
+            loud = np.flatnonzero(np.abs(wav) > 0.01)  # engines pad the end with silence; keep a breath of it
+            said[line] = wav[:loud[-1] + int(sr * 0.2)] if len(loud) else wav
+        return said[line]
+
+    def beep(freq, secs):
+        t = np.arange(int(sr * secs)) / sr
+        return (0.2 * np.sin(2 * np.pi * freq * t) * np.exp(-t * 5 / secs)).astype("float32")
+
+    def scene(kind, q, wav):
+        start = sum(len(x) for x in audio) / sr
+        audio.append(wav)
+        scenes.append(dict(kind=kind, q=q, start=start, end=start + len(wav) / sr))
+
+    while True:
+        audio, scenes = [], []
+        scene("intro", None, say(m["intro"]))
+        for k, q in enumerate(m["quiz"]):
+            scene("ask", k, say(q["question"]))
+            think = np.zeros(int(sr * QUIZ_THINK), "float32")
+            for s in range(QUIZ_THINK):
+                tick = beep(880, 0.12)
+                think[s * sr:s * sr + len(tick)] += tick
+            scene("think", k, think)
+            answer, chime = say(q["answer"] + "."), beep(1320, 0.4)
+            answer = np.concatenate([answer, np.zeros(max(0, len(chime) - len(answer)) + int(sr * 0.4), "float32")])
+            answer[:len(chime)] += chime
+            scene("reveal", k, answer)
+        scene("outro", None, say("How many did you get? " + BRAND["outro_line"]))
+        if scenes[-1]["end"] <= BRAND["max_seconds"] or len(m["quiz"]) <= 3:
+            break
+        print(f"  {scenes[-1]['end']:.0f}s is over the channel's {BRAND['max_seconds']}s; leaving out the last question")
+        m["quiz"].pop()
+        m["intro"] = m["intro"].replace(m["intro"].split()[0], number_words(len(m["quiz"])).capitalize(), 1)
+    (work / "part.wav").unlink()
+    m["script"] = m["intro"] + " " + " ".join(f"{q['question']} {q['answer']}." for q in m["quiz"])
+    sf.write(work / "voice.wav", np.concatenate(audio), sr)
+    dur = scenes[-1]["end"]
+    row = con.execute("select video_path from pages where pageid=?", (m["pageid"],)).fetchone()
+    out = Path(row["video_path"]) if row and row["video_path"] else video_out(m["ep"], m["article_title"])
+    OUT.mkdir(exist_ok=True)
+    m["yt_description"] = description(m)
+    (work / "meta.json").write_text(json.dumps(m, indent=2))
+    print(f"  rendering {dur:.1f}s…")
+    render_quiz(m, scenes, work / "voice.wav", dur, out)
+    upsert(con, m["pageid"], status="rendered", video_path=str(out))
+    print(f"  done: {out}")
+
+
+def render_quiz(m, scenes, audio_path, duration, out_path, frame_at=None):
+    """Draw a quiz: a title card, then per question the question with its three options, a bar and a number counting
+    the thinking time down, and the right option lit up; last, a card asking for the score."""
+    import math
+    ensure_fonts()
+    quiz, n, cards = m["quiz"], len(m["quiz"]), {}
+
+    def lines(d, text, kind, size, y, max_lines, fill, centre=False, width=W - 120, x=60):
+        f, ls = fit_lines(text, kind, size, width, max_lines)
+        for l in ls:
+            d.text((W // 2 if centre else x, y), l, font=f, fill=fill, anchor="mt" if centre else "lt")
+            y += f.size * 1.2
+        return y
+
+    def card(kind, k):
+        if (kind, k) in cards:
+            return cards[kind, k]
+        im, d = backdrop()
+        if kind == "intro":
+            y = lines(d, m["title"].upper(), "display", 130, 560, 5, C["text"], centre=True)
+            lines(d, f"{n} QUESTIONS · {QUIZ_THINK} SECONDS EACH", "display", 60, y + 60, 1, C["accent"], centre=True)
+        elif kind == "outro":
+            y = lines(d, "HOW MANY DID YOU GET?", "display", 150, 640, 3, C["accent"], centre=True)
+            lines(d, f"Tell us your score out of {n} in the comments", "body", 48, y + 50, 2, C["muted"], centre=True)
+        else:
+            q = quiz[k]
+            d.text((60, 230), f"QUESTION {k + 1} OF {n}", font=font("display", 54), fill=C["accent"])
+            lines(d, q["question"], "display", 96, 330, 5, C["text"])
+            for j, o in enumerate(q["options"]):
+                y, right = 900 + j * 215, kind == "reveal" and o == q["answer"]
+                d.rounded_rectangle((60, y, W - 60, y + 180), 36, fill=C["accent"] if right else C["panel"])
+                ink = C["bg"] if right else C["muted"] if kind == "reveal" else C["text"]
+                d.ellipse((90, y + 40, 190, y + 140), fill=C["bg"] if right else C["accent"] if kind != "reveal" else C["bg"])
+                d.text((140, y + 92), "ABC"[j], font=font("display", 64), anchor="mm",
+                       fill=C["accent"] if right else C["bg"] if kind != "reveal" else C["muted"])
+                f, ls = fit_lines(o, "display", 72, W - 120 - 200, 2)
+                for i, l in enumerate(ls):
+                    d.text((225, y + 92 + (i - (len(ls) - 1) / 2) * f.size * 1.15), l, font=f, fill=ink, anchor="lm")
+        cards[kind, k] = im
+        return im
+
+    def frame(t):
+        from PIL import ImageDraw
+        s = next((s for s in scenes if s["start"] <= t < s["end"]), scenes[-1])
+        im = card("ask" if s["kind"] == "think" else s["kind"], s["q"]).copy()
+        d = ImageDraw.Draw(im)
+        if s["kind"] in ("ask", "think"):  # the thinking time: a bar that empties and the seconds left
+            left = 1 - (t - s["start"]) / QUIZ_THINK if s["kind"] == "think" else 1
+            d.rounded_rectangle((60, 1580, W - 60, 1610), 15, fill=C["panel"])
+            d.rounded_rectangle((60, 1580, 60 + max(30, int((W - 120) * left)), 1610), 15, fill=C["accent"])
+            if s["kind"] == "think":
+                d.text((W // 2, 1710), str(math.ceil(left * QUIZ_THINK)), font=font("display", 150), fill=C["accent"], anchor="mm")
+        d.rounded_rectangle((PX, 1826, PX + PW, 1836), 5, fill=C["panel"])
+        d.rounded_rectangle((PX, 1826, PX + max(10, int(PW * t / duration)), 1836), 5, fill=C["accent"])
+        return im
+
+    if frame_at is not None:
+        frame(frame_at).save(out_path)
+        return
+    music = WS / BRAND["music"]
+    encode(frame, duration, audio_path, audio_mix(music if music.exists() else None, BRAND["music_volume"], []), out_path)
+
+
 def copy_to(con, ep, to):
     """Copy a video to another channel: same script and pictures (or clips), made again there with that channel's
     brand, voice and closing line. The work is done by `copyfrom` running as that channel."""
@@ -3140,6 +3382,8 @@ def copy_from(con, channel, pageid):
             m["yt_description"] = ""
             (mine / "meta.json").write_text(json.dumps(m, indent=2))
             render_clips(con, m)
+        elif m.get("origin") == "quiz":
+            produce_quiz(con, m)
         else:
             produce(con, m, video_out(ep, m["article_title"]))
             try:
@@ -3252,6 +3496,8 @@ def auto(con, dry_run=False):
             return
         if clips_channel():
             pid = make_clips(con, sch["fallback_arg"] or random_topic(), draft=False)  # nobody is there to pick clips
+        elif BRAND.get("video_type") == "quiz":
+            pid = make_quiz(con, sch["fallback_arg"] or random_topic())
         elif row:
             pid = row["pageid"]
         elif not sch["fallback_arg"]:  # nothing set for empty runs: your topics and what's trending in them
@@ -3260,7 +3506,7 @@ def auto(con, dry_run=False):
             pid = brainstorm(con, sch["fallback_arg"], "any", 1)[0]
         else:
             pid = discover_source(con, sch["fallback"], 1, sch["fallback_arg"] or None)[0]
-        if not clips_channel():
+        if BRAND.get("video_type") not in ("clips", "quiz"):
             make(con, pid)
         if sch["upload"]:
             pick = (f"select ep from pages where status='rendered' {UPLOAD_ORDER} limit 1" if sch["pick"] == "order"
@@ -3299,6 +3545,8 @@ def rerender(con, ep, repick_images=False, narration=None):
         raise SystemExit(f"episode {ep} has no saved script to re-render")
     if row["status"] == "uploaded":
         raise SystemExit(f"episode {ep} is already on YouTube; a re-render can't replace it there")
+    if row["origin"] == "quiz":
+        return produce_quiz(con, json.loads((WORK / str(row["pageid"]) / "meta.json").read_text()))
     if row["origin"] == "clips":
         return render_clips(con, json.loads((WORK / str(row["pageid"]) / "meta.json").read_text()))
     m = json.loads((WORK / str(row["pageid"]) / "meta.json").read_text())
@@ -3770,6 +4018,23 @@ def selftest():
     saved, BRAND["prompts"] = BRAND.get("prompts"), {"script": "Be funny about {title} }{"}
     assert prompt_for("script", title="T", text="X", answer="").startswith("Be funny about T }{\n\nArticle title: T")
     BRAND["prompts"] = saved
+    # quiz: a question is kept only if its proof is in the notes and names the right option alone
+    global llm
+    notes = ("The Sun holds 99.86% of the mass of the Solar System. Mars is the fourth planet from the Sun. "
+             "Jupiter is the largest planet, ahead of Saturn. Neptune was first seen in 1846 by Johann Galle.")
+    qs = [("How much of the mass is the Sun?", ["99.86%", "50%", "75%"], "99.86%", "The Sun holds 99.86% of the mass of the Solar System."),
+          ("Which planet is fourth?", ["Venus", "Mars", "Earth"], "Mars", "Mars is the fourth planet from the Sun."),
+          ("When was Neptune first seen?", ["1846", "1781", "1930"], "1846", "Neptune was first seen in 1846 by Johann Galle."),
+          ("Which planet has the most moons?", ["Saturn", "Venus", "Mars"], "Saturn", "Saturn has more moons than any other planet."),  # invented proof
+          ("Which planet is largest?", ["Jupiter", "Saturn", "Earth"], "Jupiter", "Jupiter is the largest planet, ahead of Saturn.")]  # names a wrong option too
+    real, llm = llm, lambda prompt, *a, **k: (
+        {"title": "T", "questions": [dict(question=q, options=o, answer=an, quote=pr) for q, o, an, pr in qs]} if "Notes:" in prompt
+        else {"answer": next(an for q, o, an, pr in qs if pr in prompt)})
+    try:
+        kept = quiz_questions("the solar system", notes, 5)[1]
+    finally:
+        llm = real
+    assert [k["answer"] for k in kept] == ["99.86%", "Mars", "1846"], kept
     print("selftest ok")
 
 
@@ -3899,6 +4164,10 @@ def main():
         clip_add(con, args.ep, args.url)
     elif args.cmd == "clips" or (args.cmd == "run" and clips_channel()):
         make_clips(con, " ".join(args.items) if args.cmd == "clips" else args.input or random_topic(), getattr(args, "count", 5))
+        if getattr(args, "upload", False):
+            upload_pending(con, args.publish_at)
+    elif args.cmd == "run" and BRAND.get("video_type") == "quiz":
+        make_quiz(con, args.input or random_topic())
         if getattr(args, "upload", False):
             upload_pending(con, args.publish_at)
     elif args.cmd == "run":

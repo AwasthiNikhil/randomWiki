@@ -83,7 +83,7 @@ def save_brand(new):
         b["pictures"], b["picture_style"] = new["pictures"], str(new.get("picture_style") or "").strip()[:300]
     if new.get("research_from") in ("web", "wikipedia"):
         b["research_from"] = new["research_from"]
-    if new.get("video_type") in ("explainer", "clips"):
+    if new.get("video_type") in ("explainer", "clips", "quiz"):
         b["video_type"] = new["video_type"]
     if new.get("mode") in ("auto", "manual"):
         b["mode"] = new["mode"]
@@ -269,7 +269,7 @@ def set_audio_credit(pid, file, item):
 _meta_cache = {}  # path -> (mtime, summary): thousands of videos shouldn't mean thousands of JSON reads per refresh
 
 
-HEAVY = ("images", "yt_description", "potential_info", "audio_credits", "clips")  # only the open video needs these
+HEAVY = ("images", "yt_description", "potential_info", "audio_credits", "clips", "quiz")  # only the open video needs these
 
 
 def pages(pageid=None):
@@ -303,7 +303,7 @@ def meta_summary(pid, m):
     return dict(yt_title=m["title"], script=m["script"], yt_description=m["yt_description"], potential_info=m.get("potential"),
                      narration=m.get("narration", "kokoro"), music=m.get("music", "brand"), music_volume=m.get("music_volume"),
                      ai=m.get("ai") or m.get("gemini"),
-                     audio_credits=m.get("audio_credits") or {},
+                     audio_credits=m.get("audio_credits") or {}, quiz=m.get("quiz") or [],
                      clips=[dict(file=Path(c["path"]).name, title=c.get("title", ""), uploader=c.get("uploader", ""), site=c.get("site", ""),
                                  url=c.get("url", ""), seconds=c.get("seconds") or c.get("duration") or 0, views=c.get("views", 0),
                                  use=c.get("use", True)) for c in m.get("clips") or [] if Path(c["path"]).exists()],

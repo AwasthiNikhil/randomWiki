@@ -161,6 +161,14 @@ the background for every channel whichever one is open, taking turns if they fal
 channel lives in the project folder itself, later ones in `workspaces/<name>/`; deleting a channel means deleting its
 folder (turn its schedule off first). On the command line, `RW_WORKSPACE=<name> ./rw …` works on that channel.
 
+## Quizzes
+Set a channel to **Quizzes** in Settings → Videos, then type a topic ("the solar system"). The topic is researched,
+five questions are written from what was read, and each one is shown with three options, read out, given three
+seconds with a ticking countdown, and answered. A question is only used if a sentence from the research proves its
+answer; open the video in the studio to see each question with that sentence. If the video would run over the
+channel's maximum length, the last question is left out. Quizzes are made straight away (no edit-first step) and
+their questions can't be edited yet; "Remake" writes a new set.
+
 ## Clip countdowns
 A channel can make countdowns of short clips instead of narrated explainers: Settings → Ideas & videos → "What this
 channel makes". Then the Make box takes words (YouTube Shorts under that hashtag: "funny cats" looks in #funnycats)
