@@ -605,6 +605,22 @@ class H(BaseHTTPRequestHandler):
                     raise ValueError("give it a title (up to 100 characters) and tick at least two clips")
                 m.update(title=title, clips=order + list(have.values()))  # any clip the page didn't list is kept, at the end
                 meta.write_text(json.dumps(m, indent=2))
+            elif self.path == "/api/quiz":  # body: {"pageid", "title", "quiz": [{"question", "options": [3], "answer"}]}; client then runs rerender
+                meta = rw.WORK / str(int(body["pageid"])) / "meta.json"
+                m = json.loads(meta.read_text())
+                proof = {(q["question"], q["answer"]): q.get("quote", "") for q in m.get("quiz") or []}
+                quiz = []
+                for q in body["quiz"]:
+                    question, answer = str(q.get("question", "")).strip()[:160], str(q.get("answer", "")).strip()[:60]
+                    opts = [str(o).strip()[:60] for o in q.get("options") or []]
+                    if not question or len(opts) != 3 or len({o.lower() for o in opts if o}) != 3 or answer not in opts:
+                        raise ValueError(f"question {len(quiz) + 1} needs its words, three different options and one of them marked as the answer")
+                    quiz.append(dict(question=question, options=opts, answer=answer, quote=proof.get((question, answer), "")))  # changed = no proof
+                title = str(body.get("title", "")).strip()
+                if not 0 < len(title) <= 100 or not 1 <= len(quiz) <= 10:
+                    raise ValueError("give it a title (up to 100 characters) and one to ten questions")
+                m.update(title=title, quiz=quiz)
+                meta.write_text(json.dumps(m, indent=2))
             elif self.path == "/api/images":  # body: {"pageid", "images": [ordered list]}; downloads new picks
                 pid = int(body["pageid"])
                 work = rw.WORK / str(pid)

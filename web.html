@@ -1230,6 +1230,42 @@ function clipEditor(p) {
     <div class="btns" style="margin-top:12px"><button class="btn primary" id="clipRender" type="button">${p.status === "draft" ? "Render video" : "Save &amp; re-render"}</button>
     <span class="hint" style="align-self:center">Joins the ticked clips in this order. Clips already prepared are reused, so a reorder is quick.</span></div>`;
 }
+// ---------------- quizzes: edit the questions, options and answers, then re-render ----------------
+function quizEditor(p) {
+  const locked = p.status === "uploaded";
+  return `${locked ? "" : `<h5>YouTube title</h5><input class="edit" id="edTitle" maxlength="100" value="${esc(p.yt_title)}">`}
+    <h5>Questions <span style="text-transform:none;letter-spacing:0">· ${locked ? "as published" : "change the words, the options or which one is right, then re-render"}</span></h5>
+    <div id="quizList" style="display:grid;gap:8px"></div>
+    ${locked ? "" : `<div class="btns" style="margin-top:12px"><button class="btn" id="quizAdd" type="button">Add a question</button>
+      <button class="btn primary" id="quizRender" type="button">Save &amp; re-render</button>
+      <span class="hint" style="align-self:center">A question you change or add is yours to vouch for: it is no longer checked against the research.</span></div>`}`;
+}
+function wireQuiz(p) {
+  const qz = (p.quiz || []).map(q => ({...q, options: [...q.options], was: q.question + "|" + q.answer})), locked = p.status === "uploaded";
+  const list = $("#quizList"), dis = locked ? "disabled" : "";
+  function draw() {
+    list.innerHTML = qz.map((q, k) => `<div class="box" data-k="${k}" style="display:grid;gap:6px">
+      <div style="display:flex;gap:8px;align-items:center"><b>${k + 1}</b><input class="edit qq" maxlength="160" value="${esc(q.question)}" placeholder="The question" ${dis}>
+        ${locked ? "" : `<button class="btn" data-rm type="button" title="Remove this question">×</button>`}</div>
+      ${q.options.map((o, j) => `<label style="display:flex;gap:8px;align-items:center"><input type="radio" name="qa${k}" value="${j}" ${o && o === q.answer ? "checked" : ""} ${dis} title="This one is the answer" style="accent-color:var(--accent)">
+        <input class="edit qo" data-j="${j}" maxlength="60" value="${esc(o)}" placeholder="Option ${"ABC"[j]}" ${dis}></label>`).join("")}
+      <div class="hint" style="margin:0">${q.quote && q.was === q.question + "|" + q.answer ? `Proof from the research: “${esc(q.quote)}”` : "Yours: not checked against the research."}</div></div>`).join("");
+  }
+  const read = () => list.querySelectorAll("[data-k]").forEach(box => {  // the fields back into qz
+    const q = qz[+box.dataset.k], pick = box.querySelector("input[type=radio]:checked");
+    q.question = box.querySelector(".qq").value.trim();
+    q.options = [...box.querySelectorAll(".qo")].map(i => i.value.trim());
+    q.answer = pick ? q.options[+pick.value] : "";
+  });
+  draw();
+  if (locked) return;
+  list.onclick = e => { const rm = e.target.closest("[data-rm]"); if (rm) { read(); qz.splice(+rm.closest("[data-k]").dataset.k, 1); draw(); } };
+  $("#quizAdd").onclick = () => { read(); qz.push({question: "", options: ["", "", ""], answer: "", quote: "", was: null}); draw(); list.lastElementChild.querySelector(".qq").focus(); };
+  $("#quizRender").onclick = async () => {
+    read();
+    if (await post("/api/quiz", {pageid: p.pageid, title: $("#edTitle").value, quiz: qz.map(({question, options, answer}) => ({question, options, answer}))})) { dlg.close(); exec(`rerender --ep ${p.ep}`); }
+  };
+}
 function wireClips(p) {
   const cl = p.clips.map(c => ({...c})), stem = f => f.replace(/\.[^.]+$/, "");
   let from = null;
@@ -1296,9 +1332,7 @@ async function openDetail(id) {
         <button class="btn" id="copyGo" type="button" data-ep="${p.ep}" title="Same script and pictures, made again with that channel's brand, voice and closing line">Copy to channel</button></div>` : ""}
       ${potDetail(p)}
       ${p.status === "failed" ? `<h5>Error</h5><div class="box">${esc(p.reason)}</div>` : ""}
-      ${p.origin === "clips" && p.clips?.length && p.status !== "uploaded" ? clipEditor(p) : p.origin === "quiz" ? `
-        <h5>Questions <span style="text-transform:none;letter-spacing:0">· each with the sentence from the research that proves its answer</span></h5>
-        ${(p.quiz || []).map((q, k) => `<div class="box" style="margin-bottom:8px"><b>${k + 1}. ${esc(q.question)}</b><br>${q.options.map(o => o === q.answer ? `<b>${esc(o)} ✓</b>` : esc(o)).join(" · ")}<div class="hint">“${esc(q.quote)}”</div></div>`).join("")}` : p.script && p.status !== "uploaded" ? `
+      ${p.origin === "clips" && p.clips?.length && p.status !== "uploaded" ? clipEditor(p) : p.origin === "quiz" ? quizEditor(p) : p.script && p.status !== "uploaded" ? `
         <h5>YouTube title</h5><input class="edit" id="edTitle" maxlength="100" value="${esc(p.yt_title)}">
         <h5>Narration <span id="edCount" style="text-transform:none;letter-spacing:0"></span></h5>
         <textarea id="edScript">${esc(p.script)}</textarea>
@@ -1355,6 +1389,7 @@ async function openDetail(id) {
   if ($("#vStrip")) wireVisuals(p);
   if ($("#recOpen")) wireRecorder(p);
   if ($("#clipList")) wireClips(p);
+  if ($("#quizList")) wireQuiz(p);
   const ed = $("#edScript");
   if (ed) { const n = () => $("#edCount").textContent = `· ${ed.value.trim().split(/\s+/).length} words (aim 85–128)`; ed.oninput = n; n(); }
 }

@@ -3190,9 +3190,8 @@ def make_quiz(con, topic, count=5):
     pid = sources_id(f"quiz:{topic}:{time.time()}")
     ep = con.execute("select coalesce(max(ep), 0) + 1 from pages").fetchone()[0]
     (WORK / str(pid)).mkdir(parents=True, exist_ok=True)
-    intro = f"{number_words(n).capitalize()} questions on {topic}. {number_words(QUIZ_THINK).capitalize()} seconds each."
     m = dict(ep=ep, pageid=pid, origin="quiz", article_title=topic, description="", title=title or f"{n} questions: {topic}"[:70],
-             intro=intro, quiz=quiz, script=intro + " " + " ".join(f"{q['question']} {q['answer']}." for q in quiz),
+             quiz=quiz, script="",
              tags=[w for w in re.findall(r"[a-z0-9]+", topic.lower()) if len(w) > 2 and w not in ("the", "and")][:5], images=[],
              url=a["url"], credit=a["credit"], source_label=a["source_label"])
     print(f"[{ep:03d}] {m['title']}")
@@ -3239,7 +3238,9 @@ def produce_quiz(con, m):
         scenes.append(dict(kind=kind, q=q, start=start, end=start + len(wav) / sr))
 
     while True:
-        audio, scenes = [], []
+        audio, scenes, n = [], [], len(m["quiz"])
+        m["intro"] = (f"{number_words(n).capitalize()} question{'s' * (n > 1)} on {m['article_title']}. "
+                      f"{number_words(QUIZ_THINK).capitalize()} seconds each.")
         scene("intro", None, say(m["intro"]))
         for k, q in enumerate(m["quiz"]):
             scene("ask", k, say(q["question"]))
@@ -3257,7 +3258,6 @@ def produce_quiz(con, m):
             break
         print(f"  {scenes[-1]['end']:.0f}s is over the channel's {BRAND['max_seconds']}s; leaving out the last question")
         m["quiz"].pop()
-        m["intro"] = m["intro"].replace(m["intro"].split()[0], number_words(len(m["quiz"])).capitalize(), 1)
     (work / "part.wav").unlink()
     m["script"] = m["intro"] + " " + " ".join(f"{q['question']} {q['answer']}." for q in m["quiz"])
     sf.write(work / "voice.wav", np.concatenate(audio), sr)
@@ -3269,7 +3269,7 @@ def produce_quiz(con, m):
     (work / "meta.json").write_text(json.dumps(m, indent=2))
     print(f"  rendering {dur:.1f}s…")
     render_quiz(m, scenes, work / "voice.wav", dur, out)
-    upsert(con, m["pageid"], status="rendered", video_path=str(out))
+    upsert(con, m["pageid"], title=m["title"], status="rendered", video_path=str(out))
     print(f"  done: {out}")
 
 
@@ -3293,7 +3293,7 @@ def render_quiz(m, scenes, audio_path, duration, out_path, frame_at=None):
         im, d = backdrop()
         if kind == "intro":
             y = lines(d, m["title"].upper(), "display", 130, 560, 5, C["text"], centre=True)
-            lines(d, f"{n} QUESTIONS · {QUIZ_THINK} SECONDS EACH", "display", 60, y + 60, 1, C["accent"], centre=True)
+            lines(d, f"{n} QUESTION{'S' * (n > 1)} · {QUIZ_THINK} SECONDS EACH", "display", 60, y + 60, 1, C["accent"], centre=True)
         elif kind == "outro":
             y = lines(d, "HOW MANY DID YOU GET?", "display", 150, 640, 3, C["accent"], centre=True)
             lines(d, f"Tell us your score out of {n} in the comments", "body", 48, y + 50, 2, C["muted"], centre=True)
