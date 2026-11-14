@@ -167,7 +167,21 @@ five questions are written from what was read, and each one is shown with three 
 seconds with a ticking countdown, and answered. A question is only used if a sentence from the research proves its
 answer; open the video in the studio to see each question with that sentence. If the video would run over the
 channel's maximum length, the last question is left out. Quizzes are made straight away (no edit-first step) and
-their questions can't be edited yet; "Remake" writes a new set.
+"Remake" writes a new set. To change a quiz, open it in the studio: edit any question, its three options or
+which one is right, remove or add questions, then Save & re-render. A question you change or add is no longer checked
+against the research.
+
+## Guess the picture
+Set a channel to **Guess the picture**, then type a kind of thing ("famous landmarks", "dog breeds"). Five blurred
+photographs clear over four seconds each, with a countdown, then the name appears and is read out. Only things with a
+Wikipedia article whose main picture is a free photograph are used; the name and the line under it are that
+article's. A channel doesn't show the same thing twice.
+
+## On this day
+Set a channel to **On this day** and click Make now with nothing typed (or type a date, "25 December"). The video
+shows a few things that happened on that date, oldest first, each with its year, a picture and the words read out.
+Everything comes from Wikipedia's daily "On this day" list; deaths and disasters are left out. With a daily schedule
+this makes one video a day without any input.
 
 ## Clip countdowns
 A channel can make countdowns of short clips instead of narrated explainers: Settings → Ideas & videos → "What this

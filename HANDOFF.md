@@ -87,6 +87,16 @@ run, copying a quiz to another channel, Edge or cloned voices, the local model w
 listened to the ticks and chime. Open: random topics repeat, so questions can repeat across videos (nothing remembers
 asked questions); questions can't be edited in the studio; the Videos settings page still shows idea, picture and
 edit-first options that a quiz channel ignores.
+Later the same day: quiz questions are editable in the studio (tested in the browser on a throwaway copy: changed a
+question, changed which option is right, removed one, added one, re-rendered, frames checked). Two more formats and
+channels (CLAUDE.md "Formats"): Sharp Eye (`workspaces/sharp-eye`, guess the picture; EP 001 famous landmarks from the
+command line, EP 002 dog breeds from the studio's Make now) and Today in History (`workspaces/today-in-history`, on this
+day; EP 001 for 14 November). Not tested for these: scheduled runs, copying to another channel, Remake, a typed date,
+Edge or cloned voices; nobody has listened to any of them. Weak spots: a guess picture can give itself away (a sign, a
+caption in the photo) and Wikipedia's main picture isn't always the best one; one-line descriptions can be bland
+("Dog breed"); the history word list drops harmless events and can let a grim one through; history pictures are of a
+linked article, which may be a person or place rather than the event; Wikipedia rate-limits picture lookups, so runs
+sometimes wait 10-40 s. Guess and history videos can't be edited in the studio (only remade).
 Known gaps: topic match is by title words only; small or brief
 stamps and emoji overlays pass the text check; letting Gemini watch and rate candidates is the real fix. The video's dialog still shows the explainer editor (narration,
 visuals), which doesn't apply; re-render is refused. No per-clip trimming or reordering yet; each clip is its first

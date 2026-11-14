@@ -3147,7 +3147,7 @@ def quiz_questions(topic, text, count):
     good, title, why = [], "", {"proof not in the research": 0, "proof doesn't settle it": 0, "badly formed": 0}
     for _ in range(2):
         r = llm(QUIZ_PROMPT.format(topic=topic, n=count + 3, text=text[:12000]), 0.6)
-        title = title or str(r.get("title") or "").strip()[:70]
+        title = title or re.sub(r".*\d.*", "", str(r.get("title") or "").strip()[:70])  # a number in it may not match what's kept
         for q in r.get("questions") or []:
             if len(good) == count:
                 break
@@ -3179,98 +3179,19 @@ def quiz_questions(topic, text, count):
     return title, good
 
 
-def make_quiz(con, topic, count=5):
+def make_quiz(con, text="", count=5):
     """A quiz video on a topic: research it, write questions the research proves (quiz_questions), then voice and
-    render. Always made straight away: there is no draft step for quizzes yet."""
-    before, topic = dict(ai_used), topic.strip()
+    render. Always made straight away; the questions can be edited in the studio afterwards."""
+    before, topic = dict(ai_used), text.strip() or random_topic()
     print(f"quiz on: {topic}\n  researching…")
     a = research(topic)
     title, quiz = quiz_questions(topic, a["text"], count)
-    n = len(quiz)
-    pid = sources_id(f"quiz:{topic}:{time.time()}")
-    ep = con.execute("select coalesce(max(ep), 0) + 1 from pages").fetchone()[0]
-    (WORK / str(pid)).mkdir(parents=True, exist_ok=True)
-    m = dict(ep=ep, pageid=pid, origin="quiz", article_title=topic, description="", title=title or f"{n} questions: {topic}"[:70],
-             quiz=quiz, script="",
-             tags=[w for w in re.findall(r"[a-z0-9]+", topic.lower()) if len(w) > 2 and w not in ("the", "and")][:5], images=[],
+    pid, ep, _ = new_video(con, f"quiz:{topic}")
+    m = dict(ep=ep, pageid=pid, origin="quiz", article_title=topic, description="", title=title or f"{len(quiz)} questions: {topic}"[:70],
+             quiz=quiz, script="", images=[],
+             tags=[w for w in re.findall(r"[a-z0-9]+", topic.lower()) if len(w) > 2 and w not in ("the", "and")][:5],
              url=a["url"], credit=a["credit"], source_label=a["source_label"])
-    print(f"[{ep:03d}] {m['title']}")
-    upsert(con, pid, title=m["title"], url=a["url"], source="curated", origin="quiz", ref=topic, reason="quiz", status="draft", ep=ep)
-    try:
-        produce_quiz(con, m)
-    except BaseException as e:
-        upsert(con, pid, status="failed", reason=f"{type(e).__name__}: {e}"[:300])
-        raise
-    try:
-        score_video(con, pid)
-    except Exception as e:
-        print(f"  could not score: {e}")
-    record_usage(pid, before)
-    return pid
-
-
-def produce_quiz(con, m):
-    """Voice a quiz line by line (so each question, pause and answer has its own moment), add a tick for every second
-    of thinking time and a chime on the answer, then render."""
-    import numpy as np, soundfile as sf
-    work = WORK / str(m["pageid"])
-    m["narration"] = BRAND.get("voice_engine") if BRAND.get("voice_engine") in ("clone", "edge") else "kokoro"
-    print("  voicing…")
-    sr, said = None, {}
-
-    def say(line):
-        nonlocal sr
-        if line not in said:
-            tts(line, work / "part.wav")
-            wav, sr = sf.read(work / "part.wav", dtype="float32")
-            wav = wav.mean(1) if wav.ndim > 1 else wav
-            loud = np.flatnonzero(np.abs(wav) > 0.01)  # engines pad the end with silence; keep a breath of it
-            said[line] = wav[:loud[-1] + int(sr * 0.2)] if len(loud) else wav
-        return said[line]
-
-    def beep(freq, secs):
-        t = np.arange(int(sr * secs)) / sr
-        return (0.2 * np.sin(2 * np.pi * freq * t) * np.exp(-t * 5 / secs)).astype("float32")
-
-    def scene(kind, q, wav):
-        start = sum(len(x) for x in audio) / sr
-        audio.append(wav)
-        scenes.append(dict(kind=kind, q=q, start=start, end=start + len(wav) / sr))
-
-    while True:
-        audio, scenes, n = [], [], len(m["quiz"])
-        m["intro"] = (f"{number_words(n).capitalize()} question{'s' * (n > 1)} on {m['article_title']}. "
-                      f"{number_words(QUIZ_THINK).capitalize()} seconds each.")
-        scene("intro", None, say(m["intro"]))
-        for k, q in enumerate(m["quiz"]):
-            scene("ask", k, say(q["question"]))
-            think = np.zeros(int(sr * QUIZ_THINK), "float32")
-            for s in range(QUIZ_THINK):
-                tick = beep(880, 0.12)
-                think[s * sr:s * sr + len(tick)] += tick
-            scene("think", k, think)
-            answer, chime = say(q["answer"] + "."), beep(1320, 0.4)
-            answer = np.concatenate([answer, np.zeros(max(0, len(chime) - len(answer)) + int(sr * 0.4), "float32")])
-            answer[:len(chime)] += chime
-            scene("reveal", k, answer)
-        scene("outro", None, say("How many did you get? " + BRAND["outro_line"]))
-        if scenes[-1]["end"] <= BRAND["max_seconds"] or len(m["quiz"]) <= 3:
-            break
-        print(f"  {scenes[-1]['end']:.0f}s is over the channel's {BRAND['max_seconds']}s; leaving out the last question")
-        m["quiz"].pop()
-    (work / "part.wav").unlink()
-    m["script"] = m["intro"] + " " + " ".join(f"{q['question']} {q['answer']}." for q in m["quiz"])
-    sf.write(work / "voice.wav", np.concatenate(audio), sr)
-    dur = scenes[-1]["end"]
-    row = con.execute("select video_path from pages where pageid=?", (m["pageid"],)).fetchone()
-    out = Path(row["video_path"]) if row and row["video_path"] else video_out(m["ep"], m["article_title"])
-    OUT.mkdir(exist_ok=True)
-    m["yt_description"] = description(m)
-    (work / "meta.json").write_text(json.dumps(m, indent=2))
-    print(f"  rendering {dur:.1f}s…")
-    render_quiz(m, scenes, work / "voice.wav", dur, out)
-    upsert(con, m["pageid"], title=m["title"], status="rendered", video_path=str(out))
-    print(f"  done: {out}")
+    return make_format(con, m, topic, before)
 
 
 def render_quiz(m, scenes, audio_path, duration, out_path, frame_at=None):
@@ -3336,6 +3257,361 @@ def render_quiz(m, scenes, audio_path, duration, out_path, frame_at=None):
     encode(frame, duration, audio_path, audio_mix(music if music.exists() else None, BRAND["music_volume"], []), out_path)
 
 
+def quiz_steps(m):
+    n = len(m["quiz"])
+    return ([("intro", None, f"{number_words(n).capitalize()} question{'s' * (n > 1)} on {m['article_title']}. "
+                             f"{number_words(QUIZ_THINK).capitalize()} seconds each.", 0, None)]
+            + [s for k, q in enumerate(m["quiz"]) for s in (("ask", k, q["question"], 0, None), ("think", k, None, QUIZ_THINK, "tick"),
+                                                            ("reveal", k, q["answer"] + ".", 0.4, "chime"))]
+            + [("outro", None, "How many did you get? " + BRAND["outro_line"], 0, None)])
+
+
+# ---------- formats: videos made of voiced scenes (quiz, guess the picture, on this day) ----------
+def voice_scenes(work, steps, said):
+    """Voice a video scene by scene, so each has its own moment on screen. steps: [(kind, index, line or None,
+    seconds of quiet after it, sound)], sound "tick" = one per second of the quiet, "chime" = one as the scene opens.
+    Writes work/voice.wav -> [{kind, q, start, end}]. `said` keeps voiced lines between calls."""
+    import numpy as np, soundfile as sf
+    sr = said.get("sr") or 24000
+
+    def beep(freq, secs):
+        t = np.arange(int(sr * secs)) / sr
+        return (0.2 * np.sin(2 * np.pi * freq * t) * np.exp(-t * 5 / secs)).astype("float32")
+
+    audio, scenes, at = [], [], 0
+    for kind, q, line, quiet, sound in steps:
+        if line and line not in said:
+            tts(line, work / "part.wav")
+            wav, sr = sf.read(work / "part.wav", dtype="float32")
+            (work / "part.wav").unlink()
+            wav = wav.mean(1) if wav.ndim > 1 else wav
+            loud = np.flatnonzero(np.abs(wav) > 0.01)  # engines pad the end with silence; keep a breath of it
+            said[line], said["sr"] = (wav[:loud[-1] + int(sr * 0.2)] if len(loud) else wav), sr
+        wav = np.concatenate([said[line] if line else np.zeros(0, "float32"), np.zeros(int(sr * max(quiet, 0.45 * (sound == "chime"))), "float32")])
+        for s in range(int(quiet) if sound == "tick" else 0):
+            wav[s * sr:s * sr + int(sr * 0.12)] += beep(880, 0.12)
+        if sound == "chime":
+            wav[:int(sr * 0.4)] += beep(1320, 0.4)
+        audio.append(wav)
+        scenes.append(dict(kind=kind, q=q, start=at / sr, end=(at + len(wav)) / sr))
+        at += len(wav)
+    sf.write(work / "voice.wav", np.concatenate(audio), sr)
+    return scenes
+
+
+def produce_format(con, m):
+    """Voice and render a quiz, guess or on-this-day video from its meta. While it runs over the channel's maximum
+    length, the last question (picture, event) is left out."""
+    key, steps_for, renderer, least = FORMATS[m["origin"]][1:]
+    work, said = WORK / str(m["pageid"]), {}
+    m["narration"] = BRAND.get("voice_engine") if BRAND.get("voice_engine") in ("clone", "edge") else "kokoro"
+    print("  voicing…")
+    while True:
+        steps = steps_for(m)
+        scenes = voice_scenes(work, steps, said)
+        if scenes[-1]["end"] <= BRAND["max_seconds"] or len(m[key]) <= least:
+            break
+        print(f"  {scenes[-1]['end']:.0f}s is over the channel's {BRAND['max_seconds']}s; leaving out the last one")
+        m[key].pop()
+    m["script"] = " ".join(line for _, _, line, _, _ in steps if line)
+    if key == "items":
+        m["images"] = [i["image"] for i in m["items"]]
+    dur = scenes[-1]["end"]
+    row = con.execute("select video_path from pages where pageid=?", (m["pageid"],)).fetchone()
+    out = Path(row["video_path"]) if row and row["video_path"] else video_out(m["ep"], m["article_title"])
+    OUT.mkdir(exist_ok=True)
+    m["yt_description"] = description(m | {"script": steps[0][2]})  # opens with the intro line
+    (work / "meta.json").write_text(json.dumps(m, indent=2))
+    print(f"  rendering {dur:.1f}s…")
+    renderer(m, scenes, work / "voice.wav", dur, out)
+    upsert(con, m["pageid"], title=m["title"], status="rendered", video_path=str(out))
+    print(f"  done: {out}")
+
+
+def make_format(con, m, ref, before):
+    """Shared end of make_quiz / make_guess / make_onthisday: save the new video's row, voice and render it, score it."""
+    print(f"[{m['ep']:03d}] {m['title']}")
+    upsert(con, m["pageid"], title=m["title"], url=m.get("url", ""), source="curated", origin=m["origin"], ref=ref,
+           reason=m["origin"], status="draft", ep=m["ep"])
+    try:
+        produce_format(con, m)
+    except BaseException as e:
+        upsert(con, m["pageid"], status="failed", reason=f"{type(e).__name__}: {e}"[:300])
+        raise
+    try:
+        score_video(con, m["pageid"])
+    except Exception as e:
+        print(f"  could not score: {e}")
+    record_usage(m["pageid"], before)
+    return m["pageid"]
+
+
+def new_video(con, key):
+    """-> (pageid, episode number, work folder) for a video about to be made."""
+    pid = sources_id(f"{key}:{time.time()}")
+    (WORK / str(pid)).mkdir(parents=True, exist_ok=True)
+    return pid, con.execute("select coalesce(max(ep), 0) + 1 from pages").fetchone()[0], WORK / str(pid)
+
+
+def lead_picture(title):
+    """The main picture of a Wikipedia article, if it is a free-licensed photograph (not a logo, map or diagram).
+    -> (article title, its one-line description, image) or None"""
+    p = wiki(titles=title, redirects=1, prop="description|pageimages", piprop="name")["query"]["pages"][0]
+    if p.get("missing") or not p.get("pageimage"):
+        return None
+    img = src_article(p["title"], 1, p["pageimage"])
+    if not img or img[0]["name"].replace(" ", "_") != p["pageimage"] or "fit" in img[0]:
+        return None
+    return p["title"], p.get("description", ""), img[0]
+
+
+def cover(path, w, h, extra=1.0):
+    """The picture at `path`, scaled and centre-cropped to fill w×h (×extra, to leave room for a slow zoom)."""
+    from PIL import Image
+    im = Image.open(path).convert("RGB")
+    w, h = round(w * extra), round(h * extra)
+    s = max(w / im.width, h / im.height)
+    im = im.resize((max(w, round(im.width * s)), max(h, round(im.height * s))), Image.LANCZOS)
+    x, y = (im.width - w) // 2, (im.height - h) // 3  # a little above centre: faces and tops of buildings
+    return im.crop((x, y, x + w, y + h))
+
+
+def text_lines(d, text, kind, size, y, max_lines, fill, centre=False, weight=None):
+    f, ls = fit_lines(text, kind, size, W - 120, max_lines, weight)
+    for l in ls:
+        d.text((W // 2 if centre else 60, y), l, font=f, fill=fill, anchor="mt" if centre else "lt")
+        y += f.size * 1.2
+    return y
+
+
+def render_scenes(scenes, draw, audio_path, duration, out_path, frame_at=None):
+    """Encode a video whose frame at time t is draw(scene, t) with the progress bar added along the bottom."""
+    from PIL import ImageDraw
+
+    def frame(t):
+        im = draw(next((s for s in scenes if s["start"] <= t < s["end"]), scenes[-1]), t)
+        d = ImageDraw.Draw(im)
+        d.rounded_rectangle((PX, 1826, PX + PW, 1836), 5, fill=C["panel"])
+        d.rounded_rectangle((PX, 1826, PX + max(10, int(PW * t / duration)), 1836), 5, fill=C["accent"])
+        return im
+
+    if frame_at is not None:
+        return frame(frame_at).save(out_path)
+    music = WS / BRAND["music"]
+    encode(frame, duration, audio_path, audio_mix(music if music.exists() else None, BRAND["music_volume"], []), out_path)
+
+
+def countdown(d, left, seconds):
+    """The thinking time on screen: a bar that empties and the seconds left. left: 1 = all of it, 0 = none."""
+    import math
+    d.rounded_rectangle((60, 1580, W - 60, 1610), 15, fill=C["panel"])
+    d.rounded_rectangle((60, 1580, 60 + max(30, int((W - 120) * left)), 1610), 15, fill=C["accent"])
+    if left < 1:
+        d.text((W // 2, 1710), str(math.ceil(left * seconds)), font=font("display", 150), fill=C["accent"], anchor="mm")
+
+
+# ---------- guess the picture: a blurred photo clears while the viewer names it ----------
+GUESS_PROMPT = """We are making a "name it before the picture clears" YouTube Short about: "{topic}"
+List {n} examples that viewers around the world would recognise from one photograph, each as the exact title of its
+English Wikipedia article. Choose ones that look clearly different from each other; no two of the same thing.
+{skip}Reply as JSON: {{"items": ["<Wikipedia article title>", ...]}}"""
+GUESS_THINK = 4  # seconds the picture takes to clear
+
+
+def make_guess(con, text="", count=5):
+    """A guessing video on a kind of thing ("famous landmarks", "dog breeds"): the writer's model names well-known
+    examples, and each is used only if Wikipedia has an article on it whose main picture is a free photograph. What is
+    shown as the answer is that article's own title and one-line description. A channel never repeats a subject."""
+    before, topic = dict(ai_used), text.strip() or random_topic()
+    used_file = DB.parent / "guess_used.json"
+    used = json.loads(used_file.read_text()) if used_file.exists() else []
+    print(f"guess the picture: {topic}")
+    skip = f"Not these, already shown: {', '.join(used[-60:])}.\n" if used else ""
+    r = llm(GUESS_PROMPT.format(topic=topic, n=count + 6, skip=skip), 0.8)
+    pid, ep, work = new_video(con, f"guess:{topic}")
+    items = []
+    for t in [str(t) for t in r.get("items") or []]:
+        got = lead_picture(t)
+        if not got or got[0] in used or any(got[0] == i["title"] for i in items):
+            print(f"  passed over {t}: " + ("already shown" if got else "no article with a free photograph as its main picture"))
+            continue
+        img = download_image(got[2], work)
+        items.append(dict(title=got[0], name=re.sub(r"\s*\([^)]*\)$", "", got[0]), text=got[1], image=img))
+        print(f"  {items[-1]['name']}: {got[1]}")
+        if len(items) == count:
+            break
+    if len(items) < 3:
+        raise SystemExit(f"found fewer than three well-known {topic} with a free photograph on Wikipedia; try another subject")
+    used_file.write_text(json.dumps(used + [i["title"] for i in items]))
+    m = dict(ep=ep, pageid=pid, origin="guess", article_title=topic, description="",
+             title=f"Can You Name These {topic.title()} Before They Clear?"[:90], items=items, script="", images=[],
+             tags=[w for w in re.findall(r"[a-z0-9]+", topic.lower()) if len(w) > 2 and w not in ("the", "and")][:5], url="",
+             credit="Names, descriptions and pictures from English Wikipedia articles, CC BY-SA 4.0.")
+    return make_format(con, m, topic, before)
+
+
+def guess_steps(m):
+    n = len(m["items"])
+    return ([("intro", None, f"Can you name these {number_words(n)} {m['article_title']} before the picture clears?", 0, None)]
+            + [s for k, i in enumerate(m["items"]) for s in (("ask", k, f"Number {number_words(k + 1)}.", 0, None),
+                                                            ("think", k, None, GUESS_THINK, "tick"), ("reveal", k, i["name"] + ".", 1.2, "chime"))]
+            + [("outro", None, "How many did you get? " + BRAND["outro_line"], 0, None)])
+
+
+def render_guess(m, scenes, audio_path, duration, out_path, frame_at=None):
+    """Each picture starts as a blur and clears over GUESS_THINK seconds with a countdown; then its name appears."""
+    from PIL import Image, ImageDraw, ImageFilter
+    ensure_fonts()
+    items, n, cards, levels = m["items"], len(m["items"]), {}, {}
+    mask = Image.new("L", (PW, PH), 0)
+    ImageDraw.Draw(mask).rounded_rectangle((0, 0, PW, PH), 36, fill=255)
+
+    def card(kind, k):
+        if (kind, k) not in cards:
+            im, d = backdrop()
+            if kind == "intro":
+                y = text_lines(d, m["title"].upper(), "display", 130, 560, 5, C["text"], centre=True)
+                text_lines(d, f"{n} PICTURES · NAME EACH BEFORE IT CLEARS", "display", 56, y + 60, 1, C["accent"], centre=True)
+            elif kind == "outro":
+                y = text_lines(d, "HOW MANY DID YOU GET?", "display", 150, 640, 3, C["accent"], centre=True)
+                text_lines(d, f"Tell us your score out of {n} in the comments", "body", 48, y + 50, 2, C["muted"], centre=True)
+            else:
+                d.text((60, 205), f"NUMBER {k + 1} OF {n}", font=font("display", 54), fill=C["accent"])
+                text_lines(d, items[k]["name"].upper() if kind == "reveal" else "WHAT IS THIS?", "display", 110, 290, 1,
+                           C["accent"] if kind == "reveal" else C["text"])
+                if kind == "reveal":
+                    text_lines(d, items[k]["text"][:1].upper() + items[k]["text"][1:], "body", 50, 1500, 3, C["muted"], weight="Medium")
+            cards[kind, k] = im
+        return cards[kind, k]
+
+    def picture(k, clear):  # clear: 0 = fully blurred, 1 = sharp
+        if k not in levels:
+            sharp = cover(items[k]["image"]["path"], PW, PH)
+            levels[k] = [sharp.filter(ImageFilter.GaussianBlur(r)) for r in (70, 48, 32, 20, 11, 5)] + [sharp]
+        x = min(max(clear, 0), 1) * (len(levels[k]) - 1)
+        i = min(int(x), len(levels[k]) - 2)
+        return Image.blend(levels[k][i], levels[k][i + 1], x - i)
+
+    def draw(s, t):
+        kind = s["kind"]
+        im = card("ask" if kind == "think" else kind, s["q"]).copy()
+        if s["q"] is not None:
+            left = 1 - (t - s["start"]) / GUESS_THINK if kind == "think" else 1
+            im.paste(picture(s["q"], 1 if kind == "reveal" else 1 - left), (PX, PY), mask)
+            if kind != "reveal":
+                countdown(ImageDraw.Draw(im), left, GUESS_THINK)
+        return im
+
+    render_scenes(scenes, draw, audio_path, duration, out_path, frame_at)
+
+
+# ---------- on this day: a few things that happened on today's date, each with its year and a picture ----------
+MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
+# ponytail: a word list keeps deaths and disasters out of a cheerful daily video; it also drops some harmless events
+GRIM = re.compile(r"kill|dead\b|died|death|massacre|murder|assassin|crash|bomb|terror|genocide|suicide|\bshot\b|execut|disaster|"
+                  r"\bwar\b|attack|invad|invasion|riot|famine|earthquake|hurricane|cyclone|tsunami|hijack|sank\b|explo", re.I)
+
+
+def day_from(text):
+    """(month, day) named in the text ("25 December", "December 25", "12-25" = month-day), else today's."""
+    import datetime
+    name = re.search("|".join(MONTH_NAMES), text, re.I)
+    nums = [int(x) for x in re.findall(r"\d{1,2}", text)]
+    mo, d = ((MONTH_NAMES.index(name.group().capitalize()) + 1, nums[0]) if name and nums else tuple(nums[:2]) if len(nums) >= 2
+             else (datetime.date.today().month, datetime.date.today().day))
+    try:
+        datetime.date(2024, mo, d)  # a leap year, so 29 February counts
+    except ValueError:
+        raise SystemExit(f"\"{text}\" isn't a date; write it like 25 December or 12-25") from None
+    return mo, d
+
+
+def make_onthisday(con, text="", count=4):
+    """Events from Wikipedia's "On this day" list for a date (today's unless the text names one), oldest first. An
+    event is used if it isn't grim, is short enough to read on screen, and one of the articles it links to has a free
+    photograph as its main picture. No model is involved: the words are Wikipedia's."""
+    before = dict(ai_used)
+    mo, d = day_from(text)
+    date = f"{d} {MONTH_NAMES[mo - 1]}"
+    print(f"on this day: {date}")
+    feed = get_json(f"https://api.wikimedia.org/feed/v1/wikipedia/en/onthisday/selected/{mo:02d}/{d:02d}").get("selected") or []
+    pid, ep, work = new_video(con, f"onthisday:{date}")
+    items = []
+    for e in feed[::3] + feed[1::3] + feed[2::3]:  # the list runs newest to oldest: take from across it, not just the top
+        words = re.sub(r"\s*\([^()]*(pictured|depicted|shown)[^()]*\)", "", e.get("text") or "").strip()
+        if not isinstance(e.get("year"), int) or GRIM.search(words) or not 6 <= len(words.split()) <= 30:
+            continue
+        got = next((g for g in (lead_picture(p["title"]) for p in (e.get("pages") or [])[::-1][:4]) if g), None)
+        if not got:
+            continue
+        year = f"{-e['year']} BC" if e["year"] < 0 else str(e["year"])
+        items.append(dict(year=e["year"], name=year, text=words, image=download_image(got[2], work)))
+        print(f"  {year}: {words[:90]}")
+        if len(items) == count:
+            break
+    if len(items) < 2:
+        raise SystemExit(f"Wikipedia's list for {date} has fewer than two short events with a free photograph")
+    items.sort(key=lambda i: i["year"])
+    m = dict(ep=ep, pageid=pid, origin="onthisday", article_title=f"On this day: {date}", description="",
+             title=f"What Happened on {MONTH_NAMES[mo - 1]} {d}? On This Day in History", items=items, script="", images=[],
+             tags=["onthisday", "history", MONTH_NAMES[mo - 1].lower()], url=f"https://en.wikipedia.org/wiki/{MONTH_NAMES[mo - 1]}_{d}",
+             day=[mo, d], credit=f"Events from Wikipedia's \"On this day\" for {date}, CC BY-SA 4.0: https://en.wikipedia.org/wiki/{MONTH_NAMES[mo - 1]}_{d}")
+    return make_format(con, m, date, before)
+
+
+def onthisday_steps(m):
+    mo, d = m["day"]
+    return ([("intro", None, f"On this day, {MONTH_NAMES[mo - 1]} {number_words(d, ordinal=True)}.", 0.2, None)]
+            + [("event", k, f"In {i['name']}, {i['text']}", 0.5, None) for k, i in enumerate(m["items"])]
+            + [("outro", None, BRAND["outro_line"], 0.3, None)])
+
+
+def render_onthisday(m, scenes, audio_path, duration, out_path, frame_at=None):
+    """A title card with the date, then each event: its year large, a picture that drifts closer, and the words."""
+    from PIL import Image, ImageDraw
+    ensure_fonts()
+    items, cards, pics = m["items"], {}, {}
+    date = f"{m['day'][1]} {MONTH_NAMES[m['day'][0] - 1]}".upper()
+    bw, bh, by = PW, 760, 540  # the picture's box
+    mask = Image.new("L", (bw, bh), 0)
+    ImageDraw.Draw(mask).rounded_rectangle((0, 0, bw, bh), 36, fill=255)
+
+    def card(kind, k):
+        if (kind, k) not in cards:
+            im, d = backdrop()
+            if kind == "intro":
+                y = text_lines(d, "ON THIS DAY", "display", 190, 620, 1, C["text"], centre=True)
+                text_lines(d, date, "display", 130, y + 30, 1, C["accent"], centre=True)
+            elif kind == "outro":
+                y = text_lines(d, date, "display", 130, 640, 1, C["accent"], centre=True)
+                text_lines(d, BRAND["outro_line"], "body", 56, y + 60, 3, C["text"], centre=True, weight="Medium")
+            else:
+                d.text((60, 205), f"ON THIS DAY · {date}", font=font("display", 54), fill=C["accent"])
+                d.text((60, 268), items[k]["name"], font=font("display", 200), fill=C["text"])
+                text_lines(d, items[k]["text"], "body", 56, by + bh + 50, 8, C["text"], weight="Medium")
+            cards[kind, k] = im
+        return cards[kind, k]
+
+    def draw(s, t):
+        im, k = card(s["kind"], s["q"]).copy(), s["q"]
+        if k is not None:
+            if k not in pics:
+                pics[k] = cover(items[k]["image"]["path"], bw, bh, 1.12)
+            z = 1.1 - 0.1 * (t - s["start"]) / max(0.1, s["end"] - s["start"])  # drifts closer through the scene
+            w, h, p = bw * z, bh * z, pics[k]
+            box = ((p.width - w) / 2, (p.height - h) / 2, (p.width + w) / 2, (p.height + h) / 2)
+            im.paste(p.resize((bw, bh), Image.BILINEAR, box=box), (PX, by), mask)
+        return im
+
+    render_scenes(scenes, draw, audio_path, duration, out_path, frame_at)
+
+
+# video_type / origin -> (make it from the Make box's text, where its parts are in meta, its scenes, its renderer, fewest parts)
+FORMATS = {"quiz": (make_quiz, "quiz", quiz_steps, render_quiz, 3),
+           "guess": (make_guess, "items", guess_steps, render_guess, 3),
+           "onthisday": (make_onthisday, "items", onthisday_steps, render_onthisday, 2)}
+
+
 def copy_to(con, ep, to):
     """Copy a video to another channel: same script and pictures (or clips), made again there with that channel's
     brand, voice and closing line. The work is done by `copyfrom` running as that channel."""
@@ -3370,6 +3646,8 @@ def copy_from(con, channel, pageid):
             shutil.copy(f, mine / f.name)
     for i in m.get("images") or []:
         i["path"] = str(mine / Path(i["path"]).name)
+    for i in m.get("items") or []:
+        i["image"]["path"] = str(mine / Path(i["image"]["path"]).name)
     ep = con.execute("select coalesce(max(ep), 0) + 1 from pages").fetchone()[0]
     m["ep"] = ep
     for k in ("narration", "yt_description", "potential", "ai", "gemini"):
@@ -3382,8 +3660,8 @@ def copy_from(con, channel, pageid):
             m["yt_description"] = ""
             (mine / "meta.json").write_text(json.dumps(m, indent=2))
             render_clips(con, m)
-        elif m.get("origin") == "quiz":
-            produce_quiz(con, m)
+        elif m.get("origin") in FORMATS:
+            produce_format(con, m)
         else:
             produce(con, m, video_out(ep, m["article_title"]))
             try:
@@ -3496,8 +3774,8 @@ def auto(con, dry_run=False):
             return
         if clips_channel():
             pid = make_clips(con, sch["fallback_arg"] or random_topic(), draft=False)  # nobody is there to pick clips
-        elif BRAND.get("video_type") == "quiz":
-            pid = make_quiz(con, sch["fallback_arg"] or random_topic())
+        elif BRAND.get("video_type") in FORMATS:
+            pid = FORMATS[BRAND["video_type"]][0](con, sch["fallback_arg"])
         elif row:
             pid = row["pageid"]
         elif not sch["fallback_arg"]:  # nothing set for empty runs: your topics and what's trending in them
@@ -3506,7 +3784,7 @@ def auto(con, dry_run=False):
             pid = brainstorm(con, sch["fallback_arg"], "any", 1)[0]
         else:
             pid = discover_source(con, sch["fallback"], 1, sch["fallback_arg"] or None)[0]
-        if BRAND.get("video_type") not in ("clips", "quiz"):
+        if not clips_channel() and BRAND.get("video_type") not in FORMATS:
             make(con, pid)
         if sch["upload"]:
             pick = (f"select ep from pages where status='rendered' {UPLOAD_ORDER} limit 1" if sch["pick"] == "order"
@@ -3545,8 +3823,8 @@ def rerender(con, ep, repick_images=False, narration=None):
         raise SystemExit(f"episode {ep} has no saved script to re-render")
     if row["status"] == "uploaded":
         raise SystemExit(f"episode {ep} is already on YouTube; a re-render can't replace it there")
-    if row["origin"] == "quiz":
-        return produce_quiz(con, json.loads((WORK / str(row["pageid"]) / "meta.json").read_text()))
+    if row["origin"] in FORMATS:
+        return produce_format(con, json.loads((WORK / str(row["pageid"]) / "meta.json").read_text()))
     if row["origin"] == "clips":
         return render_clips(con, json.loads((WORK / str(row["pageid"]) / "meta.json").read_text()))
     m = json.loads((WORK / str(row["pageid"]) / "meta.json").read_text())
@@ -4018,6 +4296,7 @@ def selftest():
     saved, BRAND["prompts"] = BRAND.get("prompts"), {"script": "Be funny about {title} }{"}
     assert prompt_for("script", title="T", text="X", answer="").startswith("Be funny about T }{\n\nArticle title: T")
     BRAND["prompts"] = saved
+    assert day_from("25 December") == day_from("December 25") == day_from("12-25") == (12, 25)
     # quiz: a question is kept only if its proof is in the notes and names the right option alone
     global llm
     notes = ("The Sun holds 99.86% of the mass of the Solar System. Mars is the fourth planet from the Sun. "
@@ -4166,8 +4445,8 @@ def main():
         make_clips(con, " ".join(args.items) if args.cmd == "clips" else args.input or random_topic(), getattr(args, "count", 5))
         if getattr(args, "upload", False):
             upload_pending(con, args.publish_at)
-    elif args.cmd == "run" and BRAND.get("video_type") == "quiz":
-        make_quiz(con, args.input or random_topic())
+    elif args.cmd == "run" and BRAND.get("video_type") in FORMATS:
+        FORMATS[BRAND["video_type"]][0](con, args.input or "")
         if getattr(args, "upload", False):
             upload_pending(con, args.publish_at)
     elif args.cmd == "run":

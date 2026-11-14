@@ -475,6 +475,8 @@ body[data-vtype=clips] [data-for=explainer], body[data-vtype=explainer] [data-fo
               <label class="tile"><input type="radio" name="vtype" value="explainer"><b>Narrated explainers</b><small>A question, topic, paragraph or link becomes a researched, voiced video with pictures and captions.</small></label>
               <label class="tile"><input type="radio" name="vtype" value="clips"><b>Clip countdowns</b><small>Short clips from YouTube, TikTok and other sites, joined as a ranked countdown with their own sound.</small></label>
               <label class="tile"><input type="radio" name="vtype" value="quiz"><b>Quizzes</b><small>A topic becomes five researched questions: each is read out with three options, the viewer gets three seconds, then the answer lights up. Ideas, pictures and the edit-first step don't apply.</small></label>
+              <label class="tile"><input type="radio" name="vtype" value="guess"><b>Guess the picture</b><small>A kind of thing (famous landmarks, dog breeds) becomes five blurred photographs that clear over four seconds, then each one's name. Names and pictures come from Wikipedia.</small></label>
+              <label class="tile"><input type="radio" name="vtype" value="onthisday"><b>On this day</b><small>A few things that happened on today's date, each with its year, a picture and the words read out. Taken from Wikipedia's daily list; made for one video a day on a schedule.</small></label>
             </div>
           </fieldset>
           <fieldset class="scard" data-group="content"><legend>Topics</legend>
@@ -926,10 +928,10 @@ function potDetail(p) {
     <div class="hint">${esc(i.why)} · ${i.views60.toLocaleString()} article views in 60 days · ${i.languages} languages · ${i.seconds}s</div>`;
 }
 
-const ORIGIN_NAMES = {wikipedia: "Wikipedia", web: "Article", hackernews: "Hacker News", arxiv: "arXiv", apod: "NASA APOD", question: "Researched", text: "Your text", clips: "Clip countdown", quiz: "Quiz"};
+const ORIGIN_NAMES = {wikipedia: "Wikipedia", web: "Article", hackernews: "Hacker News", arxiv: "arXiv", apod: "NASA APOD", question: "Researched", text: "Your text", clips: "Clip countdown", quiz: "Quiz", guess: "Guess the picture", onthisday: "On this day"};
 const STATUS_LABEL = {queued: "idea", rendered: "in queue", draft: "draft"};
 const statusLabel = st => STATUS_LABEL[st] || st;
-const makeArg = p => ["question", "text", "clips", "quiz"].includes(p.origin) ? p.ref : p.url;  // what `run` needs to make it again
+const makeArg = p => ["question", "text", "clips", "quiz", "guess", "onthisday"].includes(p.origin) ? p.ref : p.url;  // what `run` needs to make it again
 const kTokens = n => n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1) + "k" : String(n);
 const originName = p => ORIGIN_NAMES[p.origin || "wikipedia"] || p.origin;
 
@@ -1332,7 +1334,9 @@ async function openDetail(id) {
         <button class="btn" id="copyGo" type="button" data-ep="${p.ep}" title="Same script and pictures, made again with that channel's brand, voice and closing line">Copy to channel</button></div>` : ""}
       ${potDetail(p)}
       ${p.status === "failed" ? `<h5>Error</h5><div class="box">${esc(p.reason)}</div>` : ""}
-      ${p.origin === "clips" && p.clips?.length && p.status !== "uploaded" ? clipEditor(p) : p.origin === "quiz" ? quizEditor(p) : p.script && p.status !== "uploaded" ? `
+      ${p.origin === "clips" && p.clips?.length && p.status !== "uploaded" ? clipEditor(p) : p.origin === "quiz" ? quizEditor(p) : p.parts?.length ? `
+        <h5>In this video</h5>${p.parts.map(([n, t], k) => `<div class="box" style="margin-bottom:8px"><b>${k + 1}. ${esc(n)}</b><div class="hint" style="margin:0">${esc(t)}</div></div>`).join("")}
+        <div class="hint">Taken from Wikipedia as it is. "Remake" makes a new one${p.origin === "guess" ? " with other pictures" : ""}.</div>` : p.script && p.status !== "uploaded" ? `
         <h5>YouTube title</h5><input class="edit" id="edTitle" maxlength="100" value="${esc(p.yt_title)}">
         <h5>Narration <span id="edCount" style="text-transform:none;letter-spacing:0"></span></h5>
         <textarea id="edScript">${esc(p.script)}</textarea>
@@ -1743,7 +1747,7 @@ function setDirty(d) { $("#sState").innerHTML = d ? `<span class="dirty">Unsaved
 // what the channel makes decides which settings, connectors and Make-box words are shown (CSS: [data-for])
 function setVtype(t) {
   document.body.dataset.vtype = t === "clips" ? "clips" : "explainer";
-  $("#input").placeholder = t === "clips" ? "Type what to search for (funny cats), or paste video links" : t === "quiz" ? "Name a topic to make a quiz on (the solar system)" : "Ask a question, name a topic, paste a paragraph or a link";
+  $("#input").placeholder = t === "clips" ? "Type what to search for (funny cats), or paste video links" : t === "quiz" ? "Name a topic to make a quiz on (the solar system)" : t === "guess" ? "Name a kind of thing to guess from pictures (famous landmarks)" : t === "onthisday" ? "Leave empty for today, or type a date (25 December)" : "Ask a question, name a topic, paste a paragraph or a link";
 }
 const SETTINGS_PAGES = {brand: ["Channel", "The name, look and words that go on every video."],
   content: ["Videos", "What this channel makes, what it's about, and how a video gets made."],

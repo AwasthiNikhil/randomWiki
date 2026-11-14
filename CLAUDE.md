@@ -115,18 +115,29 @@ web.html) saves order and ticks through `POST /api/clips`.
 **The owner chose to allow other people's clips here**, as an exception to the licence rule below; every clip is
 credited in the description, and publishing rights are theirs to sort out.
 
-## Quizzes (`make_quiz()` in rw.py)
-A third kind of video (`video_type: "quiz"`; `run` and `auto` on such a channel take a topic, or a random channel
-topic). `research()` as for explainers, then `quiz_questions()`: the writer's model drafts questions with three options
-and the sentence of the notes that proves each; code keeps only those whose sentence is really in the notes
-(`in_text()`), names the answer and neither wrong option, and from which the local model, shown only that sentence,
-picks the same option. Fewer than three kept = the video fails. `produce_quiz()` voices line by line (intro, each
-question, each answer, outro), adds `QUIZ_THINK` seconds with a tick per second and a chime on the answer, drops the
-last question while the total is over `max_seconds`, and `render_quiz()` draws it (cards cached per state; `backdrop()`,
-`font()`, `fit_lines()`, `encode()` are shared with `render()`). Meta has `origin: "quiz"`, `intro`, `quiz`
-(question, options, answer, quote). `rerender` and "Copy to channel" re-voice and redraw it. No draft step, no
-question editing, no pictures or captions; the studio lists the questions with their proof. In the UI a quiz channel
-counts as an explainer channel for `data-for` (same topics, research, voice and model settings).
+## Formats: quiz, guess the picture, on this day (`FORMATS` in rw.py)
+Videos made of voiced scenes rather than one narration. `FORMATS` maps a channel's `video_type` (also the video's
+`origin`) to (make function, where its parts are in meta, its scene list, its renderer, fewest parts). `run` and `auto`
+on such a channel call the make function with the Make box's text ("" = a random channel topic, or today's date).
+Shared: `make_format()` (row, produce, score), `produce_format()` (also what `rerender` and "Copy to channel" run),
+`voice_scenes()` (each line voiced on its own and trimmed, quiet after it, a tick per second or a chime; writes
+`voice.wav`, returns scene times), `render_scenes()` (frame = the format's `draw(scene, t)` plus the progress bar),
+`backdrop()`, `text_lines()`, `countdown()`, `cover()`, `lead_picture()` (an article's main picture, only if it is a
+free photograph). While a video is over `max_seconds` its last part is dropped. To add a format: a `make_x`, `x_steps`,
+`render_x`, a `FORMATS` entry, a tile and Make-box hint in web.html, `ORIGIN_NAMES` and `makeArg`. In the UI these
+channels count as explainer channels for `data-for`. No draft step, pictures editor or captions.
+- **quiz** (`make_quiz`): `research()` as for explainers, then `quiz_questions()`: the writer's model drafts questions
+  with three options and the sentence of the notes that proves each; code keeps only those whose sentence is really in
+  the notes (`in_text()`), names the answer and neither wrong option, and from which the local model, shown only that
+  sentence, picks the same option. Fewer than three = the video fails. Meta `quiz`: question, options, answer, quote.
+  The studio edits questions, options and the answer (`quizEditor`/`wireQuiz`, `POST /api/quiz`, then `rerender`); a
+  changed or added question loses its quote and is shown as the owner's own.
+- **guess** (`make_guess`): the model lists well-known examples of the topic as Wikipedia titles; each is used only if
+  `lead_picture()` finds one. Shown as the answer: the article's title and one-line description. The picture clears
+  from a blur over `GUESS_THINK` seconds. Subjects already shown are in the channel's `data/guess_used.json`.
+- **onthisday** (`make_onthisday`): Wikipedia's "On this day" feed for today or a date in the text (`day_from()`), no
+  model: events that pass the `GRIM` word list, are 6-30 words and have a `lead_picture()` among their linked articles,
+  taken from across the list and shown oldest first. Meta `items` (guess and onthisday): name, text, image.
 
 ## Conventions that matter
 - **No video from model memory:** research must come from sources actually read; if research has no answer to a
