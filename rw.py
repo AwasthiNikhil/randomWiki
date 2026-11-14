@@ -4667,6 +4667,8 @@ def selftest():
 
 
 def main():
+    import signal
+    signal.signal(signal.SIGINT, signal.default_int_handler)  # a studio started in the background hands down "ignore Ctrl-C"; Stop needs it heard
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     r = sub.add_parser("run", help="make a video from anything: a question, topic, paragraph or link (none = next idea)")

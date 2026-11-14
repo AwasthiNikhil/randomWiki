@@ -197,7 +197,8 @@ def start(cmd):
         if job["proc"] and job["proc"].poll() is None:
             raise RuntimeError("a command is already running")
         proc = subprocess.Popen([sys.executable, "-W", "ignore", "-u", str(rw.ROOT / "rw.py"), *args],
-                                cwd=rw.ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+                                cwd=rw.ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
+                                start_new_session=True)  # its own process group, so Stop reaches the voice, ffmpeg and download helpers too
         job.update(proc=proc, cmd="rw " + cmd, lines=[f"$ rw {cmd}"], code=None)
 
     def pump():
@@ -597,7 +598,13 @@ class H(BaseHTTPRequestHandler):
                     return self.send(200, {"next": len(job["lines"])})
             elif self.path == "/api/stop":
                 if job["proc"] and job["proc"].poll() is None:
-                    job["proc"].send_signal(signal.SIGINT)  # make() records it as failed
+                    os.killpg(job["proc"].pid, signal.SIGINT)  # the job and everything it started; make() records it as failed
+                    def insist(p=job["proc"]):  # a helper deep in native code may not hear it: end the group after a few seconds
+                        try:
+                            p.wait(8)
+                        except subprocess.TimeoutExpired:
+                            os.killpg(p.pid, signal.SIGKILL)
+                    threading.Thread(target=insist, daemon=True).start()
             elif self.path == "/api/reorder":  # body: {"order": [pageid, ...]} top to bottom
                 con = rw.db()
                 con.executemany("update pages set rank=? where pageid=? and status='queued'",
