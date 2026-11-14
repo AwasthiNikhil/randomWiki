@@ -680,7 +680,7 @@ class H(BaseHTTPRequestHandler):
                 if name not in rw.STOCK:
                     raise ValueError("unknown stock library")
                 keys = rw.secret(rw.STOCK_FILE)
-                if key and not re.fullmatch(r"[\w\-]{20,100}", key):
+                if key and not re.fullmatch(r"[\w\-]{6,100}", key):
                     raise ValueError(f"that doesn't look like a {rw.STOCK[name]} API key")
                 keys[name] = key
                 rw.secret(rw.STOCK_FILE, {k: v for k, v in keys.items() if v})

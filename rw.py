@@ -1250,7 +1250,7 @@ def src_nasa_video(q, limit=8):
 
 # ---------- stock libraries: Pexels and Pixabay (your own free key), WordPress Photos (CC0, no key) ----------
 STOCK_FILE = SECRETS / "stock.json"  # {"pexels": key, "pixabay": key}
-STOCK = {"pexels": "Pexels", "pixabay": "Pixabay"}
+STOCK = {"pexels": "Pexels", "pixabay": "Pixabay", "unsplash": "Unsplash", "smithsonian": "Smithsonian", "europeana": "Europeana"}
 
 
 def stock_key(name):
@@ -1262,10 +1262,71 @@ def stock_get(name, url, params, headers=None):
     k = stock_key(name)
     if not k:
         raise RuntimeError(f"add a {STOCK[name]} API key in Connectors")
-    if name == "pixabay":
-        params = {**params, "key": k}
+    in_url = {"pixabay": "key", "smithsonian": "api_key", "europeana": "wskey"}.get(name)  # the others send it as a header
+    if in_url:
+        params = {**params, in_url: k}
+    auth = {"pexels": k, "unsplash": "Client-ID " + k}.get(name)
     return http_json(urllib.request.Request(url + "?" + urllib.parse.urlencode(params),
-                                            headers={"User-Agent": BRAND["user_agent"], **({"Authorization": k} if name == "pexels" else {})}))
+                                            headers={"User-Agent": BRAND["user_agent"], **({"Authorization": auth} if auth else {})}))
+
+
+def src_unsplash(q, limit=24):
+    d = stock_get("unsplash", "https://api.unsplash.com/search/photos", {"query": q, "per_page": min(limit, 30)})
+    return [dict(source="unsplash", url=x["urls"]["regular"], thumb=x["urls"]["small"], page=x["links"]["html"],
+                 name=x.get("alt_description") or x.get("description") or "Unsplash photo", artist=(x.get("user") or {}).get("name", ""),
+                 license="Unsplash License", tags=x.get("alt_description") or "") for x in d.get("results", [])]
+
+
+def src_smithsonian(q, limit=12):
+    """Smithsonian Open Access: museum objects, specimens and photographs released as CC0."""
+    d = stock_get("smithsonian", "https://api.si.edu/openaccess/api/v1.0/search",
+                  {"q": f"{q} AND online_visual_material:true", "rows": limit * 2})
+    out = []
+    for r in (d.get("response") or {}).get("rows") or []:
+        dn = (r.get("content") or {}).get("descriptiveNonRepeating") or {}
+        m = next((m for m in (dn.get("online_media") or {}).get("media") or []
+                  if m.get("type") == "Images" and (m.get("usage") or {}).get("access") == "CC0" and m.get("content")), None)
+        if m:
+            out.append(dict(source="smithsonian", url=m["content"] + "&max=1600", thumb=(m.get("thumbnail") or m["content"]) + "&max=400", name=r.get("title") or "object",
+                            page=dn.get("record_link") or "https://collections.si.edu/search/detail/" + urllib.parse.quote(r.get("id", "")),
+                            artist=dn.get("data_source") or "Smithsonian", license="CC0 (Smithsonian Open Access)"))
+    return out[:limit]
+
+
+EUROPEANA_RIGHTS = [("publicdomain/zero", "CC0"), ("publicdomain/mark", "Public domain"), ("licenses/by-sa", "CC BY-SA"), ("licenses/by/", "CC BY")]
+
+
+def src_europeana(q, limit=12):
+    """Europe's museums, libraries and archives; only items whose rights allow reuse (public domain, CC0, BY, BY-SA)."""
+    d = stock_get("europeana", "https://api.europeana.eu/record/v2/search.json",
+                  {"query": q, "reusability": "open", "media": "true", "qf": "TYPE:IMAGE", "rows": limit * 2, "profile": "rich"})
+    out = []
+    for x in d.get("items") or []:
+        rights = (x.get("rights") or [""])[0]
+        lic = next((name for part, name in EUROPEANA_RIGHTS if part in rights), None)
+        if lic and x.get("edmIsShownBy"):  # anything else (ND, NC, in copyright) is left out even if the search returned it
+            out.append(dict(source="europeana", url=x["edmIsShownBy"][0], thumb=(x.get("edmPreview") or x["edmIsShownBy"])[0],
+                            page=(x.get("guid") or "").split("?")[0], name=(x.get("title") or ["item"])[0],
+                            artist=(x.get("dcCreator") or x.get("dataProvider") or ["unknown"])[0], license=lic))
+    return out[:limit]
+
+
+def src_archive_video(q, limit=6):
+    """Public-domain films from the Prelinger Archives at the Internet Archive (old newsreels, ads, educational films)."""
+    docs = get_json("https://archive.org/advancedsearch.php?fl[]=identifier&fl[]=title&" + urllib.parse.urlencode(
+        {"q": f"({q}) AND collection:prelinger AND mediatype:movies", "rows": limit * 2, "output": "json"}))["response"]["docs"]
+    out = []
+    for doc in docs:
+        i = doc["identifier"]
+        files = [f for f in get_json(f"https://archive.org/metadata/{i}/files").get("result") or [] if f.get("name", "").endswith(".mp4")]
+        if files:
+            f = min(files, key=lambda f: int(f.get("size") or 10 ** 12))  # the small rendition: we use a few seconds at 720 px
+            out.append(dict(source="archive", kind="video", url=f"https://archive.org/download/{i}/{urllib.parse.quote(f['name'])}",
+                            thumb=f"https://archive.org/services/img/{i}", page=f"https://archive.org/details/{i}",
+                            name=doc.get("title") or i, artist="Prelinger Archives", license="Public domain (Prelinger Archives)"))
+        if len(out) >= limit:
+            break
+    return out
 
 
 def src_pexels(q, limit=24):
@@ -1326,7 +1387,8 @@ def src_wordpress(q, limit=24):
 
 IMAGE_SOURCES = {"article": src_article, "commons": src_commons, "openverse": src_openverse, "nasa": src_nasa, "met": src_met, "cleveland": src_cleveland,
                  "commons_video": src_commons_video, "nasa_video": src_nasa_video, "wordpress": src_wordpress,
-                 "pexels": src_pexels, "pexels_video": src_pexels_video, "pixabay": src_pixabay, "pixabay_video": src_pixabay_video}
+                 "pexels": src_pexels, "pexels_video": src_pexels_video, "pixabay": src_pixabay, "pixabay_video": src_pixabay_video,
+                 "unsplash": src_unsplash, "smithsonian": src_smithsonian, "europeana": src_europeana, "archive_video": src_archive_video}
 
 
 def src_audio(q, kind="music", limit=20):

@@ -608,10 +608,31 @@ body[data-vtype=clips] [data-for=explainer], body[data-vtype=explainer] [data-fo
               <button class="btn sm" type="button" data-stocksave="pixabay">Save key</button><button class="btn sm danger" type="button" data-stockrm="pixabay" hidden>Remove</button></div>
           </div>
           <div class="ccard">
+            <div class="chead"><b>Unsplash</b><span class="cstate" id="st_unsplash"></span></div>
+            <span class="hint">Modern photographs, free to use under the Unsplash License (credited anyway). Create an app and copy its Access Key. <a href="https://unsplash.com/developers" target="_blank" rel="noopener">Get a free key ↗</a></span>
+            <span class="hint" id="stm_unsplash"></span>
+            <div class="inline"><input type="password" id="stk_unsplash" placeholder="Paste a Unsplash API key" autocomplete="off" aria-label="Unsplash API key" style="flex:1;min-width:0">
+              <button class="btn sm" type="button" data-stocksave="unsplash">Save key</button><button class="btn sm danger" type="button" data-stockrm="unsplash" hidden>Remove</button></div>
+          </div>
+          <div class="ccard">
+            <div class="chead"><b>Smithsonian</b><span class="cstate" id="st_smithsonian"></span></div>
+            <span class="hint">Museum objects, specimens and photographs from Smithsonian Open Access, all CC0. The key comes from api.data.gov by email. <a href="https://api.data.gov/signup/" target="_blank" rel="noopener">Get a free key ↗</a></span>
+            <span class="hint" id="stm_smithsonian"></span>
+            <div class="inline"><input type="password" id="stk_smithsonian" placeholder="Paste a Smithsonian API key" autocomplete="off" aria-label="Smithsonian API key" style="flex:1;min-width:0">
+              <button class="btn sm" type="button" data-stocksave="smithsonian">Save key</button><button class="btn sm danger" type="button" data-stockrm="smithsonian" hidden>Remove</button></div>
+          </div>
+          <div class="ccard">
+            <div class="chead"><b>Europeana</b><span class="cstate" id="st_europeana"></span></div>
+            <span class="hint">Europe's museums, libraries and archives. Only items free to reuse are shown (public domain, CC0, CC BY, CC BY-SA). <a href="https://pro.europeana.eu/pages/get-api" target="_blank" rel="noopener">Get a free key ↗</a></span>
+            <span class="hint" id="stm_europeana"></span>
+            <div class="inline"><input type="password" id="stk_europeana" placeholder="Paste a Europeana API key" autocomplete="off" aria-label="Europeana API key" style="flex:1;min-width:0">
+              <button class="btn sm" type="button" data-stocksave="europeana">Save key</button><button class="btn sm danger" type="button" data-stockrm="europeana" hidden>Remove</button></div>
+          </div>
+          <div class="ccard">
             <div class="chead"><b>Free libraries</b><span class="cstate ok">Always on</span></div>
             <ul class="hint" style="margin:0;padding-left:18px;display:grid;gap:3px">
               <li><b>Images:</b> Wikipedia, Wikimedia Commons, Openverse (Flickr and others), NASA, The Met, Cleveland Museum of Art, WordPress Photo Directory (CC0)</li>
-              <li><b>Video clips:</b> Wikimedia Commons, NASA, and your Library</li>
+              <li><b>Video clips:</b> Wikimedia Commons, NASA, the Prelinger Archives (old public-domain films, at the Internet Archive), and your Media</li>
               <li><b>Music:</b> Openverse (Jamendo, ccMixter and others)</li>
               <li><b>Sound effects:</b> Freesound, through Openverse</li>
             </ul>
@@ -1253,6 +1274,7 @@ async function openDetail(id) {
             <option value="article">This article</option><option value="commons" selected>Wikimedia Commons</option>
             <option value="openverse">Openverse (Flickr etc.)</option><option value="nasa">NASA</option><option value="met">The Met (art &amp; history)</option><option value="cleveland">Cleveland Museum of Art (CC0)</option>
             <option value="wordpress">WordPress Photos (CC0)</option><option value="pexels">Pexels photos</option><option value="pixabay">Pixabay photos</option>
+            <option value="unsplash">Unsplash photos</option><option value="smithsonian">Smithsonian (CC0)</option><option value="europeana">Europeana (museums &amp; archives)</option><option value="archive_video">▶ Old films (Prelinger Archives)</option>
             <option value="commons_video">▶ Commons videos</option><option value="nasa_video">▶ NASA videos</option><option value="pexels_video">▶ Pexels videos</option><option value="pixabay_video">▶ Pixabay videos</option><option value="media_image">My media: images</option><option value="library">▶ My media: videos</option>
           </select>
           <input id="vQuery" value="${esc(p.title)}" aria-label="Image search">
