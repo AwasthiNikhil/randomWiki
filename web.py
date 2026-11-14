@@ -738,13 +738,19 @@ class H(BaseHTTPRequestHandler):
                 if not any(f["family"] == family for f in rw.google_fonts()):
                     raise ValueError("unknown font family")
                 return self.send(200, {"path": rw.install_font(family), "family": family})
-            elif self.path == "/api/remove_brand":  # body: {"kind": "music"|"logo"}
+            elif self.path == "/api/remove_brand":  # body: {"kind": "music"|"logo"|"sample"}
                 b = brand()
                 if body.get("kind") == "music":
                     (rw.WS / b["music"]).unlink(missing_ok=True)
                 elif body.get("kind") == "logo":
                     (rw.WS / "brand" / "logo.png").unlink(missing_ok=True)
                     b.pop("logo", None)
+                    BRAND_FILE.write_text(json.dumps(b, indent=2) + "\n")
+                elif body.get("kind") == "sample":  # the voice sample: without it the channel goes back to the preset voice
+                    (rw.WS / "brand" / "voice_sample.wav").unlink(missing_ok=True)
+                    b["clone_consent"] = False
+                    if b.get("voice_engine") == "clone":
+                        b["voice_engine"] = "kokoro"
                     BRAND_FILE.write_text(json.dumps(b, indent=2) + "\n")
             elif self.path == "/api/delete_video":  # body: {"pageid"}; keeps the page in the log as skipped
                 pid = int(body["pageid"])

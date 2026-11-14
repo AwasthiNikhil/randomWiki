@@ -436,6 +436,7 @@ body[data-vtype=clips] [data-for=explainer], body[data-vtype=explainer] [data-fo
               <div class="inline">
                 <button class="btn sm" type="button" id="sampleRec">● Record sample</button>
                 <label class="btn sm" style="display:inline-block;cursor:pointer">Upload audio<input type="file" accept="audio/*" id="sampleFile" hidden></label>
+                <button class="btn sm danger" type="button" id="sampleRm" hidden>Delete sample</button>
                 <span class="hint" id="sampleState"></span>
               </div>
               <audio id="sampleAudio" controls hidden></audio>
@@ -1840,6 +1841,10 @@ $("#sform").addEventListener("click", async e => {
     $("#fontPick").hidden = true; renderFontRoles(); setDirty(true);
   }
   else if (t.id === "hear") { if (await saveSettings() && await exec("voicetest")) { await waitJob(); const a = $("#voiceAudio"); a.hidden = false; a.src = "/data/voice_preview.wav?t=" + Date.now(); a.play(); } }
+  else if (t.id === "sampleRm") {
+    if (t.textContent !== "Delete it for good?") { t.textContent = "Delete it for good?"; return; }
+    if (await post("/api/remove_brand", {kind: "sample"})) { await loadSettings(); syncEngine(); termLine("voice sample deleted; this channel uses the preset voice again", "good"); }
+  }
   else if (t.id === "musicRm" || t.id === "logoRm") { await post("/api/remove_brand", {kind: t.id === "musicRm" ? "music" : "logo"}); const keep = collect(); await loadSettings(); Object.assign(S, keep); }
 });
 let fqTimer; $("#fq").oninput = () => { clearTimeout(fqTimer); fqTimer = setTimeout(searchFonts, 250); };
@@ -1969,6 +1974,7 @@ $("#logoFile").onchange = e => e.target.files[0] && uploadBrand("logo", e.target
 function sampleState(has) {
   $("#sampleState").textContent = has ? "Sample saved." : "No sample yet.";
   $("#sampleAudio").hidden = !has; if (has) $("#sampleAudio").src = "/brand/voice_sample.wav?t=" + Date.now();
+  $("#sampleRm").hidden = !has; $("#sampleRm").textContent = "Delete sample";
 }
 let edgeLoaded = false;
 async function loadEdgeVoices() {
