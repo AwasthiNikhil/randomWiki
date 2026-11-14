@@ -2393,8 +2393,12 @@ def description(m):
     used = {i.get("sfx") for i in m["images"]} | ({"music.m4a"} if m.get("music") == "own" else set())
     lines += [f"{'Music' if f == 'music.m4a' else 'Sound'}: \"{c['name']}\" by {c['artist']}, {c['license']}: {c['page']}"
               for f, c in (m.get("audio_credits") or {}).items() if f in used]
+    drawn = lambda i: i.get("source") == "ai" or i.get("license") == "AI-generated"
     lines += [f"{'Video' if i.get('kind') == 'video' else 'Image'}: \"{i['name']}\", {credit(i).replace(' · ', ', ')}: {i['page']}"
-              for i in m["images"] if credit(i)]
+              for i in m["images"] if credit(i) and not drawn(i)]
+    if any(drawn(i) for i in m["images"]):  # one line, not a prompt per picture: viewers need to know they're AI, not how
+        lines.append("Images: AI-generated illustrations (FLUX.1 schnell)." if all(drawn(i) for i in m["images"])
+                     else "Some images are AI-generated illustrations (FLUX.1 schnell).")
     narration = {"recording": f"Narration: {BRAND['channel']}.", "clone": "Narration: AI voice clone of the creator (Chatterbox).",
                  "edge": "Narration: AI voice (Microsoft Edge text to speech)."}
     lines += [narration.get(m.get("narration"), "Narration: AI voice (Kokoro TTS).") + " Fonts: SIL OFL.", "",
