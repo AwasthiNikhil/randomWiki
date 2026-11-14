@@ -2580,6 +2580,54 @@ def src_media_images(q, limit=30):
             if all(w in " ".join(str(v.get(k, "")) for k in ("title", "uploader", "site", "license", "file")).lower() for w in words)][:limit]
 
 
+# ---------- pictures drawn on this Mac (FLUX.1 schnell through mflux, in its own .venv-image) ----------
+IMAGE_MODEL = "mflux-community/flux-1-schnell-mflux-q4"  # Apache-2.0, 4-bit for Apple chips, 9.6 GB in .cache/hf
+IMAGE_BIN = ROOT / ".venv-image" / "bin"
+IMAGE_READY = ROOT / "data" / "image_model_ready"  # written after the first picture, so a half-finished download doesn't count
+
+
+def generate_image(prompt, dest, size=768, show=False):
+    import subprocess
+    r = subprocess.run([str(IMAGE_BIN / "mflux-generate"), "--model", IMAGE_MODEL, "--base-model", "schnell", "--steps", "4",
+                        "--width", str(size), "--height", str(size), "--low-ram", "--prompt", prompt, "--output", str(dest)],
+                       capture_output=not show, text=True)
+    if r.returncode or not Path(dest).exists():
+        raise RuntimeError("the picture model failed: " + ((r.stderr or "").strip().splitlines() or ["see the console"])[-1][:200])
+    return dest
+
+
+def image_model_setup():
+    """Install the picture model: its runner into .venv-image, the model into .cache/hf, then draw a test picture."""
+    import subprocess
+    uv = str(ROOT / ".tools" / "bin" / "uv")
+    if not (IMAGE_BIN / "mflux-generate").exists():
+        print("installing the picture runner (mflux)…", flush=True)
+        subprocess.run([uv, "venv", "--python", "3.12", str(ROOT / ".venv-image")], check=True)
+        subprocess.run([uv, "pip", "install", "--python", str(IMAGE_BIN / "python"), "mflux"], check=True)
+    print("downloading the model (9.6 GB the first time; it resumes if interrupted) and drawing a test picture…", flush=True)
+    generate_image("a red apple on a wooden table, photograph", ROOT / "data" / "image_test.png", show=True)
+    IMAGE_READY.write_text(IMAGE_MODEL)
+    print("the picture model is ready: in a video's Visuals, choose \"Draw a picture with AI\" and describe it")
+
+
+def src_ai_image(q, limit=1):
+    """Draw the picture described (about a minute), keep it in media/image/ and offer it like any other of your images."""
+    import hashlib
+    from PIL import Image
+    if not IMAGE_READY.exists():
+        raise RuntimeError("download the picture model first: Connectors, AI model, Pictures")
+    folder = MEDIA / "image"
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / f"AI-{hashlib.sha1(f'{q}{time.time()}'.encode()).hexdigest()[:10]}.png"
+    generate_image(q, path)
+    im = Image.open(path)
+    path.with_suffix(".json").write_text(json.dumps(dict(title=q[:150], url="", site="AI picture", uploader="FLUX.1 schnell, on this Mac",
+                                                         license="AI-generated", file=path.name, width=im.width, height=im.height,
+                                                         saved=time.strftime("%Y-%m-%d %H:%M")), indent=1))
+    return [c for c in src_media_images("", 10 ** 6) if c["url"] == "media:" + path.name]
+
+
+IMAGE_SOURCES["ai"] = src_ai_image
 IMAGE_SOURCES["library"] = src_library
 IMAGE_SOURCES["media_image"] = src_media_images
 
@@ -3645,6 +3693,7 @@ def main():
     lg = sub.add_parser("log"); lg.add_argument("n", nargs="?", type=int, default=30)
     sub.add_parser("selftest")
     sub.add_parser("preview")
+    sub.add_parser("imagemodel", help="install the picture model that runs on this Mac")
     pl = sub.add_parser("pull", help="download a local model into Ollama"); pl.add_argument("model")
     ca = sub.add_parser("clipadd", help="add one video (a link) to a clip countdown")
     ca.add_argument("url"); ca.add_argument("--ep", type=int, required=True)
@@ -3741,6 +3790,8 @@ def main():
             print("everything is scored (use --all to rescore)")
     elif args.cmd == "upload":
         upload_pending(con, args.publish_at, args.ep)
+    elif args.cmd == "imagemodel":
+        image_model_setup()
     elif args.cmd == "pull":
         pull_model(args.model)
     elif args.cmd == "clipadd":

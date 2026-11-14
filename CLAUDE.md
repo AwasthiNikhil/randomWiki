@@ -78,7 +78,15 @@ Prompts: seven theme-defining prompts are editable per channel (`PROMPTS` in rw.
 joins the channel's instructions (or the default) with the constant's fixed part (material + reply format), which is
 never editable because code reads that JSON. The checks (`CHECK_PROMPT`, `ANSWER_PROMPT`, …) are fixed.
 
-LLM layer: `llm(prompt, temperature, local=False)` returns parsed JSON. `writer()` picks gemini/claude/local from
+Models the owner can add (Connectors → AI model): other writers through `PROVIDERS` (Groq, OpenRouter, Cerebras:
+OpenAI-style chat, keys in `secrets/ai_keys.json`, `provider_chat()`; they write, research stays `research_web()`);
+Ollama models downloaded with `./rw pull <name>`; a picture model on this Mac (`./rw imagemodel`: mflux in
+`.venv-image`, FLUX.1 schnell 4-bit in `.cache/hf`, `generate_image()`, offered in the visuals editor as source `ai`
+and saved to `media/image/` as "AI-generated"); voices: Kokoro, the clone, or Edge online voices (`tts_edge()`, word
+timings from the service, any language; `edge_voices()` cached in `data/`). Picture sources with the owner's own free
+keys live in `STOCK` (Pexels, Pixabay, Unsplash, Smithsonian, Europeana); keyless ones are plain `src_*` functions.
+
+LLM layer: `llm(prompt, temperature, local=False)` returns parsed JSON. `writer()` picks gemini/claude/a provider/local from
 Connectors; bulk scoring and all checks pass `local=True` (free Ollama, `llama3.1:8b`). The 8B model is unreliable at
 yes/no judgements and at obeying "skip X" instructions: make it quote or label, then decide in code (see
 `find_answer`, `answers`, `TREND_SKIP`). Cloud failures set `ai_down` and the run continues locally.

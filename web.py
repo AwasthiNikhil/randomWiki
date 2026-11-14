@@ -10,7 +10,7 @@ from pathlib import Path
 import rw
 
 ALLOWED = {"run", "add", "download", "connect", "discover", "upload", "unpublish", "rerender", "log", "score", "selftest", "preview", "voicetest",
-           "auto", "schedule", "clips", "clipadd", "pull"}
+           "auto", "schedule", "clips", "clipadd", "pull", "imagemodel"}
 HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 BRAND_FILE = rw.BRAND_FILE
 HEX = re.compile(r"^#[0-9a-fA-F]{6}$")
@@ -450,7 +450,7 @@ class H(BaseHTTPRequestHandler):
                         p["error"] = f"couldn't list its models ({str(e)[:80]})"
             log = rw.AUTO_LOG.read_text(errors="ignore").splitlines()[-40:] if rw.AUTO_LOG.exists() else []
             return self.send(200, {"brand": b, "themes": themes(), "prompts": [dict(zip(("default", "fixed"), rw.prompt_parts(k)), key=k, label=v[0], hint=v[1]) for k, v in rw.PROMPTS.items()],
-                                   "voices": sorted(rw.KOKORO_VOICES), "models": models, "gemini": gemini, "claude": claude, "providers": providers, "ai": b.get("ai") or "gemini", "publish": rw.publish_status(),
+                                   "voices": sorted(rw.KOKORO_VOICES), "models": models, "gemini": gemini, "claude": claude, "providers": providers, "image_model": rw.IMAGE_READY.exists(), "ai": b.get("ai") or "gemini", "publish": rw.publish_status(),
                                    "publish_to": b.get("publish_to") or ["youtube"], "youtube": rw.youtube_status(),
                                    "stock": {n: "shell" if os.environ.get(f"{n.upper()}_API_KEY", "").strip() else "saved" if rw.stock_key(n) else "" for n in rw.STOCK},
                                    "schedule": rw.SCHEDULE_DEFAULTS | b.get("schedule", {}), "schedule_loaded": rw.schedule_loaded(),

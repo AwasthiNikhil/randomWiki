@@ -426,7 +426,7 @@ body[data-vtype=clips] [data-for=explainer], body[data-vtype=explainer] [data-fo
             <label>Closing line <small>spoken at the end of every video</small><textarea name="outro_line" maxlength="200" rows="2"></textarea></label>
             <div style="display:grid;gap:6px">
               <label class="radio"><input type="radio" name="vEngine" value="kokoro"> Preset AI voice (Kokoro): fast</label>
-              <label class="radio"><input type="radio" name="vEngine" value="edge"> <b>Online voices</b>: about 300 voices in many languages, Nepali and Hindi included (Microsoft Edge; needs the internet)</label>
+              <label class="radio"><input type="radio" name="vEngine" value="edge"> <b>Online voices</b>: 300 voices in many languages (Microsoft Edge, needs the internet)</label>
               <label class="radio"><input type="radio" name="vEngine" value="clone"> <b>My voice</b>: cloned from a sample (Chatterbox, a few minutes per video)</label>
             </div>
             <div id="cloneBox" style="display:grid;gap:10px;padding:12px;border:1px dashed var(--line);border-radius:10px">
@@ -596,6 +596,14 @@ body[data-vtype=clips] [data-for=explainer], body[data-vtype=explainer] [data-fo
         <div class="cgrid" id="provCards"></div>
         <span class="hint">Groq, OpenRouter and Cerebras run open models on their servers with free daily allowances. They write scripts; the facts still come from the pages the app reads itself. Keys from your shell (<code>GEMINI_API_KEY</code>, <code>ANTHROPIC_API_KEY</code>, <code>GROQ_API_KEY</code>…) are used first. Saved keys stay in <code>secrets/</code> on this computer, which scheduled runs need.</span>
 
+        <div class="shead" style="margin-top:14px"><h2 class="ch">Pictures</h2><span class="scope all">All channels</span></div>
+        <div class="cgrid">
+          <div class="ccard">
+            <div class="chead"><b>Picture model on this Mac</b><span class="cstate" id="imgState"></span></div>
+            <span class="hint">FLUX.1 schnell · free, private, no watermark, and its licence (Apache 2.0) allows any use. In a video's Visuals, choose "Draw a picture with AI" and describe what you want; each picture takes about a minute and is kept in Media → Images. Descriptions say "AI-generated".</span>
+            <div class="inline"><button class="btn sm" type="button" id="imgGet">Download (9.6 GB)</button><span class="hint" id="imgHint" style="margin:0"></span></div>
+          </div>
+        </div>
        </div>
        <div class="conn" data-cgroup="media">
         <div class="shead"><h2 class="ch">Media sources</h2><span class="scope all">All channels</span></div>
@@ -1284,7 +1292,7 @@ async function openDetail(id) {
             <option value="openverse">Openverse (Flickr etc.)</option><option value="nasa">NASA</option><option value="met">The Met (art &amp; history)</option><option value="cleveland">Cleveland Museum of Art (CC0)</option>
             <option value="wordpress">WordPress Photos (CC0)</option><option value="pexels">Pexels photos</option><option value="pixabay">Pixabay photos</option>
             <option value="unsplash">Unsplash photos</option><option value="smithsonian">Smithsonian (CC0)</option><option value="europeana">Europeana (museums &amp; archives)</option><option value="archive_video">▶ Old films (Prelinger Archives)</option>
-            <option value="commons_video">▶ Commons videos</option><option value="nasa_video">▶ NASA videos</option><option value="pexels_video">▶ Pexels videos</option><option value="pixabay_video">▶ Pixabay videos</option><option value="media_image">My media: images</option><option value="library">▶ My media: videos</option>
+            <option value="commons_video">▶ Commons videos</option><option value="nasa_video">▶ NASA videos</option><option value="pexels_video">▶ Pexels videos</option><option value="pixabay_video">▶ Pixabay videos</option><option value="ai">✨ Draw a picture with AI (about a minute)</option><option value="media_image">My media: images</option><option value="library">▶ My media: videos</option>
           </select>
           <input id="vQuery" value="${esc(p.title)}" aria-label="Image search">
           <button class="btn" id="vGo">Search</button>
@@ -1843,6 +1851,8 @@ function renderConnectors(j) {
   STATE($("#clState"), c.key ? "Key added" : "No key", c.key ? "ok" : "");
   $("#clStatus").textContent = c.key === "shell" ? "Using ANTHROPIC_API_KEY from your shell." : c.key === "saved" ? "Using your saved key." : "";
   $("#clRm").hidden = c.key !== "saved";
+  STATE($("#imgState"), j.image_model ? "Ready" : "Not downloaded", j.image_model ? "ok" : "");
+  $("#imgGet").hidden = j.image_model; $("#imgHint").textContent = j.image_model ? "" : "Progress shows in the console on the right. You can keep working; it resumes if interrupted.";
   $("#provCards").innerHTML = Object.entries(j.providers || {}).map(([k, p]) => {
     keyed[k] = !!p.key;
     const pm = S[k + "_model"] || p.model;
@@ -1896,6 +1906,7 @@ $("#connectors").addEventListener("click", async e => {
     await ok("/api/ai_key", {name: t.dataset.aikey, key: box.value}, "key saved"); return;
   }
   if (t.dataset.aikeyrm) { await ok("/api/ai_key", {name: t.dataset.aikeyrm, key: ""}, "key removed"); return; }
+  if (t.id === "imgGet") { exec("imagemodel"); return; }
   if (t.id === "pullGo") {
     const name = $("#pullName").value.trim();
     if (!/^[\w.\-:\/]+$/.test(name)) { $("#pullName").focus(); return; }

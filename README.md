@@ -29,6 +29,17 @@ research the web if one is chosen in Connectors; otherwise the app searches the 
 few pages from different sites and writes from those; Wikipedia is used only if they don't answer the question.
 Settings → Videos has "Wikipedia only" for channels that prefer it. Every page read is linked in the description.
 
+## More models and sources (all free)
+- **Writers:** besides the local model, Gemini and Claude, you can add a free key for Groq, OpenRouter or Cerebras in
+  Connectors → AI model and choose it for writing. Download more local models there too (any name from
+  ollama.com/library).
+- **Pictures drawn on your Mac:** Connectors → AI model → Pictures downloads FLUX.1 schnell (9.6 GB, Apache 2.0). Then
+  a video's Visuals has "Draw a picture with AI": describe it, wait about a minute, and it is saved in Media → Images.
+- **Picture libraries:** Unsplash, Smithsonian Open Access and Europeana with your own free key (Connectors → Media
+  sources), plus the Cleveland Museum of Art and old public-domain films from the Prelinger Archives with no key.
+- **Voices:** Settings → Voice & music → Online voices gives about 300 Microsoft Edge voices in many languages. It is
+  free but unofficial and sends the script text to Microsoft.
+
 ## AI models: local, Gemini or Claude
 Everything runs locally by default (Ollama). In the studio's **Connectors** tab you can add a Gemini key (free at [aistudio.google.com/apikey](https://aistudio.google.com/apikey)) or an Anthropic key for Claude ([platform.claude.com](https://platform.claude.com/settings/keys)), and choose which model writes:
 - **Research goes beyond Wikipedia.** Gemini uses Google Search if your key's plan includes it; otherwise it picks reliable pages on any site, reads them itself and writes notes from what it read. Claude uses Anthropic's web search and cites the pages it used. Every source is credited. If the model can't read enough, research falls back to Wikipedia rather than script from the model's memory.
