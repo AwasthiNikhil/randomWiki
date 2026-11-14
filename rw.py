@@ -202,10 +202,72 @@ def claude_key():
     return k or (CLAUDE_KEY_FILE.read_text().strip() if CLAUDE_KEY_FILE.exists() else "")
 
 
+# Other services that speak the OpenAI chat format, each with a free tier and its own key: name -> (label, address,
+# model used until you pick one, where to get a key). They write; the facts still come from the web reading we do.
+PROVIDERS = {"groq": ("Groq", "https://api.groq.com/openai/v1", "llama-3.3-70b-versatile", "https://console.groq.com/keys"),
+             "openrouter": ("OpenRouter", "https://openrouter.ai/api/v1", "meta-llama/llama-3.3-70b-instruct:free", "https://openrouter.ai/keys"),
+             "cerebras": ("Cerebras", "https://api.cerebras.ai/v1", "llama-3.3-70b", "https://cloud.cerebras.ai")}
+AI_KEYS_FILE = SECRETS / "ai_keys.json"  # {"groq": key, ...}
+
+
+def provider_key(name):
+    """GROQ_API_KEY etc. from the shell, else the key saved in Connectors."""
+    return os.environ.get(f"{name.upper()}_API_KEY", "").strip() or secret(AI_KEYS_FILE).get(name, "")
+
+
+def provider_request(name, path, body=None):
+    req = urllib.request.Request(PROVIDERS[name][1] + path, json.dumps(body).encode() if body else None,
+                                 {"Authorization": "Bearer " + provider_key(name), "Content-Type": "application/json",
+                                  "User-Agent": BRAND["user_agent"]})
+    try:
+        with urllib.request.urlopen(req, timeout=120) as r:
+            return json.load(r)
+    except urllib.error.HTTPError as e:
+        try:
+            why = str((json.load(e).get("error") or {}).get("message") or "")[:160]
+        except Exception:
+            why = ""
+        raise RuntimeError(f"{PROVIDERS[name][0]}: HTTP {e.code} {why}".strip()) from None
+    except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
+        raise RuntimeError(f"{PROVIDERS[name][0]}: {type(e).__name__}") from None
+
+
+def provider_models(name):
+    return sorted(m["id"] for m in provider_request(name, "/models").get("data") or [] if m.get("id"))
+
+
+def provider_chat(name, prompt, temperature=0.7):
+    model = BRAND.get(f"{name}_model") or PROVIDERS[name][2]
+    r = provider_request(name, "/chat/completions", {"model": model, "temperature": temperature,
+                                                     "messages": [{"role": "user", "content": prompt}]})
+    count_ai(f"{name}:{model}", (r.get("usage") or {}).get("total_tokens"))
+    return r["choices"][0]["message"]["content"] or ""
+
+
+def pull_model(name):
+    """Download a model into Ollama (it keeps models in its own folder, outside this project), showing progress."""
+    req = urllib.request.Request(BRAND["ollama_url"] + "/api/pull", json.dumps({"model": name}).encode(), {"Content-Type": "application/json"})
+    seen = ""
+    try:
+        with urllib.request.urlopen(req, timeout=3600) as r:
+            for line in r:
+                d = json.loads(line)
+                if d.get("error"):
+                    raise SystemExit(f"Ollama couldn't download {name}: {d['error']}")
+                tenth = f" {10 * (10 * d['completed'] // d['total'])}%" if d.get("total") and d.get("completed") else ""
+                if d.get("status", "") + tenth != seen:
+                    seen = d.get("status", "") + tenth
+                    print("  " + seen, flush=True)
+    except urllib.error.URLError:
+        raise SystemExit("Ollama isn't running; start it and try again") from None
+    print(f"downloaded: {name}. Choose it in Connectors, AI model.")
+
+
 def writer():
     """Which model writes: the one chosen in Connectors if it has a key, else the local one."""
     want = BRAND.get("ai") or "gemini"
-    return want if {"gemini": gemini_key, "claude": claude_key}.get(want, lambda: "")() else "local"
+    key = {"gemini": gemini_key, "claude": claude_key}.get(want) or (lambda: provider_key(want) if want in PROVIDERS else "")
+    return want if key() else "local"
 
 
 def claude(prompt, tools=None):
@@ -245,7 +307,8 @@ def llm(prompt, temperature=0.7, local=False):
     who = writer()
     if not local and not ai_down and who != "local":
         try:
-            return json_in(gemini(prompt, temperature)[0] if who == "gemini" else claude(prompt)[0])
+            return json_in(gemini(prompt, temperature)[0] if who == "gemini" else claude(prompt)[0] if who == "claude"
+                           else provider_chat(who, prompt, temperature))
         except (RuntimeError, ValueError) as e:
             ai_down = str(e)
             print(f"  {who.title()} unavailable ({ai_down}); using the local model for the rest of this run")
@@ -786,7 +849,7 @@ def research(question):
     if that fails, we search and read the web ourselves; Wikipedia is the last resort (or the only one, if the channel
     is set to "Wikipedia only")."""
     who = writer()
-    if who != "local" and not ai_down:
+    if who in ("gemini", "claude") and not ai_down:  # the two that can search the web themselves
         try:
             return (research_gemini if who == "gemini" else research_claude)(question)
         except (RuntimeError, ValueError) as e:
@@ -1784,7 +1847,50 @@ def align_words(text, heard, duration=None):
 
 def tts(text, dest):
     """Narrate with the engine chosen in Settings. Returns (caption words as written, duration)."""
-    return tts_clone(text, dest) if BRAND.get("voice_engine") == "clone" else tts_kokoro(text, dest)
+    return {"clone": tts_clone, "edge": tts_edge}.get(BRAND.get("voice_engine"), tts_kokoro)(text, dest)
+
+
+def edge_voices():
+    """Microsoft Edge's online voices as [{name, gender, locale, label}], listed once a week (data/edge_voices.json)."""
+    cache = ROOT / "data" / "edge_voices.json"
+    if cache.exists() and time.time() - cache.stat().st_mtime < 7 * 86400:
+        return json.loads(cache.read_text())
+    import asyncio, edge_tts
+    vs = [dict(name=v["ShortName"], gender=v["Gender"], locale=v["Locale"],
+               label=re.sub(r"^Microsoft | Online \(Natural\)", "", v["FriendlyName"])) for v in asyncio.run(edge_tts.list_voices())]
+    cache.write_text(json.dumps(vs))
+    return vs
+
+
+def tts_edge(text, dest):
+    """An online voice from Microsoft Edge's read-aloud service (free, many languages, needs the internet; not an
+    official API, so it can change). It reports each word's timing itself, so captions work in any language."""
+    import asyncio, subprocess, edge_tts, imageio_ffmpeg, soundfile as sf
+    spoken, _ = speakable_map(text)
+    voice, speed = BRAND.get("edge_voice") or "en-US-AndrewNeural", BRAND["voice_speed"]
+
+    async def say(rate):
+        heard, mp3 = [], Path(str(dest) + ".mp3")
+        with open(mp3, "wb") as f:
+            async for ch in edge_tts.Communicate(spoken, voice, rate=f"{round((rate - 1) * 100):+d}%", boundary="WordBoundary").stream():
+                if ch["type"] == "audio":
+                    f.write(ch["data"])
+                elif ch["type"] == "WordBoundary":
+                    heard.append((ch["text"], ch["offset"] / 1e7, (ch["offset"] + ch["duration"]) / 1e7))
+        subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(), "-y", "-loglevel", "error", "-i", str(mp3), "-af", "apad=pad_dur=0.5",
+                        "-ar", "24000", "-ac", "1", str(dest)], check=True)
+        mp3.unlink()
+        return heard, sf.info(str(dest)).duration
+
+    try:
+        heard, dur = asyncio.run(say(speed))
+        if dur > BRAND["max_seconds"] and speed < 1.25:
+            speed = min(1.25, speed * dur / (BRAND["max_seconds"] - 1))
+            print(f"  narration {dur:.1f}s too long, re-voicing at speed {speed:.2f}")
+            heard, dur = asyncio.run(say(speed))
+    except Exception as e:
+        raise RuntimeError(f"the online voice {voice} didn't answer ({type(e).__name__}: {str(e)[:100]}); check the internet, or pick another voice in Settings") from None
+    return align_words(text, heard or transcribe_words(dest), dur), dur
 
 
 def tts_clone(text, dest):
@@ -2226,7 +2332,8 @@ def description(m):
               for f, c in (m.get("audio_credits") or {}).items() if f in used]
     lines += [f"{'Video' if i.get('kind') == 'video' else 'Image'}: \"{i['name']}\", {credit(i).replace(' · ', ', ')}: {i['page']}"
               for i in m["images"] if credit(i)]
-    narration = {"recording": f"Narration: {BRAND['channel']}.", "clone": "Narration: AI voice clone of the creator (Chatterbox)."}
+    narration = {"recording": f"Narration: {BRAND['channel']}.", "clone": "Narration: AI voice clone of the creator (Chatterbox).",
+                 "edge": "Narration: AI voice (Microsoft Edge text to speech)."}
     lines += [narration.get(m.get("narration"), "Narration: AI voice (Kokoro TTS).") + " Fonts: SIL OFL.", "",
               " ".join("#" + re.sub(r"\W", "", t) for t in BRAND["hashtags"] + m["tags"][:3])]
     return "\n".join(lines)[:4900]
@@ -2379,7 +2486,7 @@ def produce(con, m, out):
         dur = sf.info(str(recording)).duration + 0.3
         words, voice = align_words(text, transcribe_words(recording), dur), recording
     else:
-        m["narration"] = "clone" if BRAND.get("voice_engine") == "clone" else "kokoro"
+        m["narration"] = BRAND.get("voice_engine") if BRAND.get("voice_engine") in ("clone", "edge") else "kokoro"
         print("  voicing…")
         words, dur = tts(text, work / "voice.wav")
         voice = work / "voice.wav"
@@ -3538,6 +3645,7 @@ def main():
     lg = sub.add_parser("log"); lg.add_argument("n", nargs="?", type=int, default=30)
     sub.add_parser("selftest")
     sub.add_parser("preview")
+    pl = sub.add_parser("pull", help="download a local model into Ollama"); pl.add_argument("model")
     ca = sub.add_parser("clipadd", help="add one video (a link) to a clip countdown")
     ca.add_argument("url"); ca.add_argument("--ep", type=int, required=True)
     cl = sub.add_parser("clips", help="a countdown of clips: words to search YouTube for, and/or links from any site")
@@ -3633,6 +3741,8 @@ def main():
             print("everything is scored (use --all to rescore)")
     elif args.cmd == "upload":
         upload_pending(con, args.publish_at, args.ep)
+    elif args.cmd == "pull":
+        pull_model(args.model)
     elif args.cmd == "clipadd":
         clip_add(con, args.ep, args.url)
     elif args.cmd == "clips" or (args.cmd == "run" and clips_channel()):

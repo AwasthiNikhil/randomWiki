@@ -426,6 +426,7 @@ body[data-vtype=clips] [data-for=explainer], body[data-vtype=explainer] [data-fo
             <label>Closing line <small>spoken at the end of every video</small><textarea name="outro_line" maxlength="200" rows="2"></textarea></label>
             <div style="display:grid;gap:6px">
               <label class="radio"><input type="radio" name="vEngine" value="kokoro"> Preset AI voice (Kokoro): fast</label>
+              <label class="radio"><input type="radio" name="vEngine" value="edge"> <b>Online voices</b>: about 300 voices in many languages, Nepali and Hindi included (Microsoft Edge; needs the internet)</label>
               <label class="radio"><input type="radio" name="vEngine" value="clone"> <b>My voice</b>: cloned from a sample (Chatterbox, a few minutes per video)</label>
             </div>
             <div id="cloneBox" style="display:grid;gap:10px;padding:12px;border:1px dashed var(--line);border-radius:10px">
@@ -440,8 +441,12 @@ body[data-vtype=clips] [data-for=explainer], body[data-vtype=explainer] [data-fo
               <label class="check"><input type="checkbox" id="cloneConsent"> This is my own voice, or I have the speaker's permission to clone it.</label>
               <div class="hint">Runs locally; your sample never leaves this Mac. Cloned audio carries an inaudible AI watermark, and descriptions say "AI voice clone". Tick YouTube's "altered or synthetic content" box when you publish.</div>
             </div>
+            <div id="edgeBox" style="display:grid;gap:8px">
+              <label>Online voice <small>grouped by language</small><select id="edgeSel"></select></label>
+              <span class="hint" style="margin:0">Free and unlimited in practice, but it is Microsoft's read-aloud service used unofficially, so it could change or stop. The text of each script is sent to Microsoft. For another language, also rewrite the prompts in that language (Settings → Prompts) and pick fonts that have its letters.</span>
+            </div>
             <div class="inline" id="presetBox">
-              <label style="flex:1;min-width:min(200px,100%)">Voice<select name="voice" id="voiceSel"></select></label>
+              <label style="flex:1;min-width:min(200px,100%)" id="kokoroPick">Voice<select name="voice" id="voiceSel"></select></label>
               <label style="flex:1;min-width:min(200px,100%)">Speed <output id="speedOut"></output><input type="range" name="voice_speed" min="0.7" max="1.3" step="0.05"></label>
             </div>
             <div class="inline"><button class="btn" type="button" id="hear">Save &amp; hear it</button><audio id="voiceAudio" controls hidden></audio></div>
@@ -561,7 +566,10 @@ body[data-vtype=clips] [data-for=explainer], body[data-vtype=explainer] [data-fo
           <div class="ccard" data-ai="local">
             <div class="chead"><b>On this Mac</b><span class="cstate" id="localState"></span></div>
             <span class="hint">Ollama · free, private, works offline</span>
-            <label>Model<select id="llmSel"></select></label>
+            <label>Model <small>the ones installed in Ollama</small><select id="llmSel"></select></label>
+            <div class="inline"><input id="pullName" placeholder="Download another model, e.g. qwen2.5:14b" aria-label="Model to download" style="flex:1;min-width:0">
+              <button class="btn sm" type="button" id="pullGo">Download</button></div>
+            <span class="hint">Any model name from <a href="https://ollama.com/library" target="_blank" rel="noopener">ollama.com/library ↗</a>. Progress shows in the console on the right; when it's done the model appears in the list above. Bigger models write better but need more memory: on 16 GB, stay at about 14B or under.</span>
             <label class="radio use"><input type="radio" name="aiPick" value="local"> Use for writing</label>
           </div>
           <div class="ccard" data-ai="gemini">
@@ -585,7 +593,8 @@ body[data-vtype=clips] [data-for=explainer], body[data-vtype=explainer] [data-fo
             <label class="radio use"><input type="radio" name="aiPick" value="claude"> Use for writing</label>
           </div>
         </div>
-        <span class="hint">Keys from your shell (<code>GEMINI_API_KEY</code>, <code>ANTHROPIC_API_KEY</code>) are used first. Saved keys stay in <code>secrets/</code> on this computer, which scheduled runs need.</span>
+        <div class="cgrid" id="provCards"></div>
+        <span class="hint">Groq, OpenRouter and Cerebras run open models on their servers with free daily allowances. They write scripts; the facts still come from the pages the app reads itself. Keys from your shell (<code>GEMINI_API_KEY</code>, <code>ANTHROPIC_API_KEY</code>, <code>GROQ_API_KEY</code>…) are used first. Saved keys stay in <code>secrets/</code> on this computer, which scheduled runs need.</span>
 
        </div>
        <div class="conn" data-cgroup="media">
@@ -1762,9 +1771,10 @@ async function searchFonts() {
 function collect() {
   S = {...S, channel: F("channel").value, tagline: F("tagline").value, outro_line: F("outro_line").value, logo_text: F("logo_text").value,
     hashtags: F("hashtags").value.split(",").map(x => x.trim()).filter(Boolean), voice: F("voice").value, voice_speed: +F("voice_speed").value,
-    music_volume: +F("music_volume").value, voice_engine: document.querySelector("[name=vEngine]:checked")?.value || "kokoro",
+    music_volume: +F("music_volume").value, voice_engine: document.querySelector("[name=vEngine]:checked")?.value || "kokoro", edge_voice: $("#edgeSel").value || S.edge_voice,
     clone_consent: $("#cloneConsent").checked, mode: document.querySelector("[name=mode]:checked")?.value || "auto", video_type: document.querySelector("[name=vtype]:checked")?.value || "explainer", research_from: document.querySelector("[name=researchFrom]:checked")?.value || "web", clip_strip_voice: F("clip_strip_voice").checked, clip_sources: F("clip_sources").value.split("\n").map(x => x.trim()).filter(Boolean),
     topics: F("topics").value.split(",").map(x => x.trim()).filter(Boolean), idea_source: document.querySelector("[name=ideaSrc]:checked")?.value || "mix", min_score: +F("min_score").value, max_seconds: +F("max_seconds").value, llm: $("#llmSel").value, gemini_model: $("#gemSel").value, claude_model: $("#clSel").value,
+    ...Object.fromEntries([...document.querySelectorAll("[data-provmodel]")].map(x => [x.dataset.provmodel + "_model", x.value])),
     ai: document.querySelector("[name=aiPick]:checked")?.value || "local", publish_to: [...document.querySelectorAll("[data-pub]:checked")].map(c => c.dataset.pub),
     prompts: Object.fromEntries([...document.querySelectorAll("[data-prompt]")].map(t => [t.dataset.prompt, t.value])),
     fonts: {...S.fonts, display_weight: F("display_weight").value}};
@@ -1833,6 +1843,18 @@ function renderConnectors(j) {
   STATE($("#clState"), c.key ? "Key added" : "No key", c.key ? "ok" : "");
   $("#clStatus").textContent = c.key === "shell" ? "Using ANTHROPIC_API_KEY from your shell." : c.key === "saved" ? "Using your saved key." : "";
   $("#clRm").hidden = c.key !== "saved";
+  $("#provCards").innerHTML = Object.entries(j.providers || {}).map(([k, p]) => {
+    keyed[k] = !!p.key;
+    const pm = S[k + "_model"] || p.model;
+    return `<div class="ccard" data-ai="${k}">
+      <div class="chead"><b>${esc(p.label)}</b><span class="cstate${p.key ? " ok" : ""}">${p.key ? "Key added" : "No key"}</span></div>
+      <span class="hint">Open models on ${esc(p.label)}'s servers, with a free daily allowance. <a href="${esc(p.link)}" target="_blank" rel="noopener">Get a free key ↗</a></span>
+      ${p.key ? `<span class="hint">${p.key === "shell" ? `Using ${k.toUpperCase()}_API_KEY from your shell.` : "Using your saved key."}${p.error ? " " + esc(p.error) : ""}</span>` : ""}
+      <div class="inline"><input type="password" id="pk_${k}" placeholder="Paste a ${esc(p.label)} API key" autocomplete="off" aria-label="${esc(p.label)} API key" style="flex:1;min-width:0">
+        <button class="btn sm" type="button" data-aikey="${k}">Save key</button>${p.key === "saved" ? `<button class="btn sm danger" type="button" data-aikeyrm="${k}">Remove</button>` : ""}</div>
+      <label>Model<select data-provmodel="${k}" ${p.key ? "" : "disabled"}>${[...new Set([pm, ...p.models])].map(m => `<option${m === pm ? " selected" : ""}>${esc(m)}</option>`).join("")}</select></label>
+      <label class="radio use"><input type="radio" name="aiPick" value="${k}"> Use for writing</label></div>`;
+  }).join("");
   document.querySelectorAll("[name=aiPick]").forEach(r => { r.disabled = !keyed[r.value] && r.value !== "local"; r.checked = r.value === (keyed[ai] ? ai : "local"); });
   document.querySelectorAll("[data-ai]").forEach(card => card.classList.toggle("chosen", card.dataset.ai === (keyed[ai] ? ai : "local")));
 
@@ -1862,12 +1884,24 @@ function renderConnectors(j) {
   $("#ttConnect").textContent = pub.tiktok === "connected" ? "Reconnect" : "Connect TikTok";
 }
 $("#connectors").addEventListener("change", async e => {
-  if (!e.target.matches("[name=aiPick], [data-pub], #llmSel, #gemSel, #clSel")) return;
+  if (!e.target.matches("[name=aiPick], [data-pub], #llmSel, #gemSel, #clSel, [data-provmodel]")) return;
   if (await saveSettings()) { renderConnectors(lastSettings); termLine("saved", "good"); }
 });
 $("#connectors").addEventListener("click", async e => {
   const t = e.target.closest("button"); if (!t) return;
   const ok = async (url, body, msg) => { if (await post(url, body)) { if (msg) termLine(msg, "good"); await reloadSettings(); return true; } };
+  if (t.dataset.aikey) {
+    const box = $("#pk_" + t.dataset.aikey);
+    if (!box.value.trim()) { box.focus(); return; }
+    await ok("/api/ai_key", {name: t.dataset.aikey, key: box.value}, "key saved"); return;
+  }
+  if (t.dataset.aikeyrm) { await ok("/api/ai_key", {name: t.dataset.aikeyrm, key: ""}, "key removed"); return; }
+  if (t.id === "pullGo") {
+    const name = $("#pullName").value.trim();
+    if (!/^[\w.\-:\/]+$/.test(name)) { $("#pullName").focus(); return; }
+    if (await exec("pull " + quote(name))) $("#pullName").value = "";
+    return;
+  }
   if (t.id === "gemSave" || t.id === "clSave") {
     const box = $(t.id === "gemSave" ? "#gemKey" : "#clKey");
     if (!box.value.trim()) return termLine("! paste a key first", "err");
@@ -1908,9 +1942,21 @@ function sampleState(has) {
   $("#sampleState").textContent = has ? "Sample saved." : "No sample yet.";
   $("#sampleAudio").hidden = !has; if (has) $("#sampleAudio").src = "/brand/voice_sample.wav?t=" + Date.now();
 }
+let edgeLoaded = false;
+async function loadEdgeVoices() {
+  if (edgeLoaded) return;
+  edgeLoaded = true;
+  const r = await fetch("/api/edge_voices"), j = await r.json();
+  if (!r.ok) { edgeLoaded = false; $("#edgeSel").innerHTML = `<option value="">${esc(j.error)}</option>`; return; }
+  const lang = new Intl.DisplayNames(["en"], {type: "language"}), by = {}, want = S.edge_voice || "en-US-AndrewNeural";
+  j.voices.forEach(v => (by[lang.of(v.locale.split("-")[0]) || v.locale] ||= []).push(v));
+  $("#edgeSel").innerHTML = Object.keys(by).sort().map(l => `<optgroup label="${esc(l)}">${by[l].map(v =>
+    `<option value="${esc(v.name)}"${v.name === want ? " selected" : ""}>${esc(v.label.split(" - ")[0])} · ${v.gender.toLowerCase()} · ${esc(v.locale)}</option>`).join("")}</optgroup>`).join("");
+}
 function syncEngine() {
-  const clone = document.querySelector("[name=vEngine]:checked")?.value === "clone";
-  $("#cloneBox").hidden = !clone; $("#presetBox").hidden = clone;
+  const engine = document.querySelector("[name=vEngine]:checked")?.value, clone = engine === "clone", edge = engine === "edge";
+  $("#cloneBox").hidden = !clone; $("#presetBox").hidden = clone; $("#edgeBox").hidden = !edge; $("#kokoroPick").hidden = edge;
+  if (edge) loadEdgeVoices();
   $("#hearHint").textContent = clone ? "The first sample takes a minute or two while the model loads." : "";
 }
 async function uploadSample(blob) {

@@ -10,7 +10,7 @@ from pathlib import Path
 import rw
 
 ALLOWED = {"run", "add", "download", "connect", "discover", "upload", "unpublish", "rerender", "log", "score", "selftest", "preview", "voicetest",
-           "auto", "schedule", "clips", "clipadd"}
+           "auto", "schedule", "clips", "clipadd", "pull"}
 HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 BRAND_FILE = rw.BRAND_FILE
 HEX = re.compile(r"^#[0-9a-fA-F]{6}$")
@@ -54,7 +54,9 @@ def save_brand(new):
         raise ValueError("unknown voice")
     b["voice"], b["voice_lang"], b["voice_speed"] = new["voice"], new["voice"][0], num("voice_speed", 0.7, 1.3)
     b["voice_engine"] = new.get("voice_engine", "kokoro")
-    if b["voice_engine"] not in ("kokoro", "clone"):
+    if re.fullmatch(r"[\w-]{5,80}", str(new.get("edge_voice") or "")):
+        b["edge_voice"] = new["edge_voice"]
+    if b["voice_engine"] not in ("kokoro", "clone", "edge"):
         raise ValueError("unknown voice engine")
     b["clone_consent"] = bool(new.get("clone_consent"))
     if b["voice_engine"] == "clone" and not (b["clone_consent"] and (rw.WS / "brand" / "voice_sample.wav").exists()):
@@ -64,6 +66,9 @@ def save_brand(new):
     b["llm"] = text("llm", 1, 80)
     if "gemini_model" in new:
         b["gemini_model"] = text("gemini_model", 1, 80)
+    for name in rw.PROVIDERS:
+        if new.get(f"{name}_model"):
+            b[f"{name}_model"] = text(f"{name}_model", 1, 120)
     if new.get("claude_model"):
         b["claude_model"] = text("claude_model", 1, 80)
     if "topics" in new:
@@ -83,7 +88,7 @@ def save_brand(new):
     if "publish_to" in new:
         b["publish_to"] = [x for x in rw.PLATFORMS if x in new["publish_to"]]
     if "ai" in new:
-        if new["ai"] not in ("gemini", "claude", "local"):
+        if new["ai"] not in ("gemini", "claude", "local", *rw.PROVIDERS):
             raise ValueError("unknown model choice")
         b["ai"] = new["ai"]
     sch = new.get("schedule") or {}
@@ -434,10 +439,18 @@ class H(BaseHTTPRequestHandler):
                     gemini["error"] = f"couldn't list models ({type(e).__name__})"
             claude = {"key": "shell" if os.environ.get("ANTHROPIC_API_KEY", "").strip() else "saved" if rw.claude_key() else "",
                       "models": rw.CLAUDE_MODELS}
-            b = brand()
+            b, providers = brand(), {}
+            for name, (label, _, default, link) in rw.PROVIDERS.items():
+                p = providers[name] = {"label": label, "link": link, "model": b.get(f"{name}_model") or default, "models": [],
+                                       "key": "shell" if os.environ.get(f"{name.upper()}_API_KEY", "").strip() else "saved" if rw.provider_key(name) else ""}
+                if p["key"]:
+                    try:
+                        p["models"] = rw.provider_models(name)
+                    except Exception as e:
+                        p["error"] = f"couldn't list its models ({str(e)[:80]})"
             log = rw.AUTO_LOG.read_text(errors="ignore").splitlines()[-40:] if rw.AUTO_LOG.exists() else []
             return self.send(200, {"brand": b, "themes": themes(), "prompts": [dict(zip(("default", "fixed"), rw.prompt_parts(k)), key=k, label=v[0], hint=v[1]) for k, v in rw.PROMPTS.items()],
-                                   "voices": sorted(rw.KOKORO_VOICES), "models": models, "gemini": gemini, "claude": claude, "ai": b.get("ai") or "gemini", "publish": rw.publish_status(),
+                                   "voices": sorted(rw.KOKORO_VOICES), "models": models, "gemini": gemini, "claude": claude, "providers": providers, "ai": b.get("ai") or "gemini", "publish": rw.publish_status(),
                                    "publish_to": b.get("publish_to") or ["youtube"], "youtube": rw.youtube_status(),
                                    "stock": {n: "shell" if os.environ.get(f"{n.upper()}_API_KEY", "").strip() else "saved" if rw.stock_key(n) else "" for n in rw.STOCK},
                                    "schedule": rw.SCHEDULE_DEFAULTS | b.get("schedule", {}), "schedule_loaded": rw.schedule_loaded(),
@@ -445,6 +458,11 @@ class H(BaseHTTPRequestHandler):
                                    "music": (rw.WS / b["music"]).is_file(), "voice_sample": (rw.WS / "brand" / "voice_sample.wav").is_file(),
                                    "clone_ready": (rw.ROOT / ".venv-clone" / "bin" / "python").exists(),
                                    "logo": bool(b.get("logo")) and (rw.WS / b["logo"]).is_file()})
+        if path == "/api/edge_voices":  # the online voices, fetched only when Settings shows them
+            try:
+                return self.send(200, {"voices": rw.edge_voices()})
+            except Exception as e:
+                return self.send(502, {"error": f"couldn't list the online voices ({type(e).__name__})"})
         if path == "/api/fonts":
             from urllib.parse import parse_qs
             qs = {k: v[0] for k, v in parse_qs(query).items()}
@@ -696,6 +714,12 @@ class H(BaseHTTPRequestHandler):
                 rw.save_tiktok_app(str(body.get("key", "")), str(body.get("secret", "")))
             elif self.path == "/api/tiktok_disconnect":
                 rw.tiktok_disconnect()
+            elif self.path == "/api/ai_key":  # body: {"name": "groq"|"openrouter"|"cerebras", "key": "..."}; empty removes it
+                name, key = body.get("name"), str(body.get("key", "")).strip()
+                if name not in rw.PROVIDERS or (key and not re.fullmatch(r"[\w.\-]{20,200}", key)):
+                    raise ValueError("that doesn't look like an API key for that service")
+                keys = rw.secret(rw.AI_KEYS_FILE) | {name: key}
+                rw.secret(rw.AI_KEYS_FILE, {k: v for k, v in keys.items() if v})
             elif self.path in ("/api/gemini_key", "/api/claude_key"):  # body: {"key": "..."}; empty removes the saved key
                 key, gem = str(body.get("key", "")).strip(), self.path == "/api/gemini_key"
                 f = rw.GEMINI_KEY_FILE if gem else rw.CLAUDE_KEY_FILE
